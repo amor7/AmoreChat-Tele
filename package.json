@@ -1,8 +1,8 @@
 {
-  "name": "amorechat",
+  "name": "amorechat-tele",
   "private": true,
-  "version": "0.9.14",
-  "description": "پیام‌رسان self-hosted فارسی برای شبکه داخلی",
+  "version": "1.0.0",
+  "description": "پیام‌رسان self-hosted فارسی + پل تلگرام (Tele) از طریق پروکسی سرور",
   "workspaces": [
     "server",
     "web"

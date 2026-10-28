@@ -1,10 +1,13 @@
 {
-  "name": "amorechat-server",
+  "name": "amorechat-tele-server",
   "private": true,
-  "version": "0.9.14",
+  "version": "1.0.0",
   "type": "module",
   "main": "src/index.js",
-  "scripts": { "dev": "node --watch src/index.js", "start": "node src/index.js" },
+  "scripts": {
+    "dev": "node --watch src/index.js",
+    "start": "node src/index.js"
+  },
   "dependencies": {
     "@fastify/cookie": "^11.1.3",
     "@fastify/multipart": "^10.1.3",
@@ -13,6 +16,11 @@
     "fastify": "^5.12.5",
     "socket.io": "^4.8.4"
   },
-  "optionalDependencies": { "tdl": "^8.0.0", "prebuilt-tdlib": "^0.100802.0" },
-  "devDependencies": { "socket.io-client": "^4.8.4" }
+  "optionalDependencies": {
+    "tdl": "^8.0.0",
+    "prebuilt-tdlib": "^0.100802.0"
+  },
+  "devDependencies": {
+    "socket.io-client": "^4.8.4"
+  }
 }
