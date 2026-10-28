@@ -76,7 +76,7 @@ export default function TeleAdmin() {
   return (
     <div className="tele-admin">
       <p className="hint with-icon">
-        <Cable size={15} /> فقط ترافیک بخش Tele از این پروکسی‌ها عبور می‌کند. چت داخلی AmoreChat همیشه روی شبکه داخلی می‌ماند. اگر همه پروکسی‌ها قطع باشند، تلگرام صف می‌شود و هرگز مستقیم وصل نمی‌شود.
+        <Cable size={15} /> فقط ترافیک بخش Tele از این پروکسی‌ها عبور می‌کند. چت داخلی همیشه روی شبکه داخلی می‌ماند. اگر همه پروکسی‌ها قطع باشند، تلگرام صف می‌شود و هرگز مستقیم وصل نمی‌شود.
       </p>
 
       <div className="perm-box">
@@ -131,8 +131,13 @@ export default function TeleAdmin() {
       <form className="inline-form boxed" onSubmit={addLinks}>
         <input placeholder="نام (اختیاری)" value={name} onChange={(e) => setName(e.target.value)} />
         <textarea
-          rows={4}
-          placeholder="هر خط یک لینک: socks5:// · http:// · ss:// · یا JSON outbound برای sing-box"
+          rows={5}
+          placeholder={
+            'هر خط یک کانفیگ:\n' +
+            'socks5:// · http:// · ss:// · vless:// · vmess:// · trojan://\n' +
+            'WireGuard: بلوک [Interface]/[Peer] یا JSON outbound\n' +
+            'یا JSON کامل sing-box برای Reality'
+          }
           value={links}
           onChange={(e) => setLinks(e.target.value)}
           dir="ltr"
