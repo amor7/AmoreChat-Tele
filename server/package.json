@@ -16,6 +16,10 @@
     "fastify": "^5.12.5",
     "socket.io": "^4.8.4"
   },
+  "optionalDependencies": {
+    "tdl": "^8.0.0",
+    "prebuilt-tdlib": "^0.100802.0"
+  },
   "devDependencies": {
     "socket.io-client": "^4.8.4"
   }
