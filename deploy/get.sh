@@ -1,14 +1,13 @@
 #!/usr/bin/env bash
-# One-line fresh install of AmoreChat (latest, or a chosen version):
-#   curl -fsSL https://raw.githubusercontent.com/amor7/AmoreChat/main/deploy/get.sh | sudo bash
-#   curl -fsSL https://raw.githubusercontent.com/amor7/AmoreChat/main/deploy/get.sh | sudo bash -s -- v0.1.0
-# Installs into ./amorechat (set AMORECHAT_DIR to change).
-# Wrapped in main() so bash has the whole script before running it (it arrives through a pipe).
+# One-line fresh install of AmoreChat-Tele (latest, or a chosen version):
+#   curl -fsSL https://raw.githubusercontent.com/amor7/AmoreChat-Tele/main/deploy/get.sh | sudo bash
+#   curl -fsSL https://raw.githubusercontent.com/amor7/AmoreChat-Tele/main/deploy/get.sh | sudo bash -s -- v1.0.0
+# Installs into ./amorechat-tele (set AMORECHAT_DIR to change).
 main() {
 set -euo pipefail
 
-REPO="${AMORECHAT_REPO:-amor7/AmoreChat}"
-DIR="${AMORECHAT_DIR:-amorechat}"
+REPO="${AMORECHAT_REPO:-amor7/AmoreChat-Tele}"
+DIR="${AMORECHAT_DIR:-amorechat-tele}"
 TAG="${1:-}"
 
 if [ "$(id -u)" -ne 0 ]; then
@@ -29,20 +28,19 @@ if [ -f "${DIR}/docker-compose.yml" ]; then
 fi
 
 BASE="https://github.com/${REPO}/releases/download/${TAG}"
-echo ">> Installing AmoreChat ${TAG} into ./${DIR}"
+echo ">> Installing AmoreChat-Tele ${TAG} into ./${DIR}"
 mkdir -p "$DIR"
-curl -fL --retry 3 "${BASE}/amorechat-source.tar.gz" | tar xz -C "$DIR" --strip-components=1
+curl -fL --retry 3 "${BASE}/amorechat-source.tar.gz" | tar xz -C "$DIR" --strip-components=1 || \
+  curl -fL --retry 3 "https://github.com/${REPO}/archive/refs/tags/${TAG}.tar.gz" | tar xz -C "$DIR" --strip-components=1
 if [ "$(uname -m)" = "x86_64" ]; then
   curl -fL --retry 3 -o "${DIR}/amorechat-offline-amd64.tar.gz" "${BASE}/amorechat-offline-amd64.tar.gz" || true
 fi
 cd "$DIR"
-# Ask here (older versions' install.sh read the domain from stdin, which is this pipe).
 if [ ! -f .env ]; then
   read -rp "Domain pointing to this server (e.g. chat.example.ir): " DOMAIN </dev/tty
   sed "s/^DOMAIN=.*/DOMAIN=${DOMAIN}/" .env.example > .env
 fi
 bash deploy/install.sh </dev/null
-# The bundle is only needed once; updates download their own.
 rm -f amorechat-offline-*.tar.gz
 }
 
