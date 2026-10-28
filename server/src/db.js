@@ -310,6 +310,22 @@ const migrations = [
   );
   CREATE INDEX tele_dialogs_selected ON tele_dialogs(account_id, selected);
   `,
+  // v9: Tele mirrored messages (bounded history + send/receive bridge)
+  `
+  CREATE TABLE tele_messages (
+    id INTEGER PRIMARY KEY,
+    account_id INTEGER NOT NULL REFERENCES tele_accounts(id) ON DELETE CASCADE,
+    dialog_id INTEGER NOT NULL REFERENCES tele_dialogs(id) ON DELETE CASCADE,
+    tg_msg_id INTEGER,
+    direction TEXT NOT NULL DEFAULT 'in',
+    kind TEXT NOT NULL DEFAULT 'text',
+    text TEXT NOT NULL DEFAULT '',
+    media_path TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    UNIQUE(account_id, dialog_id, tg_msg_id)
+  );
+  CREATE INDEX tele_messages_dialog ON tele_messages(account_id, dialog_id, id);
+  `,
 ];
 
 const current = db.prepare('PRAGMA user_version').get().user_version;
