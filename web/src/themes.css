@@ -1,0 +1,411 @@
+/* Color themes (see appearance.js). Each sets the accent colors for light and dark mode;
+   the rest of the palette comes from theme.css. Loaded last. */
+
+/* My messages use the theme gradient in dark mode too (styles.css has an older solid blue). */
+:root[data-mode='dark'] {
+  --bubble-out: var(--grad);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-mode]) {
+    --bubble-out: var(--grad);
+  }
+}
+
+:root[data-theme='ocean'] {
+  --accent: #0284c7;
+  --accent-2: #2563eb;
+  --accent-soft: #e0f2fe;
+  --grad: linear-gradient(135deg, #0ea5e9 0%, #2563eb 100%);
+}
+:root[data-theme='ocean'][data-mode='dark'] {
+  --accent: #38bdf8;
+  --accent-soft: #0c2a4a;
+  --grad: linear-gradient(135deg, #0284c7 0%, #1d4ed8 100%);
+}
+
+:root[data-theme='telegram'] {
+  --accent: #229ed9;
+  --accent-2: #1d8fd0;
+  --accent-soft: #e3f2fc;
+  --grad: linear-gradient(135deg, #2aabee 0%, #1d8fd0 100%);
+  --chat-bg: #dbe8cf;
+}
+:root[data-theme='telegram'][data-mode='dark'] {
+  --accent: #5eb5f7;
+  --accent-soft: #17324a;
+  --grad: linear-gradient(135deg, #2b5278 0%, #2b5278 100%);
+  --bg: #0e1621;
+  --panel: #17212b;
+  --panel-2: #131c26;
+  --border: #233040;
+  --bubble-in: #182533;
+  --chat-bg: #0e1621;
+  --hover: #202b36;
+  --glass: rgb(23 33 43 / 0.85);
+}
+
+:root[data-theme='emerald'] {
+  --accent: #059669;
+  --accent-2: #0d9488;
+  --accent-soft: #d1fae5;
+  --grad: linear-gradient(135deg, #10b981 0%, #0d9488 100%);
+}
+:root[data-theme='emerald'][data-mode='dark'] {
+  --accent: #34d399;
+  --accent-soft: #0b3a2e;
+  --grad: linear-gradient(135deg, #059669 0%, #0f766e 100%);
+}
+
+:root[data-theme='sunset'] {
+  --accent: #ea580c;
+  --accent-2: #ec4899;
+  --accent-soft: #ffedd5;
+  --grad: linear-gradient(135deg, #f97316 0%, #ec4899 100%);
+}
+:root[data-theme='sunset'][data-mode='dark'] {
+  --accent: #fb923c;
+  --accent-soft: #3d1f12;
+  --grad: linear-gradient(135deg, #ea580c 0%, #db2777 100%);
+}
+
+:root[data-theme='rose'] {
+  --accent: #e11d48;
+  --accent-2: #db2777;
+  --accent-soft: #ffe4e6;
+  --grad: linear-gradient(135deg, #f43f5e 0%, #db2777 100%);
+}
+:root[data-theme='rose'][data-mode='dark'] {
+  --accent: #fb7185;
+  --accent-soft: #3f1420;
+  --grad: linear-gradient(135deg, #e11d48 0%, #be185d 100%);
+}
+
+:root[data-theme='violet'] {
+  --accent: #7c3aed;
+  --accent-2: #d946ef;
+  --accent-soft: #f3e8ff;
+  --grad: linear-gradient(135deg, #8b5cf6 0%, #d946ef 100%);
+}
+:root[data-theme='violet'][data-mode='dark'] {
+  --accent: #c084fc;
+  --accent-soft: #2e1a47;
+  --grad: linear-gradient(135deg, #7c3aed 0%, #a21caf 100%);
+}
+
+:root[data-theme='gold'] {
+  --accent: #b45309;
+  --accent-2: #d97706;
+  --accent-soft: #fef3c7;
+  --grad: linear-gradient(135deg, #f59e0b 0%, #b45309 100%);
+}
+:root[data-theme='gold'][data-mode='dark'] {
+  --accent: #fbbf24;
+  --accent-soft: #3a2a0a;
+  --grad: linear-gradient(135deg, #b45309 0%, #92400e 100%);
+}
+
+:root[data-theme='graphite'] {
+  --accent: #334155;
+  --accent-2: #0f172a;
+  --accent-soft: #e2e8f0;
+  --grad: linear-gradient(135deg, #475569 0%, #1e293b 100%);
+}
+:root[data-theme='graphite'][data-mode='dark'] {
+  --accent: #cbd5e1;
+  --accent-soft: #1f2937;
+  --grad: linear-gradient(135deg, #374151 0%, #1f2937 100%);
+}
+
+/* True black for OLED screens (saves battery). */
+:root[data-theme='amoled'][data-mode='dark'] {
+  --bg: #000;
+  --panel: #000;
+  --panel-2: #0a0a0a;
+  --border: #1a1a1a;
+  --hover: #111;
+  --chat-bg: #000;
+  --bubble-in: #141414;
+  --glass: rgb(0 0 0 / 0.85);
+  --accent: #818cf8;
+  --accent-soft: #1b1d3a;
+  --grad: linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%);
+}
+
+/* Message text size */
+.bubble .text {
+  font-size: var(--msg-size, 15px);
+}
+
+/* Chat wallpapers (drawn with CSS: nothing to download). */
+:root[data-wall='dots'] .messages {
+  background-image: radial-gradient(color-mix(in srgb, var(--accent) 16%, transparent) 1px, transparent 1.2px);
+  background-size: 22px 22px;
+}
+:root[data-wall='grid'] .messages {
+  background-image:
+    linear-gradient(color-mix(in srgb, var(--accent) 10%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--accent) 10%, transparent) 1px, transparent 1px);
+  background-size: 28px 28px;
+}
+:root[data-wall='waves'] .messages {
+  background-image:
+    radial-gradient(circle at 100% 50%, transparent 20%, color-mix(in srgb, var(--accent) 9%, transparent) 21%, color-mix(in srgb, var(--accent) 9%, transparent) 34%, transparent 35%, transparent),
+    radial-gradient(circle at 0% 50%, transparent 20%, color-mix(in srgb, var(--accent-2, var(--accent)) 9%, transparent) 21%, color-mix(in srgb, var(--accent-2, var(--accent)) 9%, transparent) 34%, transparent 35%, transparent);
+  background-size: 48px 64px;
+}
+:root[data-wall='glow'] .messages {
+  background-image:
+    radial-gradient(60% 50% at 15% 20%, color-mix(in srgb, var(--accent) 22%, transparent), transparent 70%),
+    radial-gradient(50% 45% at 85% 80%, color-mix(in srgb, var(--accent-2, var(--accent)) 20%, transparent), transparent 70%);
+  background-attachment: local;
+}
+
+/* ---------- Appearance settings ---------- */
+.theme-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(92px, 1fr));
+  gap: 8px;
+  margin: 8px 0 12px;
+}
+.theme-swatch {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 10px 6px;
+  border-radius: 14px;
+  border: 2px solid var(--border);
+  background: var(--panel-2);
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.theme-swatch.active {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.theme-swatch i {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: block;
+}
+.wall-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(70px, 1fr));
+  gap: 6px;
+  margin: 8px 0 12px;
+}
+.wall-swatch {
+  height: 54px;
+  border-radius: 12px;
+  border: 2px solid var(--border);
+  background-color: var(--chat-bg);
+  color: var(--muted);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding-bottom: 4px;
+}
+.wall-swatch.active {
+  border-color: var(--accent);
+}
+.wall-swatch.dots {
+  background-image: radial-gradient(color-mix(in srgb, var(--accent) 30%, transparent) 1.2px, transparent 1.4px);
+  background-size: 10px 10px;
+}
+.wall-swatch.grid {
+  background-image:
+    linear-gradient(color-mix(in srgb, var(--accent) 16%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--accent) 16%, transparent) 1px, transparent 1px);
+  background-size: 12px 12px;
+}
+.wall-swatch.waves {
+  background-image: radial-gradient(circle at 100% 50%, transparent 20%, color-mix(in srgb, var(--accent) 16%, transparent) 21%, color-mix(in srgb, var(--accent) 16%, transparent) 34%, transparent 35%);
+  background-size: 20px 26px;
+}
+.wall-swatch.glow {
+  background-image: radial-gradient(70% 70% at 20% 20%, color-mix(in srgb, var(--accent) 35%, transparent), transparent 70%);
+}
+.text-preview {
+  padding: 10px 14px;
+  border-radius: 14px;
+  background: var(--bubble-in);
+  font-size: var(--msg-size, 15px);
+  margin: 6px 0 12px;
+}
+
+/* ---------- Folders & pinned chats ---------- */
+.folder-tabs {
+  display: flex;
+  gap: 4px;
+  overflow-x: auto;
+  padding: 0 8px 6px;
+  scrollbar-width: none;
+  flex-shrink: 0;
+}
+.folder-tabs::-webkit-scrollbar {
+  display: none;
+}
+.folder-tabs button {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.folder-tabs button.active {
+  background: var(--grad);
+  border-color: transparent;
+  color: #fff;
+}
+.folder-tabs .tab-badge {
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 11px;
+}
+.folder-tabs button.active .tab-badge {
+  background: rgb(255 255 255 / 0.3);
+}
+.folder-tabs .folder-edit {
+  padding: 6px 9px;
+}
+.pin-mark {
+  color: var(--muted);
+  transform: rotate(45deg);
+  flex-shrink: 0;
+}
+.folder-list {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 12px;
+}
+.folder-list li {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+}
+.folder-list .row-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 4px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  text-align: start;
+}
+.emoji-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+.emoji-row button {
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  font-size: 18px;
+  cursor: pointer;
+}
+.emoji-row button.active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.folder-chats {
+  max-height: 40vh;
+  overflow-y: auto;
+}
+@media (pointer: coarse) {
+  .chat-item {
+    -webkit-touch-callout: none;
+    user-select: none;
+  }
+}
+
+/* ---------- Offline outbox ---------- */
+.pending-icon {
+  opacity: 0.8;
+}
+.failed-icon {
+  color: #fecaca;
+}
+.outbox .bubble {
+  opacity: 0.85;
+}
+.ping .weak-tag {
+  font-size: 10px;
+  padding: 0 5px;
+  border-radius: 6px;
+  background: #f59e0b;
+  color: #fff;
+}
+
+/* ---------- Android: several servers ---------- */
+.server-switcher {
+  display: flex;
+  flex-direction: column;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 4px;
+  padding-bottom: 4px;
+}
+.server-switcher button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.server-switcher button.current {
+  color: var(--accent);
+  font-weight: 600;
+}
+.menu-btn {
+  position: relative;
+}
+.menu-dot {
+  position: absolute;
+  top: 6px;
+  inset-inline-end: 6px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: var(--danger);
+  box-shadow: 0 0 0 2px var(--panel);
+}
+.server-list {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+}
+.server-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 2px;
+  border-bottom: 1px solid var(--border);
+}
+.server-list small.ok {
+  color: var(--ok);
+}
+.server-list small.bad {
+  color: var(--danger);
+  max-width: 45%;
+}

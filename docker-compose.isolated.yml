@@ -1,0 +1,20 @@
+# Test only: the whole stack on a Docker network with NO route to the internet
+# (simulates a full international shutdown). See the "isolated" job in ci.yml.
+networks:
+  default:
+    internal: true
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+
+services:
+  caddy:
+    ports: !reset []
+    networks:
+      default:
+        aliases: [chat.test]
+  livekit:
+    ports: !reset []
+    networks:
+      default:
+        ipv4_address: 172.30.0.10

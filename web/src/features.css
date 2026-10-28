@@ -1,0 +1,998 @@
+/* v0.5 additions: ping indicator, mentions, per-chat mute, media gallery, security, backups.
+   Loaded after theme.css. */
+
+/* ---------- Ping / connection indicator ---------- */
+.site-name {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: auto;
+  background: none;
+  color: inherit;
+  padding-inline-end: 12px;
+}
+.site-name > span:first-child {
+  background: var(--grad);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+.ping {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+  cursor: default;
+}
+.ping.dark {
+  background: rgb(0 0 0 / 0.4);
+  border-color: rgb(255 255 255 / 0.15);
+  color: #fff;
+  backdrop-filter: blur(8px);
+}
+.room-head .ping,
+.voice-bar .ping {
+  background: rgb(255 255 255 / 0.15);
+  border-color: transparent;
+  color: #fff;
+}
+.ping-bars {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 1.5px;
+  height: 10px;
+}
+.ping-bars b {
+  width: 3px;
+  border-radius: 1px;
+  background: currentColor;
+  opacity: 0.3;
+}
+.ping-bars b:nth-child(1) {
+  height: 4px;
+}
+.ping-bars b:nth-child(2) {
+  height: 7px;
+}
+.ping-bars b:nth-child(3) {
+  height: 10px;
+}
+.ping-good .ping-bars b {
+  background: #10b981;
+  opacity: 1;
+}
+.ping-mid .ping-bars b:nth-child(-n + 2) {
+  background: #f59e0b;
+  opacity: 1;
+}
+.ping-bad .ping-bars b:nth-child(1) {
+  background: #ef4444;
+  opacity: 1;
+}
+.ping-bad > span {
+  color: #ef4444;
+}
+.ping.dark.ping-bad > span,
+.room-head .ping-bad > span,
+.voice-bar .ping-bad > span {
+  color: #fecaca;
+}
+.call-ping {
+  position: absolute;
+  top: calc(18px + env(safe-area-inset-top));
+  inset-inline-end: 12px;
+  z-index: 6;
+}
+
+/* ---------- Mentions ---------- */
+.mention {
+  color: var(--accent);
+  font-weight: 600;
+}
+.msg-row.mine .mention {
+  color: inherit;
+  text-decoration: underline;
+}
+.bubble.mentions-me {
+  box-shadow: inset -3px 0 0 var(--accent), var(--shadow-sm);
+}
+.badge.mention {
+  background: var(--grad);
+  color: #fff;
+  min-width: 20px;
+  margin-inline-end: 4px;
+}
+.badge.quiet {
+  background: var(--muted);
+}
+.muted-icon {
+  color: var(--muted);
+  margin-inline-start: 4px;
+  vertical-align: -2px;
+  flex-shrink: 0;
+}
+.composer-wrap {
+  position: relative;
+}
+.mention-list {
+  position: absolute;
+  bottom: 100%;
+  inset-inline: 8px;
+  margin: 0 0 6px;
+  padding: 4px;
+  list-style: none;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  max-height: 260px;
+  overflow-y: auto;
+  z-index: 20;
+}
+.mention-list button {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  text-align: start;
+}
+.mention-list button.active,
+.mention-list button:hover {
+  background: var(--hover);
+}
+.mention-list small {
+  color: var(--muted);
+  margin-inline-start: auto;
+}
+
+/* ---------- Per-chat mute ---------- */
+.notify-mute {
+  margin: 10px 0;
+}
+.notify-mute > .row-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel-2);
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  text-align: start;
+}
+.notify-mute > .row-item .grow {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.notify-mute .chips {
+  margin-top: 8px;
+}
+
+/* ---------- Media gallery ---------- */
+.gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 3px;
+}
+.gallery-cell {
+  position: relative;
+  aspect-ratio: 1;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--panel-2);
+  cursor: pointer;
+}
+.gallery-cell img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.gallery-video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(135deg, #312e81, #6d28d9);
+}
+.gallery-badge {
+  position: absolute;
+  bottom: 4px;
+  inset-inline-start: 4px;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: rgb(0 0 0 / 0.55);
+  color: #fff;
+  font-size: 11px;
+}
+.gallery-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.gallery-list li {
+  border-bottom: 1px solid var(--border);
+  padding: 4px 0;
+}
+.gallery-list .row-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 4px;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  text-align: start;
+}
+.gallery-list .row-item .grow {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.gallery-list .row-item b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.gallery-link {
+  display: block;
+  padding: 4px;
+  overflow-wrap: anywhere;
+  color: var(--accent);
+}
+.link-btn {
+  border: 0;
+  background: none;
+  padding: 0 4px 4px;
+  font: inherit;
+  cursor: pointer;
+}
+
+/* ---------- Security ---------- */
+.tiny {
+  font-size: 12px;
+}
+.modal-body h5 {
+  margin: 16px 0 8px;
+  font-size: 14px;
+}
+.device-list {
+  list-style: none;
+  margin: 0 0 8px;
+  padding: 0;
+}
+.device-list li {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 4px;
+  border-bottom: 1px solid var(--border);
+}
+.device-list li > div {
+  flex: 1;
+  min-width: 0;
+}
+.device-list li > svg {
+  color: var(--accent);
+  flex-shrink: 0;
+}
+.device-list .icon-btn {
+  color: var(--danger);
+}
+.badge-current {
+  margin-inline-start: 8px;
+  padding: 1px 8px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--ok) 15%, transparent);
+  color: var(--ok);
+  font-size: 11px;
+  font-weight: 600;
+}
+.twofa-status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+}
+.twofa-status > div {
+  flex: 1;
+}
+.twofa-status > svg {
+  flex-shrink: 0;
+  color: var(--muted);
+}
+.twofa-status.on > svg {
+  color: var(--ok);
+}
+.twofa-box {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+}
+.twofa-box p {
+  margin: 0;
+}
+.twofa-box .qr {
+  align-self: center;
+  width: 200px;
+  height: 200px;
+  image-rendering: pixelated;
+  border-radius: 8px;
+  background: #fff;
+  padding: 6px;
+}
+.twofa-box .secret {
+  display: block;
+  margin-top: 6px;
+  font-size: 15px;
+  letter-spacing: 1px;
+  user-select: all;
+}
+.otp-input {
+  font-size: 22px !important;
+  letter-spacing: 6px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.recovery-codes {
+  margin: 0;
+  padding: 12px;
+  border-radius: 10px;
+  background: var(--panel);
+  border: 1px dashed var(--border);
+  font-size: 16px;
+  line-height: 1.8;
+  text-align: center;
+  user-select: all;
+}
+.row-gap {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+/* ---------- Backups ---------- */
+.backup-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.backup-card {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 16px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: inherit;
+  text-decoration: none;
+  transition:
+    transform 0.12s,
+    box-shadow 0.15s;
+}
+.backup-card:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-sm);
+}
+.backup-card svg {
+  color: var(--accent);
+}
+.backup-card small {
+  color: var(--muted);
+}
+.backup-list {
+  list-style: none;
+  margin: 10px 0;
+  padding: 0;
+}
+.backup-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 4px;
+  border-bottom: 1px solid var(--border);
+}
+.backup-list .grow {
+  flex: 1;
+}
+.backup-list a.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  text-decoration: none;
+}
+
+/* ---------- v0.6: long-press on phones, volume, stage voice chats ---------- */
+@media (pointer: coarse) {
+  /* No native text-selection / callout on long-press: it fought with the message menu. */
+  .bubble {
+    -webkit-touch-callout: none;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+}
+.tile-menu {
+  min-width: 220px;
+  max-height: 70vh;
+  overflow-y: auto;
+  z-index: 5;
+}
+.tile-menu button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: inherit;
+  font: inherit;
+}
+.vol-slider {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  font-size: 13px;
+  cursor: default;
+}
+.vol-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.vol-head b {
+  margin-inline-start: auto;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+}
+.vol-slider input[type='range'] {
+  width: 100%;
+  accent-color: var(--accent);
+  direction: ltr;
+}
+.vol-anchor {
+  position: relative;
+}
+.vol-pop {
+  position: absolute;
+  bottom: calc(100% + 10px);
+  left: 50%;
+  transform: translateX(-50%);
+  width: 240px;
+  background: var(--panel);
+  color: var(--text);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  z-index: 10;
+}
+.ctl.hand.on {
+  background: #f59e0b;
+  color: #fff;
+}
+.stage-panel {
+  margin: 0 12px 8px;
+  padding: 8px 10px;
+  border-radius: 14px;
+  background: rgb(255 255 255 / 0.08);
+  color: #fff;
+  backdrop-filter: blur(10px);
+  max-height: 40vh;
+  overflow-y: auto;
+}
+.stage-toggle,
+.stage-sub {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+  padding: 4px 0;
+  text-align: start;
+}
+.stage-sub {
+  font-size: 13px;
+  opacity: 0.85;
+  margin-top: 4px;
+}
+.hand-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-inline-start: auto;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: #f59e0b;
+  color: #fff;
+  font-size: 12px;
+  animation: hand-pulse 1.4s ease-in-out infinite;
+}
+@keyframes hand-pulse {
+  50% {
+    transform: scale(1.08);
+  }
+}
+.hand-icon {
+  color: #f59e0b;
+  vertical-align: -2px;
+}
+.stage-list {
+  list-style: none;
+  margin: 4px 0;
+  padding: 0;
+}
+.stage-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid rgb(255 255 255 / 0.08);
+  font-size: 14px;
+}
+.stage-list .grow {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.stage-list .icon-btn {
+  width: 34px;
+  height: 34px;
+  color: #fff;
+}
+.stage-list .icon-btn.danger {
+  color: #fca5a5;
+}
+.stage-list .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.stage-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+}
+.stage-actions .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.stage-panel .btn:not(.primary) {
+  background: rgb(255 255 255 / 0.12);
+  border-color: transparent;
+  color: #fff;
+}
+.stage-panel .btn.danger {
+  color: #fecaca;
+}
+
+/* ---------- Android app ---------- */
+.share-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 10px;
+}
+.share-file {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--panel-2);
+  overflow-wrap: anywhere;
+}
+.share-file small {
+  color: var(--muted);
+  margin-inline-start: auto;
+}
+.user-list .row-item {
+  width: 100%;
+}
+
+/* A long preview line (e.g. the "new login" notice) must not widen the chat list on phones. */
+.sidebar,
+.chat-list,
+.chat-item .row {
+  min-width: 0;
+}
+.chat-item .row > .preview {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+}
+.preview > span:not(.emoji):not(.preview-icon) {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (max-width: 767px) {
+  /* "1fr" would let wide content stretch the only column past the screen. */
+  .app,
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.sidebar {
+  max-width: 100vw;
+  overflow-x: hidden;
+}
+.app-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  padding: 8px 10px;
+  border-radius: 10px;
+}
+.app-status.ok {
+  background: color-mix(in srgb, var(--ok) 14%, transparent);
+  color: var(--ok);
+}
+.app-status.bad {
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  color: var(--danger);
+}
+
+/* ---------- Health dashboard ---------- */
+.health h4 {
+  margin: 18px 0 6px;
+}
+.health-alert {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  border-radius: 12px;
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+.health-alert small {
+  font-weight: 400;
+  opacity: 0.8;
+}
+.health-alert.ok {
+  background: color-mix(in srgb, var(--ok) 14%, transparent);
+  color: var(--ok);
+}
+.health-alert.bad {
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  color: var(--danger);
+}
+.hcards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 8px;
+  margin: 10px 0;
+}
+.hcard {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  padding: 12px;
+  border-radius: 14px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-inline-start: 4px solid var(--ok);
+}
+.hcard.warn {
+  border-inline-start-color: #f59e0b;
+}
+.hcard.bad {
+  border-inline-start-color: var(--danger);
+}
+.hcard > svg {
+  color: var(--accent);
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.hcard div {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.hcard small,
+.hcard span {
+  color: var(--muted);
+  font-size: 12px;
+}
+.hcard b {
+  font-size: 18px;
+}
+.chart {
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 8px;
+}
+.chart svg {
+  width: 100%;
+  height: 120px;
+  display: block;
+  direction: ltr;
+}
+.chart .grid {
+  stroke: var(--border);
+  stroke-width: 1;
+}
+.chart .line {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+}
+.chart .area {
+  fill: currentColor;
+  opacity: 0.12;
+}
+.chart-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  font-size: 12px;
+  margin-top: 4px;
+}
+.chart-legend i {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  vertical-align: -1px;
+}
+.chart-empty {
+  padding: 18px;
+  text-align: center;
+  color: var(--muted);
+  background: var(--panel-2);
+  border-radius: 12px;
+  font-size: 13px;
+}
+.alert-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.alert-list li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 4px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+}
+.alert-list li.open {
+  color: var(--danger);
+}
+.alert-list li.resolved > svg {
+  color: var(--ok);
+}
+.alert-list small {
+  color: var(--muted);
+}
+
+/* ---------- In-app update bar (Android app), under the chat list like Telegram ---------- */
+.update-bar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  border-top: 1px solid var(--border);
+  background: var(--panel);
+  overflow: hidden;
+}
+.update-bar .update-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px;
+  border: 0;
+  border-radius: 10px;
+  background: none;
+  color: var(--text);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.update-bar .update-main > svg {
+  color: var(--accent);
+  flex: none;
+}
+.update-bar .update-main .grow {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.update-bar small {
+  color: var(--muted);
+  font-size: 12px;
+}
+.update-bar .update-go {
+  flex: none;
+  padding: 6px 12px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+}
+.update-bar .update-progress {
+  position: absolute;
+  inset-inline-start: 0;
+  bottom: 0;
+  height: 3px;
+  background: var(--accent);
+  transition: width 0.4s;
+}
+.update-bar .update-progress[data-indeterminate] {
+  animation: update-pulse 1.2s ease-in-out infinite;
+}
+@keyframes update-pulse {
+  50% {
+    opacity: 0.35;
+  }
+}
+/* the "new chat" button sits above the bar */
+.update-bar ~ .fab {
+  bottom: 84px;
+}
+.release-notes h5 {
+  margin: 12px 0 4px;
+}
+.release-notes ul {
+  margin: 0;
+  padding-inline-start: 20px;
+  line-height: 1.8;
+}
+
+/* Channel subscribers: one Mute / Unmute button where the message box would be (like Telegram) */
+.channel-mute-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 52px;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: 15px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.channel-mute-bar:hover {
+  background: var(--hover, rgb(127 127 127 / 0.08));
+}
+.channel-mute-bar:disabled {
+  opacity: 0.6;
+}
+
+/* ---------- Visual fixes (v0.9.3) ---------- */
+/* Chat list preview: one line ending in "…" (a flex row can't cut text with an ellipsis). */
+.chat-item .preview {
+  display: block;
+}
+.chat-item .preview .preview-icon {
+  display: inline-block;
+  vertical-align: -3px;
+  margin-inline-end: 4px;
+}
+/* Tab rows wrap on phones instead of hiding tabs off-screen. */
+@media (max-width: 700px) {
+  .tabs.scroll {
+    flex-wrap: wrap;
+    overflow: visible;
+  }
+  .tabs.scroll button {
+    flex: 1 1 auto;
+    padding: 8px 10px;
+  }
+}
+/* Segmented choices (stream quality / frame rate) wrap when the labels are long. */
+.segmented {
+  flex-wrap: wrap;
+}
+.segmented button {
+  flex: 1 1 auto;
+}
+/* Right-to-left: "reply" and "forward" arrows point the right way (like Persian Telegram/WhatsApp). */
+svg.lucide-reply,
+svg.lucide-forward {
+  transform: scaleX(-1);
+}
+/* Nothing may push the page sideways on phones (a menu a few pixels too wide panned the whole app). */
+html,
+body {
+  overflow-x: clip;
+}
+.menu.floating {
+  max-width: calc(100vw - 16px);
+  box-sizing: border-box;
+}
+.menu.floating .quick-reactions {
+  flex-wrap: wrap;
+}
+/* Notification banners are text only: taps go through to the buttons under them (in a voice
+   room on a phone a banner sat right on the control bar and swallowed the first tap). */
+.toast {
+  pointer-events: none;
+}
+/* ...and they sit above the control bar / message box instead of on top of it. */
+body:has(.room-view, .call-view) .toast {
+  bottom: calc(110px + env(safe-area-inset-bottom));
+}
+@media (max-width: 760px) {
+  body:has(.composer) .toast {
+    bottom: calc(84px + env(safe-area-inset-bottom));
+  }
+}
+
+/* Android app, sign-in page: the other servers, one tap away */
+.auth-page {
+  flex-direction: column;
+  gap: 12px;
+}
+.app-servers {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.app-servers .btn {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.app-servers small.ok {
+  color: var(--success, #16a34a);
+}
+.app-servers small.bad {
+  color: var(--muted);
+}
+.danger-text {
+  color: var(--danger);
+}

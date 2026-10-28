@@ -1,0 +1,60 @@
+services:
+  app:
+    image: amorechat:latest
+    build: .
+    restart: unless-stopped
+    environment:
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+      - BACKUP_KEEP=${BACKUP_KEEP:-14}
+      - LIVEKIT_URL=http://livekit:7880
+      - LIVEKIT_API_KEY=amorechat
+      - LIVEKIT_API_SECRET=${LIVEKIT_API_SECRET:-}
+      - BACKUP_MIRROR=${BACKUP_MIRROR_DIR:-}
+      # for the HTTPS certificate expiry warning (asks the caddy service)
+      - DOMAIN=${DOMAIN}
+      - TLS_MODE=${TLS_MODE:-auto}
+    volumes:
+      - ./data:/data
+      # Second backup copy (another disk / USB / network share): BACKUP_MIRROR_DIR in .env
+      - ${BACKUP_MIRROR_DIR:-./data/no-mirror}:/mirror
+      # Whole-server network traffic for the health dashboard (read-only)
+      - /proc/1/net/dev:/host/proc/1/net/dev:ro
+    expose:
+      - '3000'
+
+  # Voice/video media server (calls, voice chats, streaming).
+  livekit:
+    image: livekit/livekit-server:v1.13.7
+    restart: unless-stopped
+    command: --config /etc/livekit.yaml --node-ip ${PUBLIC_IP:-127.0.0.1}
+    environment:
+      - 'LIVEKIT_KEYS=amorechat: ${LIVEKIT_API_SECRET:-}'
+    volumes:
+      - ./deploy/livekit.yaml:/etc/livekit.yaml:ro
+    ports:
+      - '7881:7881'
+      - '7882:7882/udp'
+      - '3478:3478/udp'
+
+  caddy:
+    # Pinned (like LiveKit): updates only download it again when a release moves to a newer one.
+    image: caddy:2.11.7-alpine
+    restart: unless-stopped
+    depends_on:
+      - app
+    ports:
+      - '80:80'
+      - '443:443'
+      - '443:443/udp'
+    environment:
+      - DOMAIN=${DOMAIN}
+      - TLS_MODE=${TLS_MODE:-auto}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - ./certs:/certs:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

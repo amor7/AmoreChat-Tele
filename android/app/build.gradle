@@ -1,0 +1,56 @@
+plugins {
+    id 'com.android.application'
+}
+
+// Same version as the server (package.json): 1.2.3 -> versionCode 10203.
+def appVersion = new groovy.json.JsonSlurper().parse(rootProject.file('../package.json')).version
+def parts = appVersion.tokenize('.').collect { it.replaceAll(/\D.*/, '') ?: '0' }.collect { it as int } + [0, 0, 0]
+def ks = System.getenv('ANDROID_KEYSTORE_FILE')
+
+android {
+    namespace 'chat.amore.app'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'chat.amore.app'
+        minSdk 26
+        targetSdk 35
+        versionCode parts[0] * 10000 + parts[1] * 100 + parts[2]
+        versionName appVersion
+    }
+
+    signingConfigs {
+        release {
+            if (ks) {
+                storeFile file(ks)
+                storeType 'pkcs12'
+                storePassword System.getenv('ANDROID_KEYSTORE_PASSWORD')
+                keyAlias 'amorechat'
+                keyPassword System.getenv('ANDROID_KEYSTORE_PASSWORD')
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            if (ks) signingConfig signingConfigs.release
+        }
+        debug {
+            applicationIdSuffix '.debug'
+        }
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    implementation 'androidx.core:core:1.13.1'
+}

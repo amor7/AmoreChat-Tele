@@ -1,0 +1,9 @@
+# Test client with Chrome, used inside the isolated (no internet) network.
+# Built while the runner still has internet; runs without it.
+FROM node:24-bookworm
+RUN apt-get update -qq && apt-get install -y -qq libnss3-tools >/dev/null
+WORKDIR /e2e
+RUN npm init -y >/dev/null && npm install --no-audit --no-fund puppeteer@25.11.0 \
+ && npx puppeteer browsers install chrome --install-deps
+COPY server/test/rtc-e2e.mjs server/test/isolated-client.sh ./
+ENTRYPOINT ["bash", "isolated-client.sh"]

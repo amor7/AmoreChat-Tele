@@ -1,0 +1,47 @@
+# Example only: the real ./Caddyfile is generated from .env by deploy/caddy-config.sh.
+# AmoreChat reverse proxy. HTTPS mode comes from TLS_MODE in .env:
+#   auto     - Let's Encrypt (needs international internet to issue and renew)
+#   internal - this server's own certificate authority: works fully offline and
+#              with a bare IP address; each device installs the CA once from http://<server>/ca
+#   custom   - your own certificate files: ./certs/cert.pem and ./certs/key.pem
+{
+	# Browsers send no server name when you open https://<ip>; use the configured one.
+	default_sni {$DOMAIN}
+}
+
+(tls-auto) {
+}
+(tls-internal) {
+	tls internal
+}
+(tls-custom) {
+	tls /certs/cert.pem /certs/key.pem
+}
+
+{$DOMAIN} {
+	import tls-{$TLS_MODE:auto}
+	encode zstd gzip
+	reverse_proxy app:3000
+}
+
+# Plain HTTP: the CA download page (must work before a device trusts the CA) and the
+# Android app download (the app trusts the CA by itself); everything else goes to HTTPS.
+http://{$DOMAIN} {
+	handle /ca.crt {
+		root * /data/caddy/pki/authorities/local
+		rewrite * /root.crt
+		header Content-Type application/x-x509-ca-cert
+		header Content-Disposition "attachment; filename=amorechat-ca.crt"
+		file_server
+	}
+	handle /ca {
+		rewrite * /ca-help
+		reverse_proxy app:3000
+	}
+	handle /app* {
+		reverse_proxy app:3000
+	}
+	handle {
+		redir https://{host}{uri} permanent
+	}
+}

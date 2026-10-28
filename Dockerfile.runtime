@@ -1,0 +1,11 @@
+# The part of the image that rarely changes: Node.js, ffmpeg and the production libraries.
+# Releases ship it separately (amorechat-runtime-<id>-amd64.tar.gz), so an update only
+# downloads it again when a library changed; the app code goes on top (deploy/Dockerfile.app).
+FROM node:24-alpine
+# ffmpeg is used for voice/video processing (bundled so offline installs already have it).
+RUN apk add --no-cache ffmpeg tini && mkdir /data && chown node:node /data
+WORKDIR /app
+COPY package.json package-lock.json ./
+COPY server/package.json server/
+COPY web/package.json web/
+RUN npm ci --omit=dev --no-audit --no-fund && npm cache clean --force

@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>AmoreChat</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px;
+    background: radial-gradient(circle at 30% 10%, #2a2470 0%, #0b0e1a 60%); color: #e6e8f5;
+    font-family: system-ui, -apple-system, "Segoe UI", Tahoma, sans-serif; }
+  .card { width: 100%; max-width: 380px; background: rgb(18 23 41 / .9); border: 1px solid #222a44; border-radius: 22px; padding: 26px 22px; box-shadow: 0 20px 60px rgb(0 0 0 / .5); }
+  .logo { width: 64px; height: 64px; border-radius: 18px; background: linear-gradient(135deg, #6366f1, #a855f7); display: grid; place-items: center; margin: 0 auto 12px; font-size: 32px; }
+  h1 { text-align: center; margin: 0 0 4px; font-size: 22px; }
+  p { color: #8f97b8; font-size: 14px; line-height: 1.8; margin: 6px 0 14px; }
+  label { font-size: 14px; display: block; margin-bottom: 6px; }
+  input { width: 100%; padding: 13px 14px; border-radius: 12px; border: 1px solid #2c3556; background: #0f1424; color: inherit; font-size: 16px; direction: ltr; text-align: left; }
+  input:focus { outline: 2px solid #6366f1; border-color: transparent; }
+  button { width: 100%; margin-top: 12px; padding: 13px; border: 0; border-radius: 12px; font-size: 16px; font-weight: 600; color: #fff; background: linear-gradient(135deg, #6366f1, #8b5cf6); }
+  button.alt { background: #1b2138; }
+  button:disabled { opacity: .5; }
+  .msg { margin-top: 12px; font-size: 14px; line-height: 1.8; }
+  .err { color: #fca5a5; }
+  .warn { background: #3a2a0a; border: 1px solid #a16207; border-radius: 12px; padding: 10px 12px; color: #fde68a; }
+  .fp { direction: ltr; font-family: monospace; font-size: 12px; word-break: break-all; background: #0f1424; border-radius: 10px; padding: 10px; margin: 8px 0; color: #c7d2fe; }
+  .hidden { display: none; }
+</style>
+</head>
+<body>
+<div class="card">
+  <div class="logo">💬</div>
+  <h1>AmoreChat</h1>
+  <p>آدرس سرور پیام‌رسان را وارد کنید (همان آدرسی که در مرورگر باز می‌کنید).</p>
+
+  <form id="form">
+    <label for="addr">آدرس سرور</label>
+    <input id="addr" placeholder="chat.example.ir" autocomplete="url" autocapitalize="none" spellcheck="false" inputmode="url" required>
+    <button id="go">اتصال</button>
+  </form>
+
+  <div id="trust" class="hidden">
+    <div class="msg warn">
+      این سرور از <b>گواهی امنیتی داخلی</b> استفاده می‌کند (نصب آفلاین). اثر انگشت زیر را با چیزی که در صفحه <b>/ca</b> سرور یا از مدیر گرفته‌اید مقایسه کنید:
+      <div class="fp" id="fp"></div>
+    </div>
+    <button id="accept">یکسان است، اعتماد می‌کنم</button>
+    <button class="alt hidden" id="plain">بدون SSL وصل شو (فقط پیام؛ تماس کار نمی‌کند)</button>
+    <button class="alt" id="back1">آدرس دیگری وارد می‌کنم</button>
+  </div>
+
+  <div id="insecure" class="hidden">
+    <div class="msg warn">این سرور <b>SSL ندارد</b>. پیام‌ها کار می‌کنند ولی تماس، میکروفون و دوربین کار نمی‌کنند. از مدیر بخواهید SSL را فعال کند.</div>
+    <button id="anyway">با این حال ادامه</button>
+    <button class="alt" id="back2">آدرس دیگری وارد می‌کنم</button>
+  </div>
+
+  <button class="alt hidden" id="cancelAdd">انصراف و برگشت به سرور فعلی</button>
+  <div id="status" class="msg"></div>
+</div>
+<script>
+  const $ = (id) => document.getElementById(id);
+  // Adding another server: the current one stays signed in.
+  if (location.search.includes('add=1')) {
+    document.querySelector('h1').textContent = 'افزودن سرور';
+    document.querySelector('.card > p').textContent = 'آدرس سرور دیگری را وارد کنید. حساب فعلی هم وارد می‌ماند و اعلان‌های هر دو می‌آید.';
+    $('cancelAdd').classList.remove('hidden');
+    $('cancelAdd').onclick = () => AmoreAndroid.cancelAdd();
+  }
+  let found = null;
+  function show(part) {
+    for (const id of ['form', 'trust', 'insecure']) $(id).classList.toggle('hidden', id !== part);
+  }
+  $('form').onsubmit = (e) => {
+    e.preventDefault();
+    $('go').disabled = true;
+    $('status').className = 'msg';
+    $('status').textContent = 'در حال بررسی…';
+    AmoreAndroid.checkServer($('addr').value);
+  };
+  window.onNative = (r) => {
+    $('go').disabled = false;
+    $('status').textContent = '';
+    found = r;
+    if (r.error) {
+      $('status').className = 'msg err';
+      $('status').textContent = r.error;
+    } else if (r.trust) {
+      $('fp').textContent = r.fingerprint;
+      $('plain').classList.toggle('hidden', !r.http);
+      show('trust');
+    } else if (r.ok && !r.secure) {
+      show('insecure');
+    } else if (r.ok) {
+      $('status').textContent = 'وصل شد: ' + (r.site || '');
+      AmoreAndroid.useServer(r.url, false);
+    }
+  };
+  $('accept').onclick = () => AmoreAndroid.useServer(found.url, true);
+  $('anyway').onclick = () => AmoreAndroid.useServer(found.url, false);
+  $('plain').onclick = () => AmoreAndroid.useServer(found.http, false);
+  $('back1').onclick = $('back2').onclick = () => show('form');
+</script>
+</body>
+</html>
