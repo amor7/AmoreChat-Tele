@@ -1,0 +1,106 @@
+name: android
+# Builds the Android app (debug for tests, signed release for the release job).
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_call:
+    inputs:
+      version:
+        type: string
+        required: true
+    secrets:
+      ANDROID_KEYSTORE_B64:
+        required: false
+      ANDROID_KEYSTORE_PASSWORD:
+        required: false
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - name: Keystore
+        env:
+          KS: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KS" ]; then
+            echo "$KS" | base64 -d > "$RUNNER_TEMP/release.p12"
+            echo "ANDROID_KEYSTORE_FILE=$RUNNER_TEMP/release.p12" >> "$GITHUB_ENV"
+          fi
+      - name: Build
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: gradle -p android --no-daemon assembleDebug assembleRelease
+      - name: Collect
+        run: |
+          mkdir -p android-dist
+          cp android/app/build/outputs/apk/release/app-release*.apk android-dist/amorechat.apk
+          cp android/app/build/outputs/apk/debug/app-debug.apk android-dist/amorechat-debug.apk
+          "$ANDROID_HOME"/build-tools/$(ls "$ANDROID_HOME"/build-tools | sort -V | tail -1)/apksigner verify --print-certs android-dist/amorechat.apk | head -5 || true
+          ls -lh android-dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: android-dist/
+
+  # The debug APK on a real Android emulator against a real AmoreChat server:
+  # sign-in in the WebView, background notifications without Google, ringing call.
+  emulator:
+    needs: build
+    if: ${{ !inputs.version }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: android-apk
+          path: android-dist
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci && npm run build
+      - name: Start AmoreChat
+        run: |
+          export LIVEKIT_API_KEY=amorechat LIVEKIT_API_SECRET=ci-secret-0123456789abcdefghijklmnopqrstuv LIVEKIT_URL=http://127.0.0.1:7999
+          DATA_DIR=/tmp/hs-android PORT=3100 nohup node server/src/index.js > server-android.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf http://localhost:3100/healthz && break; sleep 1; done
+          echo "SETUP_CODE=$(grep -oP 'SETUP CODE: \K\S+' server-android.log)" >> "$GITHUB_ENV"
+          # A second, separate AmoreChat server (multi-server test)
+          DATA_DIR=/tmp/hs-android2 PORT=3101 nohup node server/src/index.js > server-android2.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf http://localhost:3101/healthz && break; sleep 1; done
+          echo "SETUP_CODE2=$(grep -oP 'SETUP CODE: \K\S+' server-android2.log)" >> "$GITHUB_ENV"
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Emulator test (phone cut off from the internet)
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          ISOLATE: '1'
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: node server/test/android-e2e.mjs "$SETUP_CODE" android-dist/amorechat-debug.apk "$SETUP_CODE2"
+      - name: Server log
+        if: always()
+        run: cat server-android.log; tail -40 server-android2.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: android-screenshots
+          path: android-*.png

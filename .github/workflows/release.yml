@@ -1,0 +1,65 @@
+name: release
+# Builds the Docker image and an offline bundle (app + Caddy images) that can be
+# copied to a server with no Docker Hub / npm access and loaded with install.sh.
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  android:
+    uses: ./.github/workflows/android.yml
+    secrets: inherit
+    with:
+      version: ${{ github.ref_name }}
+
+  bundle:
+    needs: android
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: android-apk
+          path: android-dist
+      - name: Android APK (served by the server at /app, and attached to the release)
+        run: |
+          rm -f android-dist/amorechat-debug.apk
+          cp android-dist/amorechat.apk "amorechat-android-${GITHUB_REF_NAME}.apk"
+          ls -lh android-dist
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci && npm run build
+      - name: Release files (small update parts + the full offline bundle)
+        run: |
+          bash deploy/make-release.sh .
+          git archive --format=tar.gz --prefix=amorechat/ -o amorechat-source.tar.gz HEAD
+          # Docker itself, for servers that cannot reach any package repository
+          bash deploy/make-docker-bundle.sh 24.04 .
+          bash deploy/make-docker-bundle.sh 22.04 .
+          ls -lh *.tar.gz manifest.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: amorechat-offline
+          path: |
+            *.tar.gz
+            manifest.json
+      - name: Release notes from CHANGELOG.md
+        run: |
+          awk -v tag="## ${GITHUB_REF_NAME}" '$0==tag{f=1;next} /^## /{f=0} f' CHANGELOG.md > notes.md
+          printf '\n**Update:** `sudo amorechat-update %s`\n' "${GITHUB_REF_NAME}" >> notes.md
+          cat notes.md
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            *.tar.gz
+            *.apk
+            manifest.json
+          body_path: notes.md
