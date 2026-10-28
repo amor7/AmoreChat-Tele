@@ -1,0 +1,72 @@
+name: tele-patch
+on:
+  workflow_dispatch:
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Wire Tele UI and schema
+        run: |
+          set -euo pipefail
+          # Restore Sidebar from AmoreChat foundation if placeholder
+          if grep -q PLACEHOLDER web/src/components/Sidebar.jsx 2>/dev/null || ! grep -q "function Sidebar" web/src/components/Sidebar.jsx; then
+            curl -fsSL -o web/src/components/Sidebar.jsx \
+              https://raw.githubusercontent.com/amor7/AmoreChat/feature/tele-foundation/web/src/components/Sidebar.jsx || \
+            curl -fsSL -o web/src/components/Sidebar.jsx \
+              https://raw.githubusercontent.com/ebrasha/AmoreChat/main/web/src/components/Sidebar.jsx
+          fi
+          # Add Cable import
+          if ! grep -q 'Cable' web/src/components/Sidebar.jsx; then
+            sed -i "s/Plus } from 'lucide-react'/Plus, Cable } from 'lucide-react'/" web/src/components/Sidebar.jsx || true
+            sed -i "s/Plus} from 'lucide-react'/Plus, Cable } from 'lucide-react'/" web/src/components/Sidebar.jsx || true
+          fi
+          # Menu entry
+          if ! grep -q "openModal('tele')" web/src/components/Sidebar.jsx; then
+            sed -i "s|{item(<><SquarePen size={18} /> گفتگوی جدید</>, () => openModal('newChat'))}|{item(<><Cable size={18} /> Tele (تلگرام)</>, () => openModal('tele'))}\\n              {item(<><SquarePen size={18} /> گفتگوی جدید</>, () => openModal('newChat'))}|" web/src/components/Sidebar.jsx
+          fi
+          # Modals
+          if ! grep -q TelePanel web/src/components/Modals.jsx; then
+            sed -i "s|import Admin from './Admin';|import Admin from './Admin';\\nimport TelePanel from './TelePanel';|" web/src/components/Modals.jsx
+            sed -i "s|case 'admin':|case 'tele':\\n      return <TelePanel onClose={close} />;\\n    case 'admin':|" web/src/components/Modals.jsx
+          fi
+          # tele_messages table if missing in db.js
+          if ! grep -q tele_messages server/src/db.js; then
+            python3 - <<'PY'
+          from pathlib import Path
+          p = Path('server/src/db.js')
+          t = p.read_text()
+          needle = "  CREATE INDEX tele_dialogs_selected ON tele_dialogs(account_id, selected);\n  `,\n];"
+          ins = '''  CREATE INDEX tele_dialogs_selected ON tele_dialogs(account_id, selected);
+  `,
+  // v9: Tele messages
+  `
+  CREATE TABLE tele_messages (
+    id INTEGER PRIMARY KEY,
+    account_id INTEGER NOT NULL REFERENCES tele_accounts(id) ON DELETE CASCADE,
+    dialog_id INTEGER NOT NULL REFERENCES tele_dialogs(id) ON DELETE CASCADE,
+    tg_msg_id INTEGER,
+    direction TEXT NOT NULL DEFAULT 'in',
+    kind TEXT NOT NULL DEFAULT 'text',
+    text TEXT NOT NULL DEFAULT '',
+    media_path TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    UNIQUE(account_id, dialog_id, tg_msg_id)
+  );
+  CREATE INDEX tele_messages_dialog ON tele_messages(dialog_id, id);
+  `,
+];'''
+          if needle in t:
+              p.write_text(t.replace(needle, ins))
+              print('db migrated')
+          else:
+              print('needle missing')
+          PY
+          fi
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git diff --cached --quiet || git commit -m 'tele: wire Sidebar/Modals + tele_messages'
+          git push
