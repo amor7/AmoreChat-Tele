@@ -1,0 +1,211 @@
+name: ci-e2e
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  rtc-e2e:
+    runs-on: ubuntu-latest
+    env:
+      LIVEKIT_API_KEY: amorechat
+      LIVEKIT_API_SECRET: ci-secret-0123456789abcdefghijklmnopqrstuv
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Start LiveKit (the production config, webhook pointed at this runner)
+        run: |
+          sed 's#http://app:3000#http://127.0.0.1:3101#' deploy/livekit.yaml > /tmp/livekit.yaml
+          docker run -d --name livekit --network host \
+            -v /tmp/livekit.yaml:/etc/livekit.yaml:ro \
+            -e "LIVEKIT_KEYS=amorechat: $LIVEKIT_API_SECRET" \
+            livekit/livekit-server:v1.13.7 --config /etc/livekit.yaml --node-ip 127.0.0.1
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:7880 && break; sleep 1; done
+      - name: Start app
+        run: |
+          LIVEKIT_URL=http://127.0.0.1:7880 DATA_DIR=/tmp/e2e PORT=3101 node server/src/index.js > server.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf http://localhost:3101/healthz && break; sleep 1; done
+      - name: Install headless Chrome and a portrait fake camera
+        run: |
+          npm install --no-save puppeteer@25.11.0
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+          ffmpeg -loglevel error -f lavfi -i testsrc=size=360x640:rate=15 -t 4 -pix_fmt yuv420p /tmp/portrait.y4m
+      - name: End-to-end voice/video test
+        run: |
+          CODE=$(grep -oP 'SETUP CODE: \K\S+' server.log)
+          FAKE_VIDEO=/tmp/portrait.y4m node server/test/rtc-e2e.mjs http://localhost:3101 "$CODE"
+      - name: UI test (menus, dialogs, step-by-step Back; desktop and phone size)
+        run: |
+          mkdir -p /tmp/apk && head -c 300000 /dev/urandom > /tmp/apk/amorechat.apk
+          APK_DIR=/tmp/apk DATA_DIR=/tmp/ui PORT=3102 node server/src/index.js > ui-server.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf http://localhost:3102/healthz && break; sleep 1; done
+          CODE=$(grep -oP 'SETUP CODE: \K\S+' ui-server.log)
+          APK_DIR=/tmp/apk node server/test/ui-e2e.mjs http://localhost:3102 "$CODE"
+      - name: Logs
+        if: always()
+        run: |
+          cat server.log
+          docker logs livekit 2>&1 | tail -80
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-screenshots
+          path: |
+            e2e-fail-*.png
+            shot-*.png
+            ui-fail-*.png
+
+  docker-offline:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        ubuntu: ['22.04', '24.04']
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build docker-offline-ubuntu-${{ matrix.ubuntu }}-amd64.tar.gz
+        run: |
+          bash deploy/make-docker-bundle.sh ${{ matrix.ubuntu }} /tmp
+          ! tar tzf /tmp/docker-offline-ubuntu-${{ matrix.ubuntu }}-amd64.tar.gz | grep -E '/(git|perl|perl-base|git-man)_'
+          echo "packages: $(tar tzf /tmp/docker-offline-ubuntu-${{ matrix.ubuntu }}-amd64.tar.gz | grep -c '\.deb$')"
+      - name: Install it in a fresh Ubuntu ${{ matrix.ubuntu }} with no network
+        run: |
+          docker run --rm --network none -v /tmp:/b -v "$PWD/deploy":/d ubuntu:${{ matrix.ubuntu }} bash -c '
+            set -e
+            bash /d/install-docker.sh /b/docker-offline-ubuntu-${{ matrix.ubuntu }}-amd64.tar.gz
+            docker --version && docker compose version
+            bash /d/install-docker.sh /b/docker-offline-ubuntu-${{ matrix.ubuntu }}-amd64.tar.gz | grep -q "already installed"'
+
+  small-updates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci && npm run build
+      - name: Release A (as GitHub would publish it)
+        run: |
+          bash deploy/make-release.sh /tmp/relA
+          git archive --format=tar.gz --prefix=amorechat/ -o /tmp/relA/amorechat-source.tar.gz HEAD
+          cat /tmp/relA/manifest.json
+      - name: Fresh server installs release A from its parts
+        run: |
+          set -x -o pipefail
+          docker image rm -f amorechat:latest $(docker images --format '{{.Repository}}:{{.Tag}}' | grep -E '^(amorechat-runtime|caddy|livekit)') || true
+          printf 'DOMAIN=127.0.0.1\nTLS_MODE=internal\nBACKUP_KEEP=14\nLOG_LEVEL=info\n' > .env
+          mkdir -p data certs && sudo chown -R 1000:1000 data
+          sudo bash deploy/ensure-env.sh
+          sudo FORCE=1 bash deploy/update.sh /tmp/relA 2>&1 | tee /tmp/updA.log
+          grep -q 'is running' /tmp/updA.log
+          for i in $(seq 1 60); do curl -skf https://127.0.0.1/healthz && break; sleep 2; done
+          curl -skf https://127.0.0.1/api/config | grep -q '"version"'
+      - name: Release B changes only code
+        run: |
+          set -x -o pipefail
+          sudo find . -path ./data -prune -o -exec chown "$(id -u):$(id -g)" {} +
+          node -e "const f='package.json';const p=JSON.parse(require('fs').readFileSync(f));p.version=p.version.replace(/\d+$/,(n)=>+n+1);require('fs').writeFileSync(f,JSON.stringify(p,null,2)+'\n')"
+          echo '// release B' >> server/src/index.js
+          npm run build
+          bash deploy/make-release.sh /tmp/relB
+          git -c user.email=ci@x -c user.name=ci commit -qam 'release B'
+          git archive --format=tar.gz --prefix=amorechat/ -o /tmp/relB/amorechat-source.tar.gz HEAD
+          [ "$(grep -o '"runtime": "[^"]*"' /tmp/relA/manifest.json)" = "$(grep -o '"runtime": "[^"]*"' /tmp/relB/manifest.json)" ]
+          mkdir /tmp/relB-small
+          cp /tmp/relB/manifest.json /tmp/relB/amorechat-app.tar.gz /tmp/relB/amorechat-source.tar.gz /tmp/relB-small/
+          docker tag caddy:2.11.7-alpine caddy:2-alpine && docker rmi caddy:2.11.7-alpine
+          sudo FORCE=1 bash deploy/update.sh /tmp/relB-small 2>&1 | tee /tmp/updB.log
+          docker image inspect caddy:2.11.7-alpine >/dev/null
+          grep -q 'Runtime .* already here' /tmp/updB.log
+          grep -q 'Caddy and LiveKit already up to date' /tmp/updB.log
+          grep -q 'is running' /tmp/updB.log
+          NEW=$(grep -o '"version": "[^"]*"' /tmp/relB/manifest.json | cut -d'"' -f4)
+          for i in $(seq 1 60); do curl -skf https://127.0.0.1/api/config | grep -q "\"version\":\"$NEW\"" && break; sleep 2; done
+          curl -skf https://127.0.0.1/api/config | grep "\"version\":\"$NEW\""
+      - name: Logs
+        if: failure()
+        run: docker compose logs --tail 60
+
+  crowd:
+    runs-on: ubuntu-latest
+    env:
+      LIVEKIT_API_KEY: amorechat
+      LIVEKIT_API_SECRET: ci-secret-0123456789abcdefghijklmnopqrstuv
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Start LiveKit
+        run: |
+          sed 's#http://app:3000#http://127.0.0.1:3103#' deploy/livekit.yaml > /tmp/livekit.yaml
+          docker run -d --name livekit --network host -v /tmp/livekit.yaml:/etc/livekit.yaml:ro \
+            -e "LIVEKIT_KEYS=amorechat: $LIVEKIT_API_SECRET" livekit/livekit-server:v1.13.7 --config /etc/livekit.yaml --node-ip 127.0.0.1
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:7880 && break; sleep 1; done
+      - name: Start app
+        run: |
+          LIVEKIT_URL=http://127.0.0.1:7880 DATA_DIR=/tmp/crowd PORT=3103 node server/src/index.js > crowd-server.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf http://localhost:3103/healthz && break; sleep 1; done
+      - run: npm install --no-save puppeteer@25.11.0
+      - name: Crowd test (6 people at once)
+        run: |
+          CODE=$(grep -oP 'SETUP CODE: \K\S+' crowd-server.log)
+          node server/test/crowd-e2e.mjs http://localhost:3103 "$CODE" crowd-server.log
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: crowd
+          path: |
+            crowd-*.png
+            crowd-server.log
+
+  isolated:
+    runs-on: ubuntu-latest
+    env:
+      DC: docker compose -p iso -f docker-compose.yml -f docker-compose.isolated.yml
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare like install.sh (offline mode on a domain)
+        run: |
+          printf 'DOMAIN=chat.test\nTLS_MODE=internal\nPUBLIC_IP=172.30.0.10\nBACKUP_KEEP=14\nLOG_LEVEL=info\n' > .env
+          mkdir -p data certs && sudo chown -R 1000:1000 data
+          sudo bash deploy/ensure-env.sh
+      - name: Build and pull everything while the runner still has internet
+        run: |
+          $DC build
+          $DC pull caddy livekit
+          docker build -t amorechat-e2e -f server/test/Dockerfile.e2e .
+      - name: Start the stack with no internet
+        run: |
+          $DC up -d
+          [ "$(docker network inspect iso_default --format '{{.Internal}}')" = "true" ]
+      - name: Prove there is no internet (server and client)
+        run: |
+          set -x
+          ! $DC exec -T app wget -q -T 8 -O /dev/null https://github.com
+          ! $DC exec -T app wget -q -T 8 -O /dev/null http://1.1.1.1
+          ! docker run --rm --network iso_default --entrypoint curl amorechat-e2e -sS -m 8 https://www.google.com
+          ! docker run --rm --network iso_default --entrypoint curl amorechat-e2e -sS -m 8 http://8.8.8.8
+      - name: Complete end-to-end test inside the isolated network
+        run: |
+          for i in $(seq 1 30); do $DC logs app | grep -q 'SETUP CODE' && break; sleep 2; done
+          CODE=$($DC logs app | grep -oP 'SETUP CODE: \K\S+' | tail -1)
+          docker run --name e2e --network iso_default amorechat-e2e https://chat.test "$CODE"
+      - name: Logs
+        if: always()
+        run: |
+          mkdir -p iso-out && docker cp e2e:/e2e/. iso-out/ 2>/dev/null || true
+          $DC logs --tail 80
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: isolated-screenshots
+          path: iso-out/*.png
