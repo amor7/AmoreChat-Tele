@@ -11,6 +11,7 @@ import NewChat from './NewChat';
 import Profile from './Profile';
 import ChatInfo from './ChatInfo';
 import Admin from './Admin';
+import TelePanel from './TelePanel';
 import { Readers } from './ChatExtras';
 import { ShareTarget, AppUpdateNotes } from './AndroidApp';
 import { FoldersModal, FolderEditor } from './Folders';
@@ -340,6 +341,8 @@ export default function Modals() {
       return <ChatInfo chatId={modal.chatId} onClose={close} />;
     case 'admin':
       return <Admin onClose={close} />;
+    case 'tele':
+      return <TelePanel onClose={close} />;
     case 'image':
       return <ImageViewer fileId={modal.fileId} name={modal.name} onClose={close} />;
     case 'forward':
