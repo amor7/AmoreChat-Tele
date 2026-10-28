@@ -1,0 +1,123 @@
+name: ci
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install ffmpeg
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+      - run: npm ci
+      - run: npm run build
+      - name: /ca page fingerprint
+        run: node server/test/ca-fingerprint.mjs
+      - name: HTTPS certificate expiry warning
+        run: cd server && node test/cert-alert.mjs
+      - name: Smoke test
+        run: |
+          DATA_DIR=/tmp/hs PORT=3100 SWEEP_MS=500 node server/src/index.js > server.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf http://localhost:3100/healthz && break; sleep 1; done
+          CODE=$(grep -oP 'SETUP CODE: \K\S+' server.log)
+          SWEEP_MS=500 node server/test/smoke.mjs http://localhost:3100 "$CODE"
+      - name: Voice/call API test
+        run: |
+          export LIVEKIT_API_KEY=amorechat LIVEKIT_API_SECRET=ci-secret-0123456789abcdefghijklmnopqrstuv LIVEKIT_URL=http://127.0.0.1:7999
+          DATA_DIR=/tmp/hs-rtc PORT=3102 node server/src/index.js > server-rtc.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf http://localhost:3102/healthz && break; sleep 1; done
+          CODE=$(grep -oP 'SETUP CODE: \K\S+' server-rtc.log)
+          LK_SECRET=$LIVEKIT_API_SECRET node server/test/rtc-api.mjs http://localhost:3102 "$CODE"
+      - name: Account & security test
+        run: |
+          DATA_DIR=/tmp/hs-acc PORT=3104 node server/src/index.js > server-acc.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf http://localhost:3104/healthz && break; sleep 1; done
+          CODE=$(grep -oP 'SETUP CODE: \K\S+' server-acc.log)
+          node server/test/account.mjs http://127.0.0.1:3104 "$CODE"
+      - name: Server logs
+        if: always()
+        run: cat server.log server-rtc.log server-acc.log
+
+  compose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Prepare like install.sh
+        run: |
+          printf 'DOMAIN=127.0.0.1\nTLS_MODE=internal\nBACKUP_KEEP=14\nLOG_LEVEL=info\n' > .env
+          mkdir -p data certs && sudo chown -R 1000:1000 data
+          sudo bash deploy/ensure-env.sh
+          grep -E '^(PUBLIC_IP|LIVEKIT_API_SECRET)=.' .env | sed 's/=.*/=<set>/'
+      - name: Start the stack
+        run: docker compose up -d --build
+      - name: Check site, media server and the /rtc proxy
+        run: |
+          set -x
+          for i in $(seq 1 60); do curl -skf https://127.0.0.1/healthz && break; sleep 2; done
+          curl -sf http://127.0.0.1/ca.crt -o /tmp/ca.crt && grep -q 'BEGIN CERTIFICATE' /tmp/ca.crt
+          curl -sf --cacert /tmp/ca.crt https://127.0.0.1/api/config | grep -q '"rtc":true'
+          curl -sf http://127.0.0.1/ca | grep -q 'نصب گواهی'
+          [ "$(curl -s -o /dev/null -w '%{http_code}' http://127.0.0.1/)" = "301" ]
+          code=$(curl -s --cacert /tmp/ca.crt -o /dev/null -w '%{http_code}' https://127.0.0.1/rtc/validate)
+          echo "rtc/validate -> $code"; [ "$code" = "401" ]
+          docker compose logs livekit | grep -q 'starting LiveKit server'
+          ! docker compose logs livekit | grep -i 'secret is too short'
+      - name: Android app through Caddy
+        run: |
+          set -x
+          curl -sf http://127.0.0.1/app | grep -q 'اندروید'
+          CODE=$(docker compose logs app | grep -oP 'SETUP CODE: \K\S+' | tail -1)
+          curl -sf --cacert /tmp/ca.crt -c /tmp/jar -H 'x-requested-with: amorechat' -H 'content-type: application/json' \
+            -d "{\"username\":\"owner\",\"password\":\"Str0ng-Pass-77\",\"displayName\":\"O\",\"invite\":\"$CODE\"}" https://127.0.0.1/api/auth/register > /dev/null
+          curl -sN --compressed --cacert /tmp/ca.crt -b /tmp/jar --max-time 5 https://127.0.0.1/api/notify/stream > /tmp/sse.txt || true
+          cat /tmp/sse.txt
+          grep -q 'connected' /tmp/sse.txt
+          curl -sf --cacert /tmp/ca.crt -b /tmp/jar https://127.0.0.1/api/admin/health | tee /tmp/health.json | head -c 400; echo
+          grep -q '"netHostWide":true' /tmp/health.json
+          curl -sf --cacert /tmp/ca.crt -b /tmp/jar 'https://127.0.0.1/api/admin/health?cert=1' | grep -o '"cert":{[^}]*}' | tee /tmp/cert.json
+          grep -q '"daysLeft":' /tmp/cert.json
+      - name: Offline update from a folder
+        run: |
+          set -x -o pipefail
+          mkdir -p /tmp/rel
+          git archive --format=tar.gz --prefix=amorechat/ -o /tmp/rel/amorechat-source.tar.gz HEAD
+          sudo FORCE=1 bash deploy/update.sh /tmp/rel 2>&1 | tee /tmp/update.log
+          grep -q 'is running' /tmp/update.log
+          for i in $(seq 1 60); do curl -sf --cacert /tmp/ca.crt https://127.0.0.1/healthz && break; sleep 2; done
+          curl -sf --cacert /tmp/ca.crt https://127.0.0.1/api/config | grep -q '"version"'
+      - name: Every address setting gives a valid Caddy config
+        run: |
+          set -e
+          for combo in "chat.example.ir auto 1 0" "chat.example.ir internal 0 1" "chat.example.ir off 1 0" "185.10.20.30 auto 0 0" "185.10.20.30 off 0 0" "chat.example.ir custom 1 1"; do
+            set -- $combo
+            d=$(mktemp -d); mkdir -p $d/deploy $d/certs; cp deploy/caddy-config.sh $d/deploy/
+            printf 'DOMAIN=%s\nTLS_MODE=%s\nALSO_IP=%s\nALLOW_HTTP=%s\nPUBLIC_IP=185.10.20.30\n' "$1" "$2" "$3" "$4" > $d/.env
+            (cd $d && bash deploy/caddy-config.sh)
+            [ "$2" = custom ] && openssl req -x509 -newkey rsa:2048 -nodes -days 2 -subj /CN=x -keyout $d/certs/key.pem -out $d/certs/cert.pem 2>/dev/null
+            docker run --rm -v $d/Caddyfile:/etc/caddy/Caddyfile:ro -v $d/certs:/certs:ro caddy:2.11.7-alpine caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile 2>&1 | tail -1
+          done
+      - name: No SSL (plain http)
+        run: |
+          set -x
+          sed -i 's/^TLS_MODE=.*/TLS_MODE=off/' .env
+          sudo bash deploy/caddy-config.sh
+          docker compose restart caddy
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1/healthz && break; sleep 1; done
+          curl -s -c /tmp/hjar -D /tmp/hdr -H 'x-requested-with: amorechat' -H 'content-type: application/json' \
+            -d '{"username":"owner","password":"Str0ng-Pass-77"}' http://127.0.0.1/api/auth/login | head -c 200; echo
+          ! grep -i '^set-cookie' /tmp/hdr | grep -qi 'secure'
+          curl -sf -b /tmp/hjar -H 'x-requested-with: amorechat' http://127.0.0.1/api/auth/me | grep -q '"username":"owner"'
+          curl -sf -b /tmp/hjar -H 'x-requested-with: amorechat' http://127.0.0.1/api/chats | grep -q '"chats"'
+      - name: Logs
+        if: always()
+        run: |
+          curl -vsk https://127.0.0.1/healthz 2>&1 | tail -25 || true
+          curl -vs http://127.0.0.1/ca.crt 2>&1 | tail -15 || true
+          docker compose logs caddy --tail 80
+          docker compose logs --tail 30
