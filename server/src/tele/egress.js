@@ -7,6 +7,7 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { DATA_DIR } from '../db.js';
 import { getProxy, selectActiveProxy, getRoutePolicy, recordHealth } from './proxies.js';
+import { outboundFromConfig } from './uri.js';
 
 const EGRESS_DIR = path.join(DATA_DIR, 'tele-egress');
 const CONFIG_PATH = path.join(EGRESS_DIR, 'sing-box.json');
@@ -25,84 +26,14 @@ function ensureDir() {
 function outboundFromProxy(row) {
   const cfg = String(row.config || '').trim();
   const tag = `proxy-${row.id}`;
-
-  // Direct URI formats that sing-box can often ingest via a simple socks/http/vless style.
-  // Full share-link parsing is best-effort; complex Reality/WS links may need manual JSON.
-  if (row.protocol === 'socks5' || cfg.startsWith('socks5://') || cfg.startsWith('socks://')) {
-    const u = parseUri(cfg.replace(/^socks:\/\//, 'socks5://'));
-    return {
-      type: 'socks',
-      tag,
-      server: u.host,
-      server_port: u.port || 1080,
-      version: '5',
-      username: u.user || undefined,
-      password: u.pass || undefined,
-    };
+  try {
+    return outboundFromConfig(cfg, row.protocol, tag);
+  } catch (e) {
+    throw new Error(
+      e.message ||
+        `پروتکل «${row.protocol}» نیاز به کانفیگ JSON خروجی sing-box دارد یا لینک socks5/http/ss/vless/vmess/trojan.`,
+    );
   }
-  if (row.protocol === 'http' || row.protocol === 'https' || cfg.startsWith('http://') || cfg.startsWith('https://')) {
-    const u = parseUri(cfg);
-    return {
-      type: 'http',
-      tag,
-      server: u.host,
-      server_port: u.port || (cfg.startsWith('https') ? 443 : 80),
-      username: u.user || undefined,
-      password: u.pass || undefined,
-    };
-  }
-  if (row.protocol === 'ss' || cfg.startsWith('ss://')) {
-    // Expect ss://method:password@host:port or base64 form — store as JSON outbound if parse fails.
-    try {
-      const parsed = parseShadowsocks(cfg);
-      return { type: 'shadowsocks', tag, ...parsed };
-    } catch {
-      /* fall through */
-    }
-  }
-  if (cfg.trim().startsWith('{')) {
-    try {
-      const j = JSON.parse(cfg);
-      return { ...j, tag };
-    } catch {
-      /* fall through */
-    }
-  }
-  // For vless/vmess/trojan/hy2/etc.: admin can paste a full sing-box outbound JSON object.
-  // Otherwise we mark the route unusable until a proper adapter parses the share link.
-  throw new Error(
-    `پروتکل «${row.protocol}» نیاز به کانفیگ JSON خروجی sing-box دارد یا لینک ساده‌ی SOCKS/HTTP/SS. لینک‌های پیچیده VLESS/Reality را به صورت JSON outbound ذخیره کنید.`,
-  );
-}
-
-function parseUri(raw) {
-  const s = raw.includes('://') ? raw : `socks5://${raw}`;
-  const u = new URL(s);
-  return {
-    host: u.hostname,
-    port: u.port ? Number(u.port) : undefined,
-    user: u.username ? decodeURIComponent(u.username) : '',
-    pass: u.password ? decodeURIComponent(u.password) : '',
-  };
-}
-
-function parseShadowsocks(link) {
-  // ss://BASE64 or ss://method:password@host:port
-  let rest = link.slice(5);
-  if (!rest.includes('@')) {
-    const pad = rest.length % 4 === 0 ? rest : rest + '='.repeat(4 - (rest.length % 4));
-    rest = Buffer.from(pad, 'base64').toString('utf8');
-  }
-  const at = rest.lastIndexOf('@');
-  if (at < 0) throw new Error('ss link');
-  const [method, password] = rest.slice(0, at).split(':');
-  const [server, port] = rest.slice(at + 1).split(':');
-  return {
-    method,
-    password,
-    server,
-    server_port: Number(port) || 8388,
-  };
 }
 
 function buildConfig(proxyRow) {
@@ -248,7 +179,6 @@ export async function ensureEgress() {
         lastError = `sing-box exited with code ${code}`;
       }
     });
-    // Give it a moment to bind.
     setTimeout(() => {
       if (!started) {
         started = true;
@@ -262,20 +192,16 @@ export async function ensureEgress() {
 }
 
 /**
- * Health probe: try TCP connect to Telegram DC through local SOCKS if running,
- * otherwise attempt to bring egress up first. Without sing-box, mark unknown.
+ * Health probe: try TCP connect to local SOCKS inbound for this proxy config.
  */
 export async function probeViaEgress(proxyId) {
   const row = getProxy(proxyId);
   if (!row) throw Object.assign(new Error('پروکسی پیدا نشد'), { statusCode: 404 });
 
-  // Temporarily prefer this proxy for a one-shot config write — simplified: only if selected.
   try {
-    // Write config for this specific proxy without changing global selection permanently.
     ensureDir();
     const config = buildConfig(row);
     const testPath = path.join(EGRESS_DIR, `probe-${row.id}.json`);
-    // Use a different local port for probe to avoid clobbering the main process.
     const probePort = LOCAL_SOCKS_PORT + 1 + (row.id % 50);
     config.inbounds[0].listen_port = probePort;
     fs.writeFileSync(testPath, JSON.stringify(config, null, 2));
@@ -289,7 +215,6 @@ export async function probeViaEgress(proxyId) {
     const started = Date.now();
     const p = spawn(bin, ['run', '-c', testPath], { stdio: ['ignore', 'pipe', 'pipe'] });
     await new Promise((r) => setTimeout(r, 600));
-    // Lightweight check: can we open a TCP connection to the local inbound?
     const net = await import('node:net');
     const ok = await new Promise((resolve) => {
       const s = net.createConnection({ host: LOCAL_SOCKS_HOST, port: probePort }, () => {
