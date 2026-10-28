@@ -1,0 +1,43 @@
+name: release-tag
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag name'
+        required: true
+        default: 'v1.0.0'
+      name:
+        description: 'Release title'
+        required: true
+        default: 'AmoreChat-Tele 1.0.0'
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Create tag and release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ inputs.tag }}
+          TITLE: ${{ inputs.name }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists"
+          else
+            git tag -a "$TAG" -m "$TITLE"
+            git push origin "$TAG"
+          fi
+          BODY=$(cat CHANGELOG-TELE.md 2>/dev/null || echo "AmoreChat-Tele $TAG")
+          # Create or update release
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release edit "$TAG" --title "$TITLE" --notes "$BODY"
+          else
+            gh release create "$TAG" --title "$TITLE" --notes "$BODY"
+          fi
