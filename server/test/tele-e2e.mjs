@@ -747,7 +747,7 @@ async function uiChecks({ owner, alice, bob, pd, gd, meta, photoMsg, voiceMsg, s
     };
     // Numbers shown as words of an error ("ناعدد" is NaN in Persian) or missing values.
     const noBrokenText = async (where) => {
-      const bad = await page.evaluate(() => (document.body.innerText.match(/ناعدد|NaN|undefined|[object Object]/) || [])[0]);
+      const bad = await page.evaluate(() => (document.body.innerText.match(/ناعدد|\bNaN\b|\bundefined\b|\[object Object\]/) || [])[0]);
       assert.ok(!bad, `${where}: the page shows "${bad}"`);
     };
     const texts = (sel) => page.$$eval(sel, (els) => els.map((e) => e.textContent));
