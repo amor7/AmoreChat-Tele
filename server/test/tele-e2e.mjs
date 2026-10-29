@@ -186,7 +186,19 @@ charlie.on('error', (e) => console.warn('[charlie]', e?.message || e));
 const charlieMsgs = [];
 charlie.on('update', (u) => {
   if (u._ === 'updateNewMessage') charlieMsgs.push(u.message);
+  if (u._ === 'updateAuthorizationState') console.log('  [charlie]', u.authorization_state._);
+  if (u._ === 'updateConnectionState') console.log('  [charlie]', u.state._);
 });
+// Nothing may hang the job: give up with the step it was on.
+setTimeout(() => {
+  console.error(`
+FAILED (stuck) at: ${step}`);
+  try {
+    console.error(fs.readFileSync(LOG, 'utf8').slice(-4000));
+  } catch {}
+  process.exit(1);
+}, Number(process.env.TELE_E2E_TIMEOUT_MS || 13 * 60000)).unref();
+const within = (p, ms, what) => Promise.race([p, sleep(ms).then(() => Promise.reject(new Error(`timed out: ${what}`)))]);
 const textOf = (m) => m.content?.text?.text || m.content?.caption?.text || '';
 
 let fail = null;
@@ -194,7 +206,27 @@ try {
   fs.writeFileSync(LOG, '');
 
   log('Charlie logs in to the Telegram test servers');
-  await charlie.login(() => ({ getPhoneNumber: async () => charliePhone, getAuthCode: async () => CODE, getName: async () => ({ firstName: 'Charlie', lastName: 'Helper' }) }));
+  await within(
+    charlie.login(() => ({
+      getPhoneNumber: async (retry) => {
+        if (retry) throw new Error('phone number refused');
+        return charliePhone;
+      },
+      getAuthCode: async (retry) => {
+        if (retry) throw new Error('code refused');
+        return CODE;
+      },
+      getName: async () => ({ firstName: 'Charlie', lastName: 'Helper' }),
+      getEmailAddress: async () => {
+        throw new Error('the test server asks for an email address');
+      },
+      confirmOnAnotherDevice: () => {
+        throw new Error('the test server asks for a QR login');
+      },
+    })),
+    120000,
+    'Charlie login',
+  );
   const charlieMe = await charlie.invoke({ _: 'getMe' });
 
   log('Server starts; owner, Alice and Bob register');
