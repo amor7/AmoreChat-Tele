@@ -337,9 +337,14 @@ async function part2() {
   ok(await alice.call('PATCH', `/api/tele/dialogs/${pd.id}`, { selected: true }), 'select bot chat');
   ok(await alice.call('PATCH', `/api/tele/dialogs/${gd.id}`, { selected: true }), 'select group');
 
+  log('Alice writes first (a bot only knows people who wrote to it); the bot receives both');
+  const botUser = botMe.usernames?.active_usernames?.[0] || '';
+  ok(await alice.call('POST', `/api/tele/dialogs/${pd.id}/messages`, { text: `ping ${RUN}` }), 'ping bot');
+  // In groups a bot only sees commands addressed to it (privacy mode).
+  ok(await alice.call('POST', `/api/tele/dialogs/${gd.id}/messages`, { text: `/ping@${botUser} ${RUN}` }), 'ping group');
+  await until('the bot receives the pings', () => botMsgs.some((m) => textOf(m) === `ping ${RUN}`) && botMsgs.some((m) => textOf(m).startsWith('/ping@') && textOf(m).endsWith(RUN)), 30000);
+
   log('The bot writes to Alice and in the group; Alice sees the text and the sender');
-  await bot.invoke({ _: 'createPrivateChat', user_id: meta.userId, force: true });
-  await bot.invoke({ _: 'createBasicGroupChat', basic_group_id: -meta.groupChatId, force: true }).catch(() => {});
   const helloText = `hello alice ${RUN}`;
   await botSend(meta.userId, helloText);
   await botSend(meta.groupChatId, `group hello ${RUN}`);
