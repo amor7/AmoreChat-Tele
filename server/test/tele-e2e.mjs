@@ -273,8 +273,8 @@ async function part1() {
 
   log('The Telegram session on disk is encrypted');
   // Before login TDLib keeps only its binlog, which holds the phone number in plain text unless encrypted.
-  const binlog = path.join(DATA_DIR, 'tele-sessions', '1', 'db', 'td.binlog');
-  await until('session binlog', () => fs.existsSync(binlog) && fs.statSync(binlog).size > 0, 15000, () => fs.readdirSync(path.dirname(binlog)));
+  const binlog = path.join(DATA_DIR, 'tele-sessions', '1', 'db', 'td_test.binlog'); // td.binlog on real Telegram
+  await until('session binlog', () => fs.existsSync(binlog) && fs.statSync(binlog).size > 0, 15000);
   assert.ok(!fs.readFileSync(binlog).includes(Buffer.from(alicePhone)), 'the Telegram session is stored unencrypted (phone number readable)');
 
   log('Server restart: a login left at the code step starts over; the tunnel comes back');

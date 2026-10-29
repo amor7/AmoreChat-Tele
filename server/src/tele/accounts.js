@@ -377,7 +377,7 @@ async function createTdlibClient(row, cred) {
   const dir = row.session_dir || sessionDir(row.id);
   // A new session is encrypted from the start. One from before encryption opens without a key and
   // is encrypted once logged in (TDLib changes the key only for a logged-in session).
-  const exists = fs.existsSync(path.join(dir, 'db', 'td.binlog'));
+  const exists = ['td.binlog', 'td_test.binlog'].some((b) => fs.existsSync(path.join(dir, 'db', b)));
   const encrypted = !exists || !!row.db_encrypted;
   if (!exists) run('UPDATE tele_accounts SET db_encrypted = 1 WHERE id = ?', row.id);
   // tdl 8 connects in createClient (there is no connect()) and answers setTdlibParameters itself.
