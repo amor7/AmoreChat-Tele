@@ -3,7 +3,7 @@
 # Called by install.sh and update.sh; safe to run again.
 set -euo pipefail
 DIR="$(cd "${1:-.}" && pwd)"
-REPO="${AMORECHAT_REPO:-amor7/AmoreChat}"
+REPO="${AMORECHAT_REPO:-amor7/AmoreChat-Tele}"
 cat > /usr/local/bin/amorechat-update <<SCRIPT
 #!/usr/bin/env bash
 # Update AmoreChat in ${DIR}:  sudo amorechat-update [version]

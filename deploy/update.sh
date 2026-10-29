@@ -14,7 +14,7 @@ main() {
 set -euo pipefail
 cd "${AMORECHAT_DIR:-$(dirname "$0")/..}"
 
-REPO="${AMORECHAT_REPO:-amor7/AmoreChat}"
+REPO="${AMORECHAT_REPO:-amor7/AmoreChat-Tele}"
 
 if [ "$(id -u)" -ne 0 ]; then
   echo "Please run with sudo: sudo bash deploy/update.sh [version]"

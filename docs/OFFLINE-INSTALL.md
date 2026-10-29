@@ -35,7 +35,7 @@
 
 ## ۲. دانلود فایل‌ها
 
-از صفحه نسخه‌ها: **https://github.com/amor7/AmoreChat/releases/latest** این فایل‌ها را دانلود کنید:
+از صفحه نسخه‌ها: **https://github.com/amor7/AmoreChat-Tele/releases/latest** این فایل‌ها را دانلود کنید:
 
 | فایل | چیست | لازم؟ |
 |---|---|---|
