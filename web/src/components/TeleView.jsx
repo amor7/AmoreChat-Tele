@@ -29,6 +29,7 @@ export default function TeleView({ dialogId }) {
   const [tab, setTab] = useState('all');
   const [syncing, setSyncing] = useState(false);
   const [picking, setPicking] = useState(false);
+  const phone = usePhoneLayout();
   const showToast = useStore((s) => s.showToast);
 
   const load = () => api('GET', '/tele/status').then(setStatus).catch((e) => showToast(e.message));
@@ -163,7 +164,8 @@ export default function TeleView({ dialogId }) {
         )}
         <ul className="chat-list">
           {!status && <li className="muted center pad">در حال بارگذاری…</li>}
-          {status && !connected && <li className="muted center pad">برای دیدن گفتگوها وارد حساب تلگرام شوید.</li>}
+          {/* On phones only this column is visible until a chat is open, so the login lives here. */}
+          {status && !connected && (phone ? <li><TeleLogin status={status} reload={load} /></li> : <li className="muted center pad">برای دیدن گفتگوها وارد حساب تلگرام شوید.</li>)}
           {connected &&
             list.map((d) =>
               picking ? (
@@ -738,4 +740,18 @@ function TelePhoto({ m }) {
       )}
     </button>
   );
+}
+
+// Phone layout (one column), the same breakpoint as the app's CSS.
+const PHONE_QUERY = '(max-width: 767px)';
+function usePhoneLayout() {
+  const [phone, setPhone] = useState(() => window.matchMedia?.(PHONE_QUERY).matches ?? false);
+  useEffect(() => {
+    const mq = window.matchMedia?.(PHONE_QUERY);
+    if (!mq) return;
+    const on = () => setPhone(mq.matches);
+    mq.addEventListener('change', on);
+    return () => mq.removeEventListener('change', on);
+  }, []);
+  return phone;
 }

@@ -37,7 +37,10 @@ export function requireChat(req, chatId, { allowModerator = false } = {}) {
   const chat = getChat(Number(chatId));
   if (!chat) fail(404, 'گفتگو پیدا نشد');
   const member = getMember(chat.id, req.user.id);
-  if (!member && !(allowModerator && hasSitePerm(req.user, 'manage_chats'))) fail(403, 'شما عضو این گفتگو نیستید');
+  // Site moderators may look into groups, channels and voice chats, never into someone's private
+  // chats or saved messages (a report already shows the reported message itself).
+  const moderated = chat.type !== 'dm' && chat.type !== 'saved';
+  if (!member && !(allowModerator && moderated && hasSitePerm(req.user, 'manage_chats'))) fail(403, 'شما عضو این گفتگو نیستید');
   return { chat, member };
 }
 
