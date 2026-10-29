@@ -62,6 +62,18 @@ await app.register(fastifyStatic, { root: UPLOAD_DIR, serve: false });
 
 app.decorateRequest('user', null);
 
+// Keys no request ever needs: they shadow built-in methods (an object with its own "toString"
+// can't be turned into text) or reach the prototype. Such input is refused outright.
+const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype', 'toString', 'valueOf', 'toJSON', 'hasOwnProperty', 'isPrototypeOf']);
+function badKeys(v, depth = 0) {
+  if (!v || typeof v !== 'object' || depth > 20) return depth > 20;
+  for (const k of Object.keys(v)) if (FORBIDDEN_KEYS.has(k) || badKeys(v[k], depth + 1)) return true;
+  return false;
+}
+app.addHook('preHandler', async (req, reply) => {
+  if (badKeys(req.body) || badKeys(req.query)) return reply.code(400).send({ error: 'درخواست نامعتبر' });
+});
+
 // Banned IPs (admin panel → Security) get nothing but this.
 app.addHook('onRequest', async (req, reply) => {
   if (!isBanned(req.ip)) return;
@@ -100,7 +112,7 @@ app.addHook('onSend', async (req, reply) => {
   reply.header(
     'Content-Security-Policy',
     "default-src 'self'; img-src 'self' blob: data:; media-src 'self' blob:; connect-src 'self' ws: wss: https://amore-share.invalid; " +
-      "style-src 'self' 'unsafe-inline'; font-src 'self' data:; worker-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'",
+      "style-src 'self' 'unsafe-inline'; font-src 'self' data:; worker-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; object-src 'none'; form-action 'self'",
   );
 });
 

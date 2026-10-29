@@ -77,7 +77,8 @@ export default async function folderRoutes(app) {
   });
 
   app.delete('/api/folders/:id', async (req) => {
-    run('DELETE FROM chat_folders WHERE id = ? AND user_id = ?', Number(req.params.id), req.user.id);
+    const r = run('DELETE FROM chat_folders WHERE id = ? AND user_id = ?', Number(req.params.id), req.user.id);
+    if (!r.changes) fail(404, 'پوشه پیدا نشد');
     changed(req.user.id);
     return { ok: true };
   });

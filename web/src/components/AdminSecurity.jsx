@@ -133,7 +133,7 @@ export default function AdminSecurity() {
           </h4>
           <label className="check">
             <input type="checkbox" checked={s.alerts} onChange={(e) => save({ alerts: e.target.checked })} />
-            هشدار در «پیام‌های ذخیره‌شده»: تلاش‌های ناموفق زیاد از یک آی‌پی، ورود مدیر از آی‌پی جدید، تغییر نقش و دسترسی، قفل شدن حساب، بازنشانی رمز توسط مدیر
+            هشدار در «پیام‌های ذخیره‌شده»: تلاش‌های ناموفق زیاد از یک آی‌پی، ورود مدیر از آی‌پی جدید، قفل شدن حساب، و بن آی‌پی یا بازنشانی رمز توسط مدیران دیگر
           </label>
           <div className="inline-form">
             <label className="inline-form">

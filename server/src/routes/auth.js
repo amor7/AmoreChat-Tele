@@ -120,6 +120,8 @@ export default async function authRoutes(app) {
     addMember(ensureEmergencyChannel(), userId, firstUser ? 'owner' : 'member', { silent: true });
     audit(userId, 'user.register', userId, inv ? { invite: inv.code } : '');
 
+    // Where the account was made counts as a known place (a later login from elsewhere is "new").
+    noteLogin(get('SELECT * FROM users WHERE id = ?', userId), req.ip, deviceName(req.headers['user-agent']));
     reply.setCookie(SESSION_COOKIE, createSession(userId, req.headers['user-agent'], req.ip), cookieOptions(req));
     return { user: selfUser(get('SELECT * FROM users WHERE id = ?', userId)) };
   });
@@ -130,6 +132,7 @@ export default async function authRoutes(app) {
     const { username, password } = req.body || {};
     const user = get('SELECT * FROM users WHERE username = ?', String(username || ''));
     if (user?.locked_until && user.locked_until > now()) {
+      noteLoginFailure(req.ip, username);
       const mins = Math.ceil((user.locked_until - now()) / 60000);
       fail(429, `به خاطر تلاش‌های ناموفق زیاد، ورود به این حساب ${mins} دقیقه قفل است`);
     }
