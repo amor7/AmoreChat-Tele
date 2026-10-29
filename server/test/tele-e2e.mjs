@@ -510,7 +510,7 @@ async function uiChecks({ alice, bob, pd, gd, meta, photoMsg, helloText, botSend
       await page.setCookie({ name, value, url: BASE });
       await page.goto(`${BASE}/${hash}`, { waitUntil: 'networkidle0' });
     };
-    const texts = (sel) => page.$eval(sel, (els) => els.map((e) => e.textContent));
+    const texts = (sel) => page.$$eval(sel, (els) => els.map((e) => e.textContent));
     const waitText = (sel, text, ms = 20000) => page.waitForFunction((sel, text) => [...document.querySelectorAll(sel)].some((e) => e.textContent.includes(text)), { timeout: ms }, sel, text);
     const countText = (text) => page.$$eval('.tele-chat .msg-row .text', (els, t) => els.filter((e) => e.textContent.trim() === t).length, text);
     const shot = async (name) => {
