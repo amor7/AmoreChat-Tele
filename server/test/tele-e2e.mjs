@@ -439,8 +439,15 @@ async function part2() {
   assert.ok(r.live);
 
   log('The saved session (from before encryption) is now stored encrypted');
-  assert.equal(sqliteHeader(path.join(SESSION_DIR, 'db', 'db.sqlite')), PLAIN_SQLITE, 'the test session should start unencrypted');
-  await until('encrypted', () => sqliteHeader(path.join(DATA_DIR, 'tele-sessions', '1', 'db', 'db.sqlite')) !== PLAIN_SQLITE, 15000);
+  // An unencrypted binlog has the account's phone number in plain text; once encrypted it is gone.
+  const phoneBytes = Buffer.from(String(process.env.TG_TEST_PHONE).replace(/D/g, ''));
+  const oldBin = fs.readFileSync(path.join(SESSION_DIR, 'db', 'td.binlog'));
+  console.log(`  (the saved, unencrypted session shows the phone number: ${oldBin.includes(phoneBytes)})`);
+  const newBinFile = path.join(DATA_DIR, 'tele-sessions', '1', 'db', 'td.binlog');
+  await until('session re-encrypted', () => {
+    const b = fs.readFileSync(newBinFile);
+    return !b.includes(phoneBytes) && !b.equals(oldBin);
+  }, 20000);
 
   log('"Add a chat" lists the bot chat and the group; nothing is selected on its own');
   const { pd, gd } = await until('bot chat and group in the list', async () => {
