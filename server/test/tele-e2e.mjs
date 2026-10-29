@@ -120,13 +120,13 @@ function client() {
     const res = await fetch(BASE + url, { method, headers: h, body: form || (body && JSON.stringify(body)) });
     const set = res.headers.get('set-cookie');
     if (set) cookie = set.split(';')[0];
-    if (/^image\//.test(res.headers.get('content-type') || '')) return { status: res.status, bytes: Buffer.from(await res.arrayBuffer()), type: res.headers.get('content-type') };
-    return { status: res.status, ...(await res.json().catch(() => ({}))) };
+    if (/^image\//.test(res.headers.get('content-type') || '')) return { http: res.status, bytes: Buffer.from(await res.arrayBuffer()), type: res.headers.get('content-type') };
+    return { ...(await res.json().catch(() => ({}))), http: res.status };
   }
   return { call };
 }
 const ok = (r, what) => {
-  assert.ok(r.status >= 200 && r.status < 300, `${what}: ${r.status} ${r.error || JSON.stringify(r).slice(0, 300)}`);
+  assert.ok(r.http >= 200 && r.http < 300, `${what}: ${r.http} ${r.error || JSON.stringify(r).slice(0, 300)}`);
   return r;
 };
 
@@ -264,14 +264,14 @@ try {
 
   log('Fail closed: no proxy → no login (and nothing sent directly)');
   let r = await alice.call('POST', '/api/tele/login/phone', { phone: alicePhone });
-  assert.equal(r.status, 503, JSON.stringify(r));
+  assert.equal(r.http, 503, JSON.stringify(r));
   assert.match(r.error, /تونل/);
   r = await alice.call('GET', '/api/tele/status');
   assert.equal(r.account?.status ?? 'disconnected', 'disconnected', 'a failed login must not leave the code step');
 
   log('A non-admin cannot manage proxies');
   r = await alice.call('GET', '/api/admin/tele/proxies');
-  assert.equal(r.status, 403);
+  assert.equal(r.http, 403);
 
   log('Admin adds a dead proxy (priority 1) and the working one (priority 5), tests them');
   r = ok(await owner.call('POST', '/api/admin/tele/proxies', { links: `socks5://127.0.0.1:1`, name: 'dead', priority: 1 }), 'add dead proxy');
@@ -300,7 +300,7 @@ try {
   assert.equal(r.status, 'code_required', JSON.stringify(r));
   assert.ok(socksStats.connections > viaProxyBefore, 'TDLib must reach Telegram through the proxy');
   r = await alice.call('POST', '/api/tele/login/code', { code: '0'.repeat(codeLength) });
-  assert.equal(r.status, 400, JSON.stringify(r));
+  assert.equal(r.http, 400, JSON.stringify(r));
   r = ok(await alice.call('GET', '/api/tele/status'), 'alice status');
   assert.equal(r.account.status, 'awaiting_code', 'a wrong code keeps the code step');
   assert.ok(!r.account.phone.includes(alicePhone.slice(4, 8)), 'phone must be masked');
@@ -320,14 +320,14 @@ try {
     r = ok(await alice.call('GET', '/api/tele/status'), 'status after restart');
     assert.equal(r.account.status, 'disconnected');
     r = await alice.call('POST', '/api/tele/login/code', { code: '1'.repeat(codeLength) });
-    assert.equal(r.status, 409, JSON.stringify(r));
+    assert.equal(r.http, 409, JSON.stringify(r));
     await until('tunnel back after restart', async () => (await owner.call('GET', '/api/admin/tele/proxies')).egress?.running, 30000);
 
     log('Proxy turned off: the tunnel stops and login is refused (nothing goes out directly)');
     ok(await owner.call('PATCH', `/api/admin/tele/proxies/${goodId}`, { enabled: false }), 'disable proxy');
     await until('tunnel stopped', async () => !(await owner.call('GET', '/api/admin/tele/proxies')).egress.running, 20000);
     r = await alice.call('POST', '/api/tele/login/phone', { phone: alicePhone });
-    assert.equal(r.status, 503, JSON.stringify(r));
+    assert.equal(r.http, 503, JSON.stringify(r));
     r = ok(await alice.call('GET', '/api/tele/status'), 'status');
     assert.equal(r.account.status, 'disconnected');
     assert.equal(r.runtime.egress.running, false);
@@ -432,13 +432,13 @@ try {
     r = ok(await alice.call('GET', `/api/tele/dialogs/${pd.id}/search?q=zebra-42`), 'search');
     assert.equal(r.messages.length, 1);
     r = await alice.call('GET', `/api/tele/dialogs/${pd.id}/search?q=z`);
-    assert.equal(r.status, 400);
+    assert.equal(r.http, 400);
 
     log('Users cannot reach each other\'s chats');
     r = await bob.call('GET', `/api/tele/dialogs/${pd.id}/messages`);
-    assert.equal(r.status, 404);
+    assert.equal(r.http, 404);
     r = await bob.call('POST', `/api/tele/dialogs/${pd.id}/messages`, { text: 'x' });
-    assert.equal(r.status, 404);
+    assert.equal(r.http, 404);
 
     log('A removed chat stays removed after refreshing');
     ok(await alice.call('PATCH', `/api/tele/dialogs/${gd.id}`, { selected: false }), 'deselect');
@@ -462,30 +462,30 @@ try {
     const photoMsg = r.messages.find((m) => m.photo && /photo caption 55/.test(m.text));
     assert.ok(photoMsg.photo.w > 0);
     r = await alice.call('GET', `/api/tele/messages/${photoMsg.id}/photo`);
-    assert.equal(r.status, 403, 'photo allowed before the admin allowed it');
+    assert.equal(r.http, 403, 'photo allowed before the admin allowed it');
     const accounts = ok(await owner.call('GET', '/api/admin/tele/accounts'), 'accounts').accounts;
     const aliceAcc = accounts.find((a) => a.username === 'alice');
     ok(await owner.call('PATCH', `/api/admin/tele/accounts/${aliceAcc.id}`, { allowMedia: true }), 'allow media');
     r = await alice.call('GET', `/api/tele/messages/${photoMsg.id}/photo`);
-    assert.equal(r.status, 200, JSON.stringify(r).slice(0, 300));
+    assert.equal(r.http, 200, JSON.stringify(r).slice(0, 300));
     assert.ok(r.bytes.length > 1000 && /^image\//.test(r.type));
     r = await bob.call('GET', `/api/tele/messages/${photoMsg.id}/photo`);
-    assert.ok([403, 404].includes(r.status));
+    assert.ok([403, 404].includes(r.http));
 
     log('Alice sends a photo; Bob may not');
     const form = new FormData();
     form.append('file', new Blob([png(200, 200, 200)], { type: 'image/png' }), 'a.png');
     r = await alice.call('POST', `/api/tele/dialogs/${pd.id}/photo?caption=${encodeURIComponent('from alice 909')}`, null, { form });
-    assert.equal(r.status, 201, JSON.stringify(r));
+    assert.equal(r.http, 201, JSON.stringify(r));
     await until('charlie receives the photo', () => charlieMsgs.find((m) => m.content?._ === 'messagePhoto' && textOf(m) === 'from alice 909'), 60000);
     const form2 = new FormData();
     form2.append('file', new Blob([png(50, 50, 1)], { type: 'image/png' }), 'b.png');
     r = await bob.call('POST', `/api/tele/dialogs/${bobDialogs.id}/photo`, null, { form: form2 });
-    assert.equal(r.status, 403);
+    assert.equal(r.http, 403);
     const form3 = new FormData();
     form3.append('file', new Blob(['not an image'], { type: 'text/plain' }), 'c.txt');
     r = await alice.call('POST', `/api/tele/dialogs/${pd.id}/photo`, null, { form: form3 });
-    assert.equal(r.status, 400);
+    assert.equal(r.http, 400);
 
     log('Server restart: the account reconnects from its saved session');
     await stopServer();
@@ -507,7 +507,7 @@ try {
     r = ok(await dave.call('GET', '/api/tele/status'), 'dave status');
     assert.equal(r.account.status, 'disconnected');
     r = await dave.call('POST', '/api/tele/login/code', { code: code() });
-    assert.equal(r.status, 409);
+    assert.equal(r.http, 409);
 
     log('Proxy turned off: Telegram waits; nothing goes out directly');
     ok(await owner.call('PATCH', `/api/admin/tele/proxies/${goodId}`, { enabled: false }), 'disable proxy');
@@ -516,7 +516,7 @@ try {
       return !x.egress.running && x;
     }, 20000);
     r = await alice.call('POST', `/api/tele/dialogs/${pd.id}/messages`, { text: 'must not be sent 000' });
-    assert.ok(r.status >= 400, `sent without a proxy: ${JSON.stringify(r)}`);
+    assert.ok(r.http >= 400, `sent without a proxy: ${JSON.stringify(r)}`);
     r = ok(await alice.call('GET', `/api/tele/dialogs/${pd.id}/messages`), 'stored messages without proxy');
     assert.ok(r.messages.length > 0, 'stored messages are still shown');
     ok(await owner.call('PATCH', `/api/admin/tele/proxies/${goodId}`, { enabled: true }), 'enable proxy');
