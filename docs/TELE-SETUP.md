@@ -23,6 +23,8 @@
 
 ## فرمت‌های پروکسی (پنل مدیریت ← Tele / VPN)
 
+دو راه: **فرم دستی** برای هر نوع (یوزر/پسورد SOCKS و HTTP اختیاری) یا **چسباندن** لینک/کانفیگ:
+
 | نوع | ورودی |
 |---|---|
 | WireGuard | کل فایل `.conf` همان‌طور که هست (PresharedKey، MTU، چند Peer)؛ چند فایل پشت سر هم = چند پروکسی |
@@ -32,7 +34,9 @@
 | Shadowsocks | `ss://…` (SIP002 و قدیمی، با plugin) |
 | Hysteria2 | `hy2://…` یا `hysteria2://…` (با obfs) |
 | TUIC | `tuic://…` |
-| SOCKS5 / HTTP | `socks5://user:pass@host:port`، `http://…`، `https://…` |
+| SOCKS5 | `socks5://USER:PASS@IP:PORT`، بدون رمز `socks5://IP:PORT`؛ قالب فروشنده‌ها `IP:PORT:USER:PASS` و `socks5://IP:PORT@USER:PASS` هم خودکار مرتب می‌شود |
+| SOCKS4 / 4a | `socks4://IP:PORT`، `socks4a://IP:PORT` (بدون پسورد) |
+| HTTP / HTTPS | `http://USER:PASS@IP:PORT`، `https://…` (CONNECT) |
 | اشتراک | متن base64 لینک اشتراک |
 | JSON | یک outbound/endpoint sing-box یا کل فایل کانفیگ |
 

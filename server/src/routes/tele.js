@@ -2,7 +2,7 @@ import { hasSitePerm } from '../perms.js';
 import { fail, audit } from '../chats.js';
 import { listProxies, getProxy, createProxy, updateProxy, deleteProxy, getRoutePolicy, setRoutePolicy, publicProxy, PROTOCOL_HINTS, ROUTE_MODES } from '../tele/proxies.js';
 import { probeViaEgress, probeAll, egressStatus, ensureEgress, stopEgress, refreshEgress, liveTunnelError } from '../tele/egress.js';
-import { splitConfigs } from '../tele/uri.js';
+import { splitConfigs, outboundFromForm } from '../tele/uri.js';
 import { beginLogin, submitCode, submitPassword, disconnectAccount, getAccountForUser, publicAccount, listDialogs, setDialogSelected, teleRuntimeInfo, clearStaleLogin, isLive, trafficOf } from '../tele/accounts.js';
 import fs from 'node:fs';
 import { pipeline } from 'node:stream/promises';
@@ -11,6 +11,8 @@ import { settingNumber, setSetting } from '../settings.js';
 import { syncDialogMessages, sendTeleMessage, sendTelePhoto, telePhotoFile, newUploadPath, mediaMaxBytes, refreshDialogsFromTelegram, listStoredMessages, publicMessages, searchDialogMessages } from '../tele/messages.js';
 
 const loginLimit = { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } };
+// Each of these costs the server's VPN traffic (and too many sends get a Telegram account limited).
+const limit = (max) => ({ config: { rateLimit: { max, timeWindow: '1 minute' } } });
 
 const needTeleAdmin = (req) => {
   if (!hasSitePerm(req.user, 'manage_settings') && req.user.role !== 'owner') fail(403, 'دسترسی ندارید');
@@ -35,6 +37,15 @@ export default async function teleRoutes(app) {
   app.post('/api/admin/tele/proxies', async (req) => {
     needTeleAdmin(req);
     const b = req.body || {};
+    // The manual form: fields → a checked sing-box outbound, stored as JSON.
+    if (b.form && typeof b.form === 'object') {
+      const out = outboundFromForm(b.form);
+      const protocol = { socks5: 'socks5', socks4: 'socks4', socks4a: 'socks4', shadowsocks: 'ss' }[b.form.type] || b.form.type;
+      const name = String(b.name || '').trim() || `${b.form.type} ${out.server || out.peers?.[0]?.address}:${out.server_port || out.peers?.[0]?.port}`;
+      const proxy = createProxy({ name, config: JSON.stringify(out), protocol, priority: b.priority, enabled: b.enabled !== false });
+      audit(req.user.id, 'tele.proxy.create', proxy.id, { form: b.form.type });
+      return { proxies: [proxy], proxy, errors: [] };
+    }
     // Several configs at once: share links one per line, WireGuard .conf / JSON kept whole.
     const configs = typeof b.links === 'string' && b.links.trim() ? splitConfigs(b.links) : [b.config || b.link || b.url];
     if (!configs.length || !configs[0]) fail(400, 'کانفیگی پیدا نشد');
@@ -104,7 +115,7 @@ export default async function teleRoutes(app) {
     if (!account) fail(400, 'حساب وصل نیست');
     return { dialogs: setDialogSelected(account.id, req.params.id, req.body?.selected !== false) };
   });
-  app.post('/api/tele/dialogs/refresh', async (req) => refreshDialogsFromTelegram(req.user.id, { all: !!req.body?.all }));
+  app.post('/api/tele/dialogs/refresh', limit(12), async (req) => refreshDialogsFromTelegram(req.user.id, { all: !!req.body?.all }));
   app.get('/api/tele/dialogs/:id/messages', async (req) => {
     const account = getAccountForUser(req.user.id);
     if (!account) fail(400, 'حساب وصل نیست');
@@ -118,13 +129,13 @@ export default async function teleRoutes(app) {
       return { messages: publicMessages(listStoredMessages(account.id, Number(req.params.id), { beforeTgId: before })), notice: e.message };
     }
   });
-  app.get('/api/tele/dialogs/:id/search', async (req) => searchDialogMessages(req.user.id, req.params.id, req.query?.q));
-  app.post('/api/tele/dialogs/:id/messages', async (req) => {
+  app.get('/api/tele/dialogs/:id/search', limit(20), async (req) => searchDialogMessages(req.user.id, req.params.id, req.query?.q));
+  app.post('/api/tele/dialogs/:id/messages', limit(30), async (req) => {
     return { message: await sendTeleMessage(req.user.id, req.params.id, req.body?.text, Number(req.body?.replyTo) || null) };
   });
 
   // ---------- Photos (only for accounts an admin allowed) ----------
-  app.post('/api/tele/dialogs/:id/photo', async (req, reply) => {
+  app.post('/api/tele/dialogs/:id/photo', limit(10), async (req, reply) => {
     const account = getAccountForUser(req.user.id);
     if (!account?.allow_media) fail(403, 'دسترسی به عکس‌های تلگرام برای شما فعال نیست');
     const part = await req.file({ limits: { fileSize: mediaMaxBytes(), files: 1 } });
@@ -144,7 +155,7 @@ export default async function teleRoutes(app) {
     reply.code(201);
     return { message: await sendTelePhoto(req.user.id, req.params.id, file, { caption: req.query?.caption, replyTo: Number(req.query?.replyTo) || null }) };
   });
-  app.get('/api/tele/messages/:id/photo', async (req, reply) => {
+  app.get('/api/tele/messages/:id/photo', limit(60), async (req, reply) => {
     const file = await telePhotoFile(req.user.id, req.params.id);
     reply.header('cache-control', 'private, max-age=86400');
     reply.type(/\.png$/i.test(file) ? 'image/png' : /\.webp$/i.test(file) ? 'image/webp' : 'image/jpeg');

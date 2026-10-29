@@ -24,6 +24,8 @@ import { rtcEnabled } from '../livekit.js';
 const VERSION = JSON.parse(readFileSync(new URL('../../../package.json', import.meta.url), 'utf8')).version;
 
 const authLimit = { rateLimit: { max: 10, timeWindow: '1 minute' } };
+// A real scrypt hash of a random password (made once at start), for logins with unknown usernames.
+const DUMMY_HASH = await hashPassword(randomCode(16));
 
 // Lock an account for 15 minutes after 10 wrong passwords/codes in a row (on top of the
 // per-IP rate limit), so guessing a password from many IPs doesn't work either.
@@ -129,7 +131,9 @@ export default async function authRoutes(app) {
       const mins = Math.ceil((user.locked_until - now()) / 60000);
       fail(429, `به خاطر تلاش‌های ناموفق زیاد، ورود به این حساب ${mins} دقیقه قفل است`);
     }
-    if (!user || !(await verifyPassword(String(password || ''), user.password_hash))) {
+    // Unknown usernames are checked against a dummy hash too: the same response time either way,
+    // so timing doesn't tell which usernames exist.
+    if (!(await verifyPassword(String(password || ''), user?.password_hash || DUMMY_HASH)) || !user) {
       if (user) noteFailedLogin(user, req);
       fail(401, 'نام کاربری یا رمز عبور اشتباه است');
     }

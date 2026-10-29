@@ -1,5 +1,11 @@
 # AmoreChat-Tele Changelog
 
+## [1.0.8] — 2026-10-29
+
+- فرم دستی (`TeleProxyForm.jsx`) → `outboundFromForm()` با اعتبارسنجی همه فیلدها؛ ذخیره به‌صورت JSON sing-box
+- SOCKS4/4a با `version: '4' | '4a'`؛ `normalizeProxyLink()` برای `IP:PORT:USER:PASS` و `IP:PORT@USER:PASS`؛ بررسی بازه پورت
+- rate limit برای مسیرهای ارسال/عکس/جستجو/refresh تلگرام؛ زمان ثابت ورود با `DUMMY_HASH`
+
 ## [1.0.7] — 2026-10-29
 
 ### پروکسی

@@ -1121,3 +1121,60 @@ body:has(.room-view, .call-view) .toast {
   display: block;
   margin-top: 4px;
 }
+.tele-add {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.tele-add-tabs {
+  display: flex;
+  gap: 6px;
+}
+.tele-add-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 16px;
+  border: 1px solid var(--border);
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+}
+.tele-add-tabs button.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.tele-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 8px 12px;
+}
+.tele-fields label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 13px;
+}
+.tele-fields label.check {
+  flex-direction: row;
+  align-items: center;
+}
+.tele-req {
+  color: var(--danger, #d33);
+}
+.tele-guide table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+.tele-guide td {
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+.tele-guide code {
+  word-break: break-all;
+}
