@@ -13,6 +13,18 @@ RUN apt-get update \
   && apt-get install -y --no-install-recommends ffmpeg tini ca-certificates wget \
   && rm -rf /var/lib/apt/lists/* \
   && mkdir /data && chown node:node /data
+# sing-box: the tunnel that carries only Telegram traffic through the admin's proxy. Bundled (and
+# checksum-verified) so offline servers have it; SING_BOX_PATH or data/bin/sing-box can override it.
+ARG SING_BOX_VERSION=1.14.4
+ARG TARGETARCH=amd64
+RUN set -e; case "$TARGETARCH" in \
+    amd64) sum=699a1b510aa4396b2176d32d1181920399ebf1e267835da6f3b598d0f7c24968 ;; \
+    arm64) sum=436441f76ee2f7fe21b5b2d426d3cb261a480455a704865789ad533e4273ec26 ;; \
+    *) echo "no sing-box for $TARGETARCH"; exit 1 ;; esac; \
+  wget -qO /tmp/sb.tgz "https://github.com/SagerNet/sing-box/releases/download/v${SING_BOX_VERSION}/sing-box-${SING_BOX_VERSION}-linux-${TARGETARCH}.tar.gz"; \
+  echo "$sum  /tmp/sb.tgz" | sha256sum -c -; \
+  tar xzf /tmp/sb.tgz -C /tmp; install -m 755 /tmp/sing-box-*/sing-box /usr/local/bin/sing-box; \
+  rm -rf /tmp/sb.tgz /tmp/sing-box-*; sing-box version
 WORKDIR /app
 COPY --from=build /app/package.json /app/CHANGELOG.md ./
 COPY --from=build /app/node_modules ./node_modules

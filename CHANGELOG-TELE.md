@@ -1,5 +1,21 @@
 # AmoreChat-Tele Changelog
 
+## [1.0.7] — 2026-10-29
+
+### پروکسی
+- تست واقعی: SOCKS5 CONNECT از sing-box جدا به دیتاسنتر تلگرام (149.154.167.51/91، 149.154.175.53 پورت 80) و زمان تا اولین پاسخ
+- `tele_health_auto` + `tele_health_interval_sec` (۱ دقیقه تا ۱ روز)، `probeAll()` و `POST /api/admin/tele/proxies/probe-all`؛ failover بعد از هر دور
+- `selectActiveProxy({ currentId })`: best بر اساس تأخیر با hysteresis (۵۰ms و ۲۰٪)، random چسبنده
+- `splitConfigs()`: WireGuard/JSON کامل، اشتراک base64؛ `nameOfConfig()`؛ اعتبارسنجی هنگام ایجاد/ویرایش
+- WireGuard به‌صورت endpoint برای sing-box ≥ 1.11 (و outbound برای قدیمی‌تر)، DNS `local` برای ≥ 1.12؛ نسخه sing-box در وضعیت
+- sing-box 1.14.4 در `Dockerfile` و `Dockerfile.runtime` با sha256
+
+### امنیت
+- allowlist نوع outbound؛ حذف پروکسی‌های دیگر از TDLib (`getProxies`/`removeProxy`)
+- `/api/tele/status` برای غیرمدیر فقط `running`
+- فایل‌های 0600 / پوشه‌های 0700، `.env` 600؛ rate limit ورود؛ audit برای update/delete پروکسی
+- mutex برای start/stop تونل؛ پورت آزاد تصادفی برای تست
+
 ## [1.0.6] — 2026-10-29
 
 ### رفع اشکال

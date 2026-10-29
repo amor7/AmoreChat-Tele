@@ -103,7 +103,7 @@ export function teleRuntimeInfo() {
 }
 function sessionDir(accountId) {
   const dir = path.join(SESSIONS_ROOT, String(accountId));
-  fs.mkdirSync(dir, { recursive: true });
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 }); // the Telegram session (auth keys): this user only
   return dir;
 }
 export function getAccountForUser(userId) { return get('SELECT * FROM tele_accounts WHERE user_id = ?', userId); }
@@ -298,6 +298,23 @@ async function saveData(client) {
 // aborts the login. Newer TDLib takes addProxy(proxy, enable, comment), older addProxy(server, port, enable, type).
 async function useProxy(client, socks) {
   const type = { _: 'proxyTypeSocks5', username: '', password: '' };
+  // The session database keeps proxies: reuse ours instead of adding a copy on every open, and
+  // drop any other proxy so TDLib can never pick one that bypasses the tunnel.
+  try {
+    const { proxies = [] } = await client.invoke({ _: 'getProxies' });
+    let ours = null;
+    for (const p of proxies) {
+      const pr = p.proxy || p;
+      if (!ours && pr.server === socks.host && pr.port === socks.port && pr.type?._ === 'proxyTypeSocks5') ours = p;
+      else await client.invoke({ _: 'removeProxy', proxy_id: p.id }).catch(() => {});
+    }
+    if (ours) {
+      await client.invoke({ _: 'enableProxy', proxy_id: ours.id });
+      return;
+    }
+  } catch {
+    /* older TDLib: just add it below */
+  }
   try {
     await client.invoke({ _: 'addProxy', proxy: { _: 'proxy', server: socks.host, port: socks.port, type }, enable: true, comment: 'AmoreChat egress' });
   } catch (e) {
