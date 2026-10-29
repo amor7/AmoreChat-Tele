@@ -574,8 +574,8 @@ async function uiChecks({ alice, bob, pd, gd, meta, photoMsg, helloText, botSend
     await page.click('button[aria-label="جستجو در این گفتگو"]');
     await page.type('.tele-search input', `hello alice ${RUN}`);
     await page.keyboard.press('Enter');
-    await waitText('.tele-chat .msg-row .text', helloText);
-    assert.equal((await texts('.tele-chat .msg-row .text')).length, 1);
+    await waitText('.tele-chat .day-sep', 'نتیجه');
+    assert.deepEqual(await texts('.tele-chat .msg-row .text'), [helloText]);
     await page.click('button[aria-label="بستن جستجو"]');
     await page.waitForSelector('.tele-chat textarea');
 
