@@ -1075,10 +1075,16 @@ async function part3() {
     return x.dialogs.find((d) => Number(d.tgChatId) === meta.channelChatId);
   });
   assert.equal(r.kind, 'channel');
-  const sg = -meta.channelChatId - 1000000000000;
-  await bot.invoke({ _: 'createSupergroupChat', supergroup_id: sg, force: true }).catch(() => {});
-  const post = (content) => bot.invoke({ _: 'sendMessage', chat_id: meta.channelChatId, input_message_content: content });
-  const text = (t) => ({ _: 'inputMessageText', text: { _: 'formattedText', text: t } });
+  // The account made the channel, so it posts there itself (through the app, as a user would).
+  const channelDialog = r;
+  ok(await owner.call('PATCH', `/api/tele/dialogs/${channelDialog.id}`, { selected: true }), 'add the channel');
+  const ownerAcc = ok(await owner.call('GET', '/api/admin/tele/accounts'), 'accounts').accounts.find((a) => a.username === 'owner');
+  ok(await owner.call('PATCH', `/api/admin/tele/accounts/${ownerAcc.id}`, { allowMedia: true }), 'photos for the owner');
+  const postText = async (t) => ok(await owner.call('POST', `/api/tele/dialogs/${channelDialog.id}/messages`, { text: t }), 'post in the channel');
+  const postPhoto = async (buf, caption) => {
+    const x = await owner.call('POST', `/api/tele/dialogs/${channelDialog.id}/photo?caption=${encodeURIComponent(caption)}`, null, { form: photoForm(buf) });
+    assert.equal(x.http, 201, JSON.stringify(x));
+  };
 
   log('Only the owner manages mirrors; bad requests are refused');
   r = await alice.call('GET', '/api/admin/tele/mirrors');
@@ -1097,11 +1103,9 @@ async function part3() {
   const mirror = r.mirror;
   r = await owner.call('POST', '/api/admin/tele/mirrors', { tgChatId: String(meta.channelChatId) });
   assert.equal(r.http, 400, 'the same channel added twice');
-  const pngFile = path.join(os.tmpdir(), `news-${RUN}.png`);
-  fs.writeFileSync(pngFile, png(200, 150, 33));
-  await post(text(`news one ${RUN}`));
-  await post({ _: 'inputMessagePhoto', photo: { _: 'inputPhoto', photo: { _: 'inputFileLocal', path: pngFile }, width: 200, height: 150 }, caption: { _: 'formattedText', text: `news photo ${RUN}` } });
-  await post(text(`news two ${RUN}`));
+  await postText(`news one ${RUN}`);
+  await postPhoto(png(200, 150, 33), `news photo ${RUN}`);
+  await postText(`news two ${RUN}`);
   const appMsgs = async () => ok(await owner.call('GET', `/api/chats/${mirror.chatId}/messages?limit=100`), 'app channel').messages;
   await until('posts in the app channel', async () => {
     await owner.call('POST', '/api/admin/tele/mirrors/run', {});
@@ -1124,7 +1128,7 @@ async function part3() {
 
   log('Paused: nothing is copied; resumed: it catches up');
   ok(await owner.call('PATCH', `/api/admin/tele/mirrors/${mirror.id}`, { enabled: false }), 'pause');
-  await post(text(`news three ${RUN}`));
+  await postText(`news three ${RUN}`);
   await sleep(3000);
   ok(await owner.call('POST', '/api/admin/tele/mirrors/run', {}), 'run while paused');
   assert.ok(!(await appMsgs()).some((x) => x.text === `news three ${RUN}`), 'copied while paused');
