@@ -160,7 +160,28 @@ async function storeTdMessages(client, accountId, dialogId, messages) {
 // stored row to the final id, so the message is not shown twice (temporary + final copy).
 // Confirmations that arrived before the temporary row was stored, applied right after storing it.
 const early = new Map();
-onTeleUpdate((accountId, u) => applySent(accountId, u));
+onTeleUpdate((accountId, u) => {
+  applySent(accountId, u);
+  applyChange(accountId, u);
+});
+
+// Deleted and edited in Telegram (by anyone): the same here, for the chats that are stored.
+function applyChange(accountId, u) {
+  if (u._ !== 'updateDeleteMessages' && u._ !== 'updateMessageContent') return;
+  const dialog = get('SELECT id FROM tele_dialogs WHERE account_id = ? AND tg_chat_id = ?', accountId, String(u.chat_id));
+  if (!dialog) return;
+  if (u._ === 'updateDeleteMessages') {
+    // from_cache: TDLib only dropped its local copy; the message still exists.
+    if (!u.is_permanent || u.from_cache || !u.message_ids?.length) return;
+    run(`DELETE FROM tele_messages WHERE account_id = ? AND dialog_id = ? AND tg_msg_id IN (${u.message_ids.map(() => '?').join(',')})`, accountId, dialog.id, ...u.message_ids);
+    return;
+  }
+  const media = photoInfo(u.new_content);
+  run(
+    'UPDATE tele_messages SET text = ?, kind = ?, media = COALESCE(?, media) WHERE account_id = ? AND dialog_id = ? AND tg_msg_id = ?',
+    contentText(u.new_content).slice(0, 8000), kindOf(u.new_content), media ? JSON.stringify(media) : null, accountId, dialog.id, u.message_id,
+  );
+}
 function applySent(accountId, u) {
   if (u._ !== 'updateMessageSendSucceeded' && u._ !== 'updateMessageSendFailed') return;
   const temp = get('SELECT * FROM tele_messages WHERE account_id = ? AND tg_msg_id = ?', accountId, u.old_message_id);
