@@ -173,28 +173,66 @@ const tdl = await import('tdl');
 const { getTdjson } = await import('prebuilt-tdlib');
 tdl.configure({ tdjson: getTdjson(), verbosityLevel: 1 });
 const rand4 = () => String(Math.floor(1000 + Math.random() * 9000));
-const DC = 2;
-// The login code is the DC digit repeated as many times as the code is long (Telegram says how long).
+// Test numbers are 99966 + DC digit + 4 digits; the login code is the DC digit repeated (as long
+// as Telegram says). The DC that works is found with the helper account and used for everyone.
+let DC = 2;
 let codeLength = 5;
 const code = () => String(DC).repeat(codeLength);
 const phone = () => `99966${DC}${rand4()}`;
-const charliePhone = phone();
-const alicePhone = phone();
-const bobPhone = phone();
 
-const charlieDir = path.join(DATA_DIR, 'charlie');
-const charlie = tdl.createClient({ apiId: API_ID, apiHash: API_HASH, databaseDirectory: path.join(charlieDir, 'db'), filesDirectory: path.join(charlieDir, 'files'), useTestDc: true });
-charlie.on('error', (e) => console.warn('[charlie]', e?.message || e));
 const charlieMsgs = [];
-charlie.on('update', (u) => {
-  if (u._ === 'updateNewMessage') charlieMsgs.push(u.message);
-  if (u._ === 'updateAuthorizationState') {
-    console.log('  [charlie]', u.authorization_state._);
-    const len = u.authorization_state.code_info?.type?.length;
-    if (len) codeLength = len;
+let charlie = null;
+function helperClient(dir) {
+  const c = tdl.createClient({ apiId: API_ID, apiHash: API_HASH, databaseDirectory: path.join(dir, 'db'), filesDirectory: path.join(dir, 'files'), useTestDc: true });
+  c.on('error', (e) => console.warn('[charlie]', e?.message || e));
+  c.on('update', (u) => {
+    if (u._ === 'updateNewMessage') charlieMsgs.push(u.message);
+    if (u._ === 'updateAuthorizationState') {
+      const st = u.authorization_state;
+      console.log('  [charlie]', st._, st.code_info ? JSON.stringify({ type: st.code_info.type, next: st.code_info.next_type?._ }) : '');
+      if (st.code_info?.type?.length) codeLength = st.code_info.type.length;
+    }
+    if (u._ === 'updateConnectionState') console.log('  [charlie]', u.state._);
+  });
+  return c;
+}
+async function loginHelper() {
+  const errors = [];
+  for (const dc of [2, 1, 3]) {
+    DC = dc;
+    const number = phone();
+    const c = helperClient(path.join(DATA_DIR, `charlie-dc${dc}`));
+    try {
+      await within(
+        c.login(() => ({
+          getPhoneNumber: async (retry) => {
+            if (retry) throw new Error('phone number refused');
+            return number;
+          },
+          getAuthCode: async (retry) => {
+            if (retry) throw new Error(`code ${code()} refused`);
+            return code();
+          },
+          getName: async () => ({ firstName: 'Charlie', lastName: 'Helper' }),
+          getEmailAddress: async () => {
+            throw new Error('the test server asks for an email address');
+          },
+          confirmOnAnotherDevice: () => {
+            throw new Error('the test server asks for a QR login');
+          },
+        })),
+        90000,
+        'Charlie login',
+      );
+      console.log(`  [charlie] logged in on test DC ${dc}`);
+      return c;
+    } catch (e) {
+      errors.push(`DC ${dc}: ${e.message}`);
+      await c.close().catch(() => {});
+    }
   }
-  if (u._ === 'updateConnectionState') console.log('  [charlie]', u.state._);
-});
+  throw new Error(errors.join(' · '));
+}
 // Nothing may hang the job: give up with the step it was on.
 setTimeout(() => {
   console.error(`
@@ -212,27 +250,9 @@ try {
   fs.writeFileSync(LOG, '');
 
   log('Charlie logs in to the Telegram test servers');
-  await within(
-    charlie.login(() => ({
-      getPhoneNumber: async (retry) => {
-        if (retry) throw new Error('phone number refused');
-        return charliePhone;
-      },
-      getAuthCode: async (retry) => {
-        if (retry) throw new Error(`code ${code()} refused`);
-        return code();
-      },
-      getName: async () => ({ firstName: 'Charlie', lastName: 'Helper' }),
-      getEmailAddress: async () => {
-        throw new Error('the test server asks for an email address');
-      },
-      confirmOnAnotherDevice: () => {
-        throw new Error('the test server asks for a QR login');
-      },
-    })),
-    120000,
-    'Charlie login',
-  );
+  charlie = await loginHelper();
+  const alicePhone = phone();
+  const bobPhone = phone();
   const charlieMe = await charlie.invoke({ _: 'getMe' });
 
   log('Server starts; owner, Alice and Bob register');
@@ -472,8 +492,8 @@ try {
   fail = e;
   console.error(`\nFAILED at: ${step}\n`, e);
 } finally {
-  await charlie.invoke({ _: 'logOut' }).catch(() => {});
-  await charlie.close().catch(() => {});
+  await charlie?.invoke({ _: 'logOut' }).catch(() => {});
+  await charlie?.close().catch(() => {});
   await stopServer();
   await stopSocks();
 }
