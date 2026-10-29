@@ -18,6 +18,7 @@ services:
       - TELEGRAM_API_HASH=${TELEGRAM_API_HASH:-}
       - SING_BOX_PATH=${SING_BOX_PATH:-/usr/local/bin/sing-box}
       - TELE_SOCKS_PORT=${TELE_SOCKS_PORT:-17890}
+      - TELE_IDLE_MINUTES=${TELE_IDLE_MINUTES:-10}
     volumes:
       - ./data:/data
       # Second backup copy (another disk / USB / network share): BACKUP_MIRROR_DIR in .env

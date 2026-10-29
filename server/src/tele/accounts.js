@@ -6,8 +6,70 @@ import { ensureEgress, egressStatus } from './egress.js';
 const SESSIONS_ROOT = path.join(DATA_DIR, 'tele-sessions');
 const live = new Map();
 
-export function getLiveClient(accountId) {
-  return live.get(Number(accountId))?.client || null;
+const opening = new Map();
+// Nobody used Telegram for this long: close the TDLib connection. A connected client receives
+// updates for every chat of the account, so this is what saves the server's VPN traffic.
+const IDLE_MS = Math.max(1, Number(process.env.TELE_IDLE_MINUTES) || 10) * 60000;
+
+/**
+ * The account's TDLib client, opened again from its saved session when needed (after a server
+ * restart, or after it was closed for being idle). No new login is needed for that.
+ */
+export async function liveClient(account) {
+  const handle = live.get(account.id);
+  if (handle?.client) {
+    handle.lastUsed = Date.now();
+    return handle.client;
+  }
+  if (account.status !== 'connected') return null;
+  if (!opening.has(account.id)) {
+    const p = (async () => {
+      const cred = apiCredentials();
+      if (!cred.ok) throw Object.assign(new Error('TELEGRAM_API_ID و HASH تنظیم نشده'), { statusCode: 503, expose: true });
+      const client = await createTdlibClient(account, cred);
+      const state = await authState(client).catch(async (e) => {
+        await client.close().catch(() => {});
+        throw e;
+      });
+      if (state !== 'authorizationStateReady') {
+        // The saved session is no longer valid (logged out from another device, expired…).
+        await client.close().catch(() => {});
+        run(`UPDATE tele_accounts SET status = 'disconnected', updated_at = ? WHERE id = ?`, now(), account.id);
+        throw Object.assign(new Error('نشست تلگرام معتبر نیست؛ دوباره وارد شوید'), { statusCode: 409, expose: true });
+      }
+      live.set(account.id, { client, phase: 'ready', userId: account.user_id, lastUsed: Date.now() });
+      return client;
+    })().finally(() => opening.delete(account.id));
+    opening.set(account.id, p);
+  }
+  return opening.get(account.id);
+}
+export const isLive = (accountId) => !!live.get(Number(accountId))?.client;
+
+setInterval(() => {
+  for (const [id, h] of live) {
+    // A login left at the code/password step is dropped after half an hour.
+    const limit = h.phase === 'ready' ? IDLE_MS : 30 * 60000;
+    if (Date.now() - (h.lastUsed || 0) > limit) closeLive(id);
+  }
+}, 60000).unref();
+
+/** Data this account's TDLib client moved since it was opened (null when it is not open). */
+export async function trafficOf(accountId) {
+  const h = live.get(Number(accountId));
+  if (!h?.client) return null;
+  try {
+    const s = await h.client.invoke({ _: 'getNetworkStatistics', only_current: true });
+    let sent = 0;
+    let received = 0;
+    for (const e of s.entries || []) {
+      sent += Number(e.sent_bytes) || 0;
+      received += Number(e.received_bytes) || 0;
+    }
+    return { sent, received, since: s.since_date ? s.since_date * 1000 : null };
+  } catch {
+    return null;
+  }
 }
 export function upsertDialog(accountId, { tgChatId, kind, title, username, lastText, lastAt, lastOut, unread }) {
   const existing = get('SELECT * FROM tele_dialogs WHERE account_id = ? AND tg_chat_id = ?', accountId, String(tgChatId));
@@ -95,7 +157,7 @@ export async function beginLogin(userId, phone) {
     }
     const status = { authorizationStateWaitCode: 'awaiting_code', authorizationStateWaitPassword: 'awaiting_password', authorizationStateReady: 'connected' }[state];
     if (!status) throw new Error(`وضعیت غیرمنتظره TDLib: ${state}`);
-    live.set(row.id, { client, phase: status, userId });
+    live.set(row.id, { client, phase: status === 'connected' ? 'ready' : status, userId, lastUsed: Date.now() });
     run(`UPDATE tele_accounts SET status = ?, updated_at = ? WHERE id = ?`, status, now(), row.id);
     const result = { awaiting_code: 'code_required', awaiting_password: 'password_required', connected: 'ready' }[status];
     return { status: result, account: publicAccount(getAccountForUser(userId)) };
@@ -157,6 +219,7 @@ export async function submitPassword(userId, password) {
 }
 async function loggedIn(row, handle) {
   handle.phase = 'ready';
+  handle.lastUsed = Date.now();
   run(`UPDATE tele_accounts SET status = 'connected', updated_at = ? WHERE id = ?`, now(), row.id);
   try {
     const me = await handle.client.invoke({ _: 'getMe' });
@@ -181,8 +244,10 @@ export function clearStaleLogin(row) {
 export async function disconnectAccount(userId) {
   const row = getAccountForUser(userId);
   if (!row) return { ok: true };
-  const handle = live.get(row.id);
-  if (handle?.client) { try { await handle.client.invoke({ _: 'logOut' }); } catch {} live.delete(row.id); }
+  // Closed for being idle: open it once more, so the session is also ended on Telegram's side.
+  const client = live.get(row.id)?.client || (row.status === 'connected' ? await liveClient(row).catch(() => null) : null);
+  if (client) { try { await client.invoke({ _: 'logOut' }); } catch {} }
+  await closeLive(row.id);
   run(`UPDATE tele_accounts SET status = 'disconnected', session_dir = '', tg_user_id = NULL, display_name = '', username = '' WHERE id = ?`, row.id);
   run('DELETE FROM tele_dialogs WHERE account_id = ?', row.id);
   try { if (row.session_dir?.startsWith(SESSIONS_ROOT)) fs.rmSync(row.session_dir, { recursive: true, force: true }); } catch {}
@@ -198,11 +263,24 @@ async function createTdlibClient(row, cred) {
   try {
     await authState(client);
     await useProxy(client, socks);
+    await saveData(client);
   } catch (e) {
     await client.close().catch(() => {});
     throw e;
   }
   return client;
+}
+// Every byte goes through the server's VPN: never download media on its own, don't appear online
+// (that keeps the session "active" and brings more updates).
+async function saveData(client) {
+  const settings = {
+    _: 'autoDownloadSettings', is_auto_download_enabled: false, max_photo_file_size: 0, max_video_file_size: 0, max_other_file_size: 0,
+    video_upload_bitrate: 0, preload_large_videos: false, preload_next_audio: false, preload_stories: false, use_less_data_for_calls: true,
+  };
+  for (const type of ['networkTypeMobile', 'networkTypeWiFi', 'networkTypeOther']) {
+    await client.invoke({ _: 'setAutoDownloadSettings', settings, type: { _: type } }).catch(() => {});
+  }
+  await client.invoke({ _: 'setOption', name: 'online', value: { _: 'optionValueBoolean', value: false } }).catch(() => {});
 }
 // Fail closed: without the local SOCKS proxy TDLib would reach Telegram directly, so a failure here
 // aborts the login. Newer TDLib takes addProxy(proxy, enable, comment), older addProxy(server, port, enable, type).

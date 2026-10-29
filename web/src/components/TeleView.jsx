@@ -3,10 +3,12 @@ import { api } from '../api';
 import { useStore } from '../store';
 import { colorFor, formatDay, formatListTime, formatTime, sameDay, toFa } from '../util';
 import Avatar from './Avatar';
-import { ArrowRight, Cable, LogOut, Megaphone, RefreshCw, Search, SendHorizontal, Users, X } from 'lucide-react';
+import { ArrowRight, Cable, Check, LogOut, Megaphone, Plus, RefreshCw, Search, SendHorizontal, Users, X, CircleMinus } from 'lucide-react';
 
 // Telegram, in the same look as the app's own chats: chat list on the side, the open chat beside it.
 // Route: #/tele (list) and #/tele/<dialogId> (an open chat).
+// Only the chats the user added are kept up to date: the whole Telegram chat list is fetched only
+// while picking chats to add, to keep the server's VPN traffic low.
 
 const KIND_ICON = { group: Users, channel: Megaphone };
 const TABS = [
@@ -17,22 +19,27 @@ const TABS = [
 ];
 // Avatar colors need a number: Telegram ids (and "u123" / "c-100…" sender ids) give a stable one.
 const num = (id) => Math.abs(Number(String(id || '').replace(/^[uc]/, '')) || 0);
+const mb = (n) => `${toFa((n / 1048576).toFixed(n < 10485760 ? 1 : 0))} MB`;
+// Periodic checks pause while the tab is in the background (no traffic, and the idle timer runs).
+const visible = () => document.visibilityState !== 'hidden';
 
 export default function TeleView({ dialogId }) {
   const [status, setStatus] = useState(null);
   const [query, setQuery] = useState('');
   const [tab, setTab] = useState('all');
   const [syncing, setSyncing] = useState(false);
+  const [picking, setPicking] = useState(false);
   const showToast = useStore((s) => s.showToast);
 
   const load = () => api('GET', '/tele/status').then(setStatus).catch((e) => showToast(e.message));
   const account = status?.account;
   const connected = account?.status === 'connected';
 
-  const syncList = async () => {
+  const syncList = async (all = false) => {
     setSyncing(true);
     try {
-      await api('POST', '/tele/dialogs/refresh');
+      const r = await api('POST', '/tele/dialogs/refresh', { all });
+      if (r?.notice) showToast(r.notice);
       await load();
     } catch (e) {
       showToast(e.message);
@@ -44,13 +51,11 @@ export default function TeleView({ dialogId }) {
   useEffect(() => {
     load();
   }, []); // eslint-disable-line
-  // Connected: fetch the chat list from Telegram now and every minute; the stored list (unread counts,
-  // last messages of open chats) more often.
+  // Connected: the user's own chats from Telegram every minute, the stored list more often.
   useEffect(() => {
     if (!connected) return;
-    syncList();
-    const fromTelegram = setInterval(syncList, 60000);
-    const stored = setInterval(load, 10000);
+    const fromTelegram = setInterval(() => visible() && syncList(), 60000);
+    const stored = setInterval(() => visible() && load(), 10000);
     return () => {
       clearInterval(fromTelegram);
       clearInterval(stored);
@@ -58,12 +63,35 @@ export default function TeleView({ dialogId }) {
   }, [connected]); // eslint-disable-line
 
   const dialogs = status?.dialogs || [];
+  const mine = useMemo(() => dialogs.filter((d) => d.selected), [dialogs]);
   const list = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return dialogs.filter((d) => (tab === 'all' || d.kind === tab) && (!q || `${d.title} ${d.username}`.toLowerCase().includes(q)));
-  }, [dialogs, query, tab]);
-  const unreadOf = (kind) => dialogs.filter((d) => (kind === 'all' || d.kind === kind) && d.unread > 0).length;
+    return (picking ? dialogs : mine).filter((d) => (tab === 'all' || d.kind === tab) && (!q || `${d.title} ${d.username}`.toLowerCase().includes(q)));
+  }, [dialogs, mine, picking, query, tab]);
+  const unreadOf = (kind) => mine.filter((d) => (kind === 'all' || d.kind === kind) && d.unread > 0).length;
   const active = dialogs.find((d) => d.id === dialogId);
+
+  const startPicking = () => {
+    setPicking(true);
+    setQuery('');
+    syncList(true);
+  };
+  const stopPicking = () => {
+    setPicking(false);
+    setQuery('');
+  };
+  const toggle = async (d) => {
+    try {
+      await api('PATCH', `/tele/dialogs/${d.id}`, { selected: !d.selected });
+      await load();
+    } catch (e) {
+      showToast(e.message);
+    }
+  };
+  const remove = async (d) => {
+    await toggle(d);
+    location.hash = '#/tele';
+  };
 
   const logout = async () => {
     if (!confirm('اتصال حساب تلگرام قطع شود؟')) return;
@@ -80,13 +108,28 @@ export default function TeleView({ dialogId }) {
     <>
       <aside className="sidebar tele-side">
         <header className="sidebar-head">
-          <a className="icon-btn" href="#/" aria-label="بازگشت به پیام‌رسان" title="بازگشت به پیام‌رسان">
-            <ArrowRight size={22} />
-          </a>
-          <input className="search grow" placeholder="جستجوی گفتگو…" value={query} onChange={(e) => setQuery(e.target.value)} disabled={!connected} />
-          {connected && (
+          {picking ? (
+            <button className="icon-btn" aria-label="پایان انتخاب" title="پایان انتخاب" onClick={stopPicking}>
+              <ArrowRight size={22} />
+            </button>
+          ) : (
+            <a className="icon-btn" href="#/" aria-label="بازگشت به پیام‌رسان" title="بازگشت به پیام‌رسان">
+              <ArrowRight size={22} />
+            </a>
+          )}
+          <input
+            className="search grow"
+            placeholder={picking ? 'جستجو در همه گفتگوهای تلگرام…' : 'جستجو در گفتگوهای من…'}
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            disabled={!connected}
+          />
+          {connected && !picking && (
             <>
-              <button className={`icon-btn ${syncing ? 'spin' : ''}`} aria-label="به‌روزرسانی فهرست" title="به‌روزرسانی فهرست" onClick={syncList} disabled={syncing}>
+              <button className="icon-btn" aria-label="افزودن گفتگو" title="افزودن گفتگو" onClick={startPicking}>
+                <Plus size={21} />
+              </button>
+              <button className={`icon-btn ${syncing ? 'spin' : ''}`} aria-label="به‌روزرسانی" title="به‌روزرسانی" onClick={() => syncList()} disabled={syncing}>
                 <RefreshCw size={19} />
               </button>
               <button className="icon-btn" aria-label="خروج از حساب تلگرام" title="خروج از حساب تلگرام" onClick={logout}>
@@ -94,9 +137,16 @@ export default function TeleView({ dialogId }) {
               </button>
             </>
           )}
+          {picking && (
+            <button className="btn sm primary" onClick={stopPicking}>
+              تمام
+            </button>
+          )}
         </header>
         <div className="site-name tele-brand">
-          <Cable size={13} /> تلگرام{account?.displayName ? ` · ${account.displayName}` : ''}
+          <Cable size={13} />
+          {picking ? 'گفتگوهایی را که می‌خواهید اضافه کنید؛ فقط همین‌ها به‌روز نگه داشته می‌شوند.' : `تلگرام${account?.displayName ? ` · ${account.displayName}` : ''}`}
+          {!picking && connected && <LinkState status={status} />}
           <TunnelState runtime={status?.runtime} />
         </div>
         {connected && (
@@ -104,7 +154,7 @@ export default function TeleView({ dialogId }) {
             {TABS.map(([k, label]) => (
               <button key={k} className={tab === k ? 'active' : ''} onClick={() => setTab(k)}>
                 {label}
-                {unreadOf(k) > 0 && <span className="tab-badge">{toFa(unreadOf(k))}</span>}
+                {!picking && unreadOf(k) > 0 && <span className="tab-badge">{toFa(unreadOf(k))}</span>}
               </button>
             ))}
           </div>
@@ -113,49 +163,91 @@ export default function TeleView({ dialogId }) {
           {!status && <li className="muted center pad">در حال بارگذاری…</li>}
           {status && !connected && <li className="muted center pad">برای دیدن گفتگوها وارد حساب تلگرام شوید.</li>}
           {connected &&
-            list.map((d) => {
-              const Icon = KIND_ICON[d.kind];
-              return (
+            list.map((d) =>
+              picking ? (
+                <li key={d.id}>
+                  <button className={`chat-item tele-pick ${d.selected ? 'active' : ''}`} onClick={() => toggle(d)} aria-pressed={d.selected}>
+                    <DialogBody d={d} />
+                    <span className={`tele-check ${d.selected ? 'on' : ''}`}>{d.selected ? <Check size={16} /> : <Plus size={16} />}</span>
+                  </button>
+                </li>
+              ) : (
                 <li key={d.id}>
                   <a href={`#/tele/${d.id}`} className={`chat-item ${d.id === dialogId ? 'active' : ''}`}>
-                    <Avatar id={num(d.tgChatId)} name={d.title} />
-                    <div className="chat-item-body">
-                      <div className="row">
-                        <span className="title">
-                          {Icon && <Icon size={15} className="type-icon" />}
-                          {d.title || d.username || 'بدون نام'}
-                        </span>
-                        {d.lastAt && <span className="time">{formatListTime(d.lastAt)}</span>}
-                      </div>
-                      <div className="row">
-                        <span className="preview">
-                          {d.lastOut && d.lastText ? 'شما: ' : ''}
-                          {(d.lastText || '').split('\n')[0]}
-                        </span>
-                        {d.unread > 0 && <span className="badge">{toFa(d.unread)}</span>}
-                      </div>
-                    </div>
+                    <DialogBody d={d} withUnread />
                   </a>
                 </li>
-              );
-            })}
-          {connected && !list.length && <li className="muted center pad">{dialogs.length ? 'گفتگویی پیدا نشد' : syncing ? 'در حال دریافت گفتگوها…' : 'گفتگویی نیست'}</li>}
+              ),
+            )}
+          {connected && !list.length && (
+            <li className="muted center pad">
+              {picking ? (
+                syncing ? 'در حال دریافت گفتگوها از تلگرام…' : 'گفتگویی پیدا نشد'
+              ) : mine.length ? (
+                'گفتگویی پیدا نشد'
+              ) : (
+                <>
+                  <p>هنوز گفتگویی اضافه نکرده‌اید.</p>
+                  <button className="btn primary" onClick={startPicking}>
+                    <Plus size={16} /> افزودن گفتگو
+                  </button>
+                </>
+              )}
+            </li>
+          )}
         </ul>
       </aside>
       <main className="chat-pane">
         {!status ? null : !connected ? (
           <TeleLogin status={status} reload={load} />
         ) : active ? (
-          <TeleChat key={active.id} dialog={active} onChanged={load} />
+          <TeleChat key={active.id} dialog={active} onChanged={load} onRemove={() => remove(active)} />
         ) : (
           <div className="empty-pane">
             <Cable size={64} className="muted" />
             <h2>تلگرام</h2>
-            <p>یک گفتگو را از فهرست انتخاب کنید.</p>
+            <p>{mine.length ? 'یک گفتگو را از فهرست انتخاب کنید.' : 'با دکمه + گفتگوهایی را که می‌خواهید اضافه کنید.'}</p>
           </div>
         )}
       </main>
     </>
+  );
+}
+
+function DialogBody({ d, withUnread }) {
+  const Icon = KIND_ICON[d.kind];
+  return (
+    <>
+      <Avatar id={num(d.tgChatId)} name={d.title} />
+      <div className="chat-item-body">
+        <div className="row">
+          <span className="title">
+            {Icon && <Icon size={15} className="type-icon" />}
+            {d.title || d.username || 'بدون نام'}
+          </span>
+          {d.lastAt && <span className="time">{formatListTime(d.lastAt)}</span>}
+        </div>
+        <div className="row">
+          <span className="preview">
+            {d.lastOut && d.lastText ? 'شما: ' : ''}
+            {(d.lastText || '').split('\n')[0]}
+          </span>
+          {withUnread && d.unread > 0 && <span className="badge">{toFa(d.unread)}</span>}
+        </div>
+      </div>
+    </>
+  );
+}
+
+// Open TDLib connection (and what it moved), or closed to save traffic until a chat is opened.
+function LinkState({ status }) {
+  if (!status.live) return <span className="muted"> · در حالت صرفه‌جویی</span>;
+  const t = status.traffic;
+  return (
+    <span className="muted" title="مصرف اینترنت این اتصال از زمان وصل شدن">
+      {' '}
+      · وصل{t ? ` · ↓${mb(t.received)} ↑${mb(t.sent)}` : ''}
+    </span>
   );
 }
 
@@ -263,7 +355,7 @@ function TeleLogin({ status, reload }) {
 }
 
 // ---------- An open chat ----------
-function TeleChat({ dialog, onChanged }) {
+function TeleChat({ dialog, onChanged, onRemove }) {
   const [messages, setMessages] = useState(null);
   const [notice, setNotice] = useState('');
   const [hasMore, setHasMore] = useState(true);
@@ -289,7 +381,8 @@ function TeleChat({ dialog, onChanged }) {
 
   const fetchLatest = async (first) => {
     try {
-      const r = await api('GET', `/tele/dialogs/${dialog.id}/messages`);
+      // Later checks ask TDLib for what it already received (local=1): no network traffic.
+      const r = await api('GET', `/tele/dialogs/${dialog.id}/messages${first ? '' : '?local=1'}`);
       setMessages((cur) => merge(first ? [] : cur, r.messages || []));
       setNotice(r.notice || '');
       if (first) {
@@ -304,7 +397,7 @@ function TeleChat({ dialog, onChanged }) {
 
   useEffect(() => {
     fetchLatest(true);
-    const t = setInterval(() => fetchLatest(false), 5000);
+    const t = setInterval(() => visible() && fetchLatest(false), 5000);
     return () => clearInterval(t);
   }, [dialog.id]); // eslint-disable-line
 
@@ -400,6 +493,14 @@ function TeleChat({ dialog, onChanged }) {
             </div>
             <button className="icon-btn" aria-label="جستجو در این گفتگو" title="جستجو در این گفتگو" onClick={() => setSearchOpen(true)}>
               <Search size={20} />
+            </button>
+            <button
+              className="icon-btn"
+              aria-label="حذف از گفتگوهای من"
+              title="حذف از گفتگوهای من (دیگر به‌روز نمی‌شود)"
+              onClick={() => confirm(`«${dialog.title || 'این گفتگو'}» از فهرست شما حذف شود؟ در تلگرام چیزی پاک نمی‌شود.`) && onRemove()}
+            >
+              <CircleMinus size={20} />
             </button>
           </>
         )}

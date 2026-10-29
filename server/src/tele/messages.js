@@ -1,5 +1,5 @@
 import { get, all, run, now } from '../db.js';
-import { getAccountForUser, getLiveClient, listDialogs, upsertDialog } from './accounts.js';
+import { getAccountForUser, liveClient, listDialogs, upsertDialog } from './accounts.js';
 import { ensureEgress } from './egress.js';
 
 export function listStoredMessages(accountId, dialogId, { limit = 50, beforeTgId = null } = {}) {
@@ -97,32 +97,33 @@ function ownDialog(userId, dialogId) {
 
 /**
  * Latest messages of a chat (or older ones with `before` = a Telegram message id). Opening a chat
- * adds it to the mirrored chats and marks it read in Telegram, like opening it in a Telegram app.
+ * adds it to the user's chats and marks it read in Telegram, like opening it in a Telegram app.
+ * `local`: the periodic check while the chat is open. TDLib already received new messages as
+ * updates, so it answers from its own database without any network traffic.
  */
-export async function syncDialogMessages(userId, dialogId, { limit = 40, before = null } = {}) {
+export async function syncDialogMessages(userId, dialogId, { limit = 40, before = null, local = false } = {}) {
   const { account, dialog } = ownDialog(userId, dialogId);
   if (!dialog.selected) run('UPDATE tele_dialogs SET selected = 1, updated_at = ? WHERE id = ?', now(), dialog.id);
   const n = Math.min(50, limit);
-  const client = getLiveClient(account.id);
-  if (!client) return { messages: listStoredMessages(account.id, dialog.id, { limit: n, beforeTgId: before }).map(publicMessage), notice: 'اتصال به تلگرام برقرار نیست؛ پیام‌های ذخیره‌شده نمایش داده می‌شوند' };
-  await ensureEgress();
+  const client = await liveClient(account);
+  if (!client) return { messages: listStoredMessages(account.id, dialog.id, { limit: n, beforeTgId: before }).map(publicMessage), notice: 'حساب تلگرام وصل نیست' };
+  if (!local) await ensureEgress();
   const chatId = Number(dialog.tg_chat_id);
-  // TDLib may return fewer messages than asked while it fetches from the network: ask again once.
-  let hist = await client.invoke({ _: 'getChatHistory', chat_id: chatId, from_message_id: before ? Number(before) : 0, offset: 0, limit: n, only_local: false });
-  if ((hist?.messages?.length || 0) < Math.min(n, 10)) {
-    hist = await client.invoke({ _: 'getChatHistory', chat_id: chatId, from_message_id: before ? Number(before) : 0, offset: 0, limit: n, only_local: false });
-  }
+  const history = () => client.invoke({ _: 'getChatHistory', chat_id: chatId, from_message_id: before ? Number(before) : 0, offset: 0, limit: n, only_local: local });
+  let hist = await history();
+  // From the network TDLib may answer with only a few messages at first: ask again once.
+  if (!local && (hist?.messages?.length || 0) < Math.min(n, 10)) hist = await history();
   const msgs = hist?.messages || [];
+  const newest = get('SELECT MAX(tg_msg_id) AS m FROM tele_messages WHERE account_id = ? AND dialog_id = ?', account.id, dialog.id)?.m || 0;
   await storeTdMessages(client, account.id, dialog.id, msgs);
   if (!before) {
     const last = msgs[0];
     if (last) upsertDialog(account.id, { tgChatId: dialog.tg_chat_id, lastText: contentText(last.content), lastAt: last.date * 1000, lastOut: last.is_outgoing, unread: 0 });
     else upsertDialog(account.id, { tgChatId: dialog.tg_chat_id, unread: 0 });
-    try {
-      await client.invoke({ _: 'openChat', chat_id: chatId });
-      if (msgs.length) await client.invoke({ _: 'viewMessages', chat_id: chatId, message_ids: msgs.map((m) => m.id), force_read: true });
-    } catch {
-      /* read state is a nicety */
+    // Mark as read in Telegram on opening, and when new incoming messages showed up.
+    const unseen = local ? msgs.filter((m) => m.id > newest && !m.is_outgoing) : msgs;
+    if (unseen.length) {
+      await client.invoke({ _: 'viewMessages', chat_id: chatId, message_ids: unseen.map((m) => m.id), force_read: true }).catch(() => {});
     }
   }
   return {
@@ -136,7 +137,7 @@ export async function searchDialogMessages(userId, dialogId, query) {
   const q = String(query || '').trim();
   if (q.length < 2) throw Object.assign(new Error('حداقل ۲ حرف بنویسید'), { statusCode: 400 });
   const { account, dialog } = ownDialog(userId, dialogId);
-  const client = getLiveClient(account.id);
+  const client = await liveClient(account);
   if (!client) {
     const rows = all(`SELECT * FROM tele_messages WHERE account_id = ? AND dialog_id = ? AND text LIKE ? ORDER BY tg_msg_id DESC LIMIT 50`, account.id, dialog.id, `%${q}%`);
     return { messages: rows.map(publicMessage) };
@@ -156,7 +157,7 @@ export async function sendTeleMessage(userId, dialogId, text) {
   const { account, dialog } = ownDialog(userId, dialogId);
   if (account.status !== 'connected') throw Object.assign(new Error('حساب وصل نیست'), { statusCode: 400 });
   await ensureEgress();
-  const client = getLiveClient(account.id);
+  const client = await liveClient(account);
   if (!client) throw Object.assign(new Error('اتصال به تلگرام برقرار نیست'), { statusCode: 503, expose: true });
   const result = await client.invoke({ _: 'sendMessage', chat_id: Number(dialog.tg_chat_id), input_message_content: { _: 'inputMessageText', text: { _: 'formattedText', text: body } } });
   const t = result?.date ? result.date * 1000 : now();
@@ -167,20 +168,26 @@ export async function sendTeleMessage(userId, dialogId, text) {
 const KIND = (chat) =>
   chat.type?._ === 'chatTypePrivate' || chat.type?._ === 'chatTypeSecret' ? 'private' : chat.type?._ === 'chatTypeSupergroup' && chat.type?.is_channel ? 'channel' : 'group';
 
-export async function refreshDialogsFromTelegram(userId) {
+/**
+ * Update the chat list from Telegram. By default only the chats the user added (their last message
+ * and unread count, which TDLib mostly knows already). `all`: the whole Telegram chat list, only
+ * when the user opens "add a chat" to pick from it.
+ */
+export async function refreshDialogsFromTelegram(userId, { all: everything = false } = {}) {
   const account = getAccountForUser(userId);
   if (!account) throw Object.assign(new Error('حساب وصل نیست'), { statusCode: 400 });
-  const client = getLiveClient(account.id);
-  if (!client) return { dialogs: listDialogs(account.id), notice: 'اتصال به تلگرام برقرار نیست' };
+  const client = await liveClient(account);
+  if (!client) return { dialogs: listDialogs(account.id), notice: 'حساب تلگرام وصل نیست' };
   await ensureEgress();
-  // Newer TDLib only returns chats that were loaded first; loadChats fails once all are loaded.
-  try {
-    await client.invoke({ _: 'loadChats', chat_list: { _: 'chatListMain' }, limit: 100 });
-  } catch {
-    /* everything is loaded already */
+  let ids;
+  if (everything) {
+    // Newer TDLib only returns chats that were loaded first; loadChats fails once all are loaded.
+    await client.invoke({ _: 'loadChats', chat_list: { _: 'chatListMain' }, limit: 200 }).catch(() => {});
+    ids = (await client.invoke({ _: 'getChats', chat_list: { _: 'chatListMain' }, limit: 200 }))?.chat_ids || [];
+  } else {
+    ids = all('SELECT tg_chat_id FROM tele_dialogs WHERE account_id = ? AND selected = 1', account.id).map((d) => Number(d.tg_chat_id));
   }
-  const chats = await client.invoke({ _: 'getChats', chat_list: { _: 'chatListMain' }, limit: 100 });
-  for (const id of chats?.chat_ids || []) {
+  for (const id of ids) {
     try {
       const chat = await client.invoke({ _: 'getChat', chat_id: id });
       const last = chat.last_message;

@@ -1041,3 +1041,30 @@ body:has(.room-view, .call-view) .toast {
 .icon-btn.spin svg {
   animation: spin 1s linear infinite;
 }
+.chat-item.tele-pick {
+  width: 100%;
+  border: 0;
+  background: none;
+  text-align: start;
+  cursor: pointer;
+  font: inherit;
+}
+.chat-item.tele-pick.active {
+  background: var(--hover);
+  color: inherit;
+}
+.tele-check {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  border: 1.5px solid var(--border);
+  color: var(--muted);
+}
+.tele-check.on {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
