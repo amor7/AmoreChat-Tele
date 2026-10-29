@@ -709,8 +709,8 @@ async function part2() {
   fs.writeFileSync(docFile, `file content ${RUN}`);
   const mp4 = path.join(botDir, 'clip.mp4');
   execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc=size=160x120:rate=10', '-t', '2', '-pix_fmt', 'yuv420p', '-c:v', 'libx264', '-movflags', '+faststart', mp4]);
-  await bot.invoke({ _: 'sendMessage', chat_id: meta.userId, input_message_content: { _: 'inputMessageDocument', document: { _: 'inputFileLocal', path: docFile }, caption: { _: 'formattedText', text: `doc ${RUN}` } } });
-  await bot.invoke({ _: 'sendMessage', chat_id: meta.userId, input_message_content: { _: 'inputMessageVideo', video: { _: 'inputFileLocal', path: mp4 }, duration: 2, width: 160, height: 120, supports_streaming: true, caption: { _: 'formattedText', text: `video ${RUN}` } } });
+  await bot.invoke({ _: 'sendMessage', chat_id: meta.userId, input_message_content: { _: 'inputMessageDocument', document: { _: 'inputDocument', document: { _: 'inputFileLocal', path: docFile } }, caption: { _: 'formattedText', text: `doc ${RUN}` } } });
+  await bot.invoke({ _: 'sendMessage', chat_id: meta.userId, input_message_content: { _: 'inputMessageVideo', video: { _: 'inputVideo', video: { _: 'inputFileLocal', path: mp4 }, duration: 2, width: 160, height: 120, supports_streaming: true }, caption: { _: 'formattedText', text: `video ${RUN}` } } });
   const findFile = async (cap) => {
     const x = ok(await alice.call('GET', `/api/tele/dialogs/${pd.id}/messages`), 'messages');
     return x.messages.find((m) => m.file && m.text.includes(cap));

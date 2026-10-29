@@ -611,7 +611,7 @@ export async function sendTeleFile(userId, dialogId, file, { mime = '', caption 
   const name = path.basename(file);
   const cap = text ? { _: 'formattedText', text } : undefined;
   const content = /^video\/(mp4|quicktime|webm)$/.test(mime)
-    ? { _: 'inputMessageVideo', video: { _: 'inputFileLocal', path: file }, supports_streaming: true, caption: cap }
-    : { _: 'inputMessageDocument', document: { _: 'inputFileLocal', path: file }, caption: cap };
+    ? { _: 'inputMessageVideo', video: { _: 'inputVideo', video: { _: 'inputFileLocal', path: file }, supports_streaming: true }, caption: cap }
+    : { _: 'inputMessageDocument', document: { _: 'inputDocument', document: { _: 'inputFileLocal', path: file } }, caption: cap };
   return sendContent(userId, dialogId, content, { replyTo, text: text ? `📎 ${name}\n${text}` : `📎 ${name}`, kind: 'file' });
 }
