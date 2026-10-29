@@ -178,9 +178,6 @@ async function savedTexts(who) {
   return ok(await who.call('GET', `/api/chats/${saved.id}/messages?limit=100`), 'saved').messages.map((m) => m.text || '');
 }
 const alertsOf = async (who) => (await savedTexts(who)).filter((t) => t.startsWith('⚠️ تلگرام'));
-// An unencrypted SQLite file starts with this; TDLib's encrypted database does not.
-const PLAIN_SQLITE = 'SQLite format 3\0';
-const sqliteHeader = (file) => fs.readFileSync(file).subarray(0, 16).toString('latin1');
 const tunnelRunning = async (owner) => (await owner.call('GET', '/api/admin/tele/proxies')).egress?.running;
 
 // ---------- A PNG photo, made here ----------
@@ -448,6 +445,11 @@ async function part2() {
     const b = fs.readFileSync(newBinFile);
     return !b.includes(phoneBytes) && !b.equals(oldBin);
   }, 20000);
+  {
+    const db = new DatabaseSync(path.join(DATA_DIR, 'amorechat.db'), { readOnly: true });
+    assert.equal(db.prepare('SELECT db_encrypted FROM tele_accounts WHERE id = 1').get().db_encrypted, 1, 'session not marked encrypted');
+    db.close();
+  }
 
   log('"Add a chat" lists the bot chat and the group; nothing is selected on its own');
   const { pd, gd } = await until('bot chat and group in the list', async () => {
@@ -740,6 +742,13 @@ async function uiChecks({ owner, alice, bob, pd, gd, meta, photoMsg, voiceMsg, s
       const [name, value] = [c.slice(0, c.indexOf('=')), c.slice(c.indexOf('=') + 1)];
       await page.setCookie({ name, value, url: BASE });
       await page.goto(`${BASE}/${hash}`, { waitUntil: 'networkidle0' });
+      // Only the hash may have changed: load the page again as this user.
+      await page.reload({ waitUntil: 'networkidle0' });
+    };
+    // Numbers shown as words of an error ("ناعدد" is NaN in Persian) or missing values.
+    const noBrokenText = async (where) => {
+      const bad = await page.evaluate(() => (document.body.innerText.match(/ناعدد|NaN|undefined|[object Object]/) || [])[0]);
+      assert.ok(!bad, `${where}: the page shows "${bad}"`);
     };
     const texts = (sel) => page.$$eval(sel, (els) => els.map((e) => e.textContent));
     const waitText = (sel, text, ms = 20000) => page.waitForFunction((sel, text) => [...document.querySelectorAll(sel)].some((e) => e.textContent.includes(text)), { timeout: ms }, sel, text);
@@ -846,6 +855,7 @@ async function uiChecks({ owner, alice, bob, pd, gd, meta, photoMsg, voiceMsg, s
     const rec = await until('the bot receives the recording', () => botMsgs.filter((m) => m.content?._ === 'messageVoiceNote').length > voicesBefore && botMsgs.filter((m) => m.content?._ === 'messageVoiceNote').at(-1), 60000);
     assert.ok(rec.content.voice_note.duration >= 1, 'recording without a length');
     await page.waitForSelector('.tele-chat textarea');
+    await noBrokenText('Telegram chat with voice messages');
     await shot('voice');
 
     log('UI: a message of the app → Telegram, from its menu');
@@ -871,6 +881,7 @@ async function uiChecks({ owner, alice, bob, pd, gd, meta, photoMsg, voiceMsg, s
     await clickText('.modal .tabs button', 'Tele / VPN');
     await waitText('.modal h4', 'هشدارها');
     await waitText('.modal .tele-users', 'Alice');
+    await noBrokenText('admin panel, Tele / VPN');
     await shot('admin');
     // Turning voice off for Alice from the panel works.
     await page.evaluate(() => {

@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { api } from '../api';
 import { useStore } from '../store';
-import { colorFor, formatDay, formatListTime, formatTime, sameDay, toFa } from '../util';
+import { colorFor, formatDay, formatListTime, formatTime, sameDay, toFa, faDigits } from '../util';
 import Avatar from './Avatar';
 import { ArrowRight, Cable, Check, LogOut, Megaphone, Plus, RefreshCw, Search, SendHorizontal, Users, X, CircleMinus, Reply, ImagePlus, Mic, Play, Forward, Trash2 } from 'lucide-react';
 
@@ -758,7 +758,7 @@ function TeleRecorder({ onSend, onCancel, maxSeconds }) {
         <SendHorizontal size={20} />
       </button>
       <span className="grow tele-rec-time">
-        <span className="tele-rec-dot" /> {toFa(mmss)}
+        <span className="tele-rec-dot" /> {faDigits(mmss)}
       </span>
       <button className="icon-btn" aria-label="لغو ضبط" onClick={() => finish(false)}>
         <Trash2 size={20} />
@@ -911,7 +911,7 @@ function TeleVoice({ m }) {
       <span className="tele-voice-play">
         <Play size={18} />
       </span>
-      <span className="grow">{state === 'loading' ? 'در حال دانلود…' : state === 'error' ? error : `پیام صوتی · ${toFa(len)}`}</span>
+      <span className="grow">{state === 'loading' ? 'در حال دانلود…' : state === 'error' ? error : `پیام صوتی · ${faDigits(len)}`}</span>
     </button>
   );
 }
