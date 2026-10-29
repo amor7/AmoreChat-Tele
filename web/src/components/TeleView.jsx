@@ -3,7 +3,7 @@ import { api } from '../api';
 import { useStore } from '../store';
 import { colorFor, formatDay, formatListTime, formatTime, sameDay, toFa } from '../util';
 import Avatar from './Avatar';
-import { ArrowRight, Cable, Check, LogOut, Megaphone, Plus, RefreshCw, Search, SendHorizontal, Users, X, CircleMinus, Reply, ImagePlus } from 'lucide-react';
+import { ArrowRight, Cable, Check, LogOut, Megaphone, Plus, RefreshCw, Search, SendHorizontal, Users, X, CircleMinus, Reply, ImagePlus, Mic, Play, Forward, Trash2 } from 'lucide-react';
 
 // Telegram, in the same look as the app's own chats: chat list on the side, the open chat beside it.
 // Route: #/tele (list) and #/tele/<dialogId> (an open chat).
@@ -205,7 +205,7 @@ export default function TeleView({ dialogId }) {
         {!status ? null : !connected ? (
           <TeleLogin status={status} reload={load} />
         ) : active ? (
-          <TeleChat key={active.id} dialog={active} onChanged={load} onRemove={() => remove(active)} allowMedia={!!account?.allowMedia} mediaMaxMb={status?.mediaMaxMb || 5} />
+          <TeleChat key={active.id} dialog={active} onChanged={load} onRemove={() => remove(active)} allowMedia={!!account?.allowMedia} allowVoice={!!account?.allowVoice} mediaMaxMb={status?.mediaMaxMb || 5} />
         ) : (
           <div className="empty-pane">
             <Cable size={64} className="muted" />
@@ -245,12 +245,17 @@ function DialogBody({ d, withUnread }) {
 
 // Open TDLib connection (and what it moved), or closed to save traffic until a chat is opened.
 function LinkState({ status }) {
-  if (!status.live) return <span className="muted"> · در حالت صرفه‌جویی</span>;
+  const u = status.usage;
+  const over = u && u.quotaMb > 0 && u.used >= u.quotaMb * 1048576;
+  const month = u ? ` · این ماه ${mb(u.used)}${u.quotaMb > 0 ? ` از ${toFa(u.quotaMb)} MB` : ''}` : '';
+  if (over) return <span className="tele-warn"> · سقف مصرف این ماه تمام شده{month}</span>;
+  if (!status.live) return <span className="muted"> · در حالت صرفه‌جویی{month}</span>;
   const t = status.traffic;
   return (
-    <span className="muted" title="مصرف اینترنت این اتصال از زمان وصل شدن">
+    <span className="muted" title="مصرف اینترنت این اتصال از زمان وصل شدن، و کل مصرف این ماه">
       {' '}
       · وصل{t ? ` · ↓${mb(t.received)} ↑${mb(t.sent)}` : ''}
+      {month}
     </span>
   );
 }
@@ -360,7 +365,7 @@ function TeleLogin({ status, reload }) {
 
 
 // ---------- An open chat ----------
-function TeleChat({ dialog, onChanged, onRemove, allowMedia, mediaMaxMb }) {
+function TeleChat({ dialog, onChanged, onRemove, allowMedia, allowVoice, mediaMaxMb }) {
   const [messages, setMessages] = useState(null);
   const [notice, setNotice] = useState('');
   const [hasMore, setHasMore] = useState(true);
@@ -371,6 +376,7 @@ function TeleChat({ dialog, onChanged, onRemove, allowMedia, mediaMaxMb }) {
   const [searchOpen, setSearchOpen] = useState(false);
   const [q, setQ] = useState('');
   const [found, setFound] = useState(null);
+  const [recording, setRecording] = useState(false);
   const listRef = useRef(null);
   const inputRef = useRef(null);
   const fileRef = useRef(null);
@@ -489,6 +495,28 @@ function TeleChat({ dialog, onChanged, onRemove, allowMedia, mediaMaxMb }) {
     }
   };
 
+  // A recorded voice message (converted to Telegram's format on the server).
+  const sendVoice = async (blob, seconds) => {
+    setRecording(false);
+    if (!blob || blob.size < 1000) return;
+    if (blob.size > mediaMaxMb * 1048576) return showToast(`حداکثر حجم پیام صوتی ${toFa(mediaMaxMb)} مگابایت است`);
+    setSending(true);
+    try {
+      const qs = new URLSearchParams({ duration: String(Math.max(1, Math.round(seconds))), ...(replyTo ? { replyTo: String(replyTo.tgMsgId) } : {}) });
+      const body = new FormData();
+      body.append('file', blob, `voice.${blob.type.includes('mp4') ? 'm4a' : blob.type.includes('ogg') ? 'ogg' : 'webm'}`);
+      const res = await fetch(`/api/tele/dialogs/${dialog.id}/voice?${qs}`, { method: 'POST', body, credentials: 'same-origin', headers: { 'x-requested-with': 'amorechat' } });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'ارسال پیام صوتی ناموفق بود');
+      sent(data.message);
+    } catch (e) {
+      showToast(e.message);
+    } finally {
+      setSending(false);
+    }
+  };
+  const forward = (m) => useStore.getState().openModal('teleToChat', { message: m });
+
   const startReply = (m) => {
     if (isChannel || !m.tgMsgId) return;
     setReplyTo(m);
@@ -567,7 +595,7 @@ function TeleChat({ dialog, onChanged, onRemove, allowMedia, mediaMaxMb }) {
         <div className="messages">
           <div className="day-sep">{found.length ? `${toFa(found.length)} نتیجه برای «${q.trim()}»` : `نتیجه‌ای برای «${q.trim()}» نیست`}</div>
           {found.map((m) => (
-            <TeleMessage key={m.id} m={m} showSender={!isChannel} showAvatar={false} grouped={false} withDate allowMedia={allowMedia} />
+            <TeleMessage key={m.id} m={m} showSender={!isChannel} showAvatar={false} grouped={false} withDate allowMedia={allowMedia} allowVoice={allowVoice} onForward={forward} />
           ))}
         </div>
       ) : (
@@ -589,6 +617,8 @@ function TeleChat({ dialog, onChanged, onRemove, allowMedia, mediaMaxMb }) {
                   showSender={isGroup && !mine && !grouped}
                   showAvatar={isGroup && !mine}
                   allowMedia={allowMedia}
+                  allowVoice={allowVoice}
+                  onForward={forward}
                   onReply={isChannel ? null : startReply}
                   onJump={jumpTo}
                 />
@@ -614,10 +644,19 @@ function TeleChat({ dialog, onChanged, onRemove, allowMedia, mediaMaxMb }) {
               </button>
             </div>
           )}
+          {recording ? (
+            <TeleRecorder onSend={sendVoice} onCancel={() => setRecording(false)} maxSeconds={600} />
+          ) : (
           <div className="composer">
-            <button className="send-btn" aria-label="ارسال" disabled={!draft.trim() || sending} onMouseDown={(e) => e.preventDefault()} onClick={send}>
-              <SendHorizontal size={20} />
-            </button>
+            {allowVoice && !draft.trim() ? (
+              <button className="send-btn" aria-label="ضبط پیام صوتی" title="ضبط پیام صوتی" disabled={sending} onClick={() => setRecording(true)}>
+                <Mic size={20} />
+              </button>
+            ) : (
+              <button className="send-btn" aria-label="ارسال" disabled={!draft.trim() || sending} onMouseDown={(e) => e.preventDefault()} onClick={send}>
+                <SendHorizontal size={20} />
+              </button>
+            )}
             {allowMedia && (
               <>
                 <button className="icon-btn" aria-label="ارسال عکس" title={`ارسال عکس (تا ${toFa(mediaMaxMb)} مگابایت؛ متن بالا توضیح عکس می‌شود)`} disabled={sending} onClick={() => fileRef.current.click()}>
@@ -653,16 +692,87 @@ function TeleChat({ dialog, onChanged, onRemove, allowMedia, mediaMaxMb }) {
               }}
             />
           </div>
+          )}
         </div>
       )}
     </div>
   );
 }
 
-function TeleMessage({ m, grouped, showSender, showAvatar, withDate, allowMedia, onReply, onJump }) {
+// Recording a voice message: time, cancel, send.
+function TeleRecorder({ onSend, onCancel, maxSeconds }) {
+  const showToast = useStore((s) => s.showToast);
+  const [seconds, setSeconds] = useState(0);
+  const rec = useRef(null);
+  const done = useRef(false);
+  useEffect(() => {
+    let cancelled = false;
+    let timer;
+    (async () => {
+      try {
+        if (!navigator.mediaDevices?.getUserMedia) throw new Error('ضبط صدا فقط روی HTTPS ممکن است');
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } });
+        if (cancelled) return stream.getTracks().forEach((t) => t.stop());
+        const mimeType = ['audio/webm;codecs=opus', 'audio/ogg;codecs=opus', 'audio/mp4', 'audio/webm'].find((t) => window.MediaRecorder?.isTypeSupported?.(t)) || '';
+        const recorder = new MediaRecorder(stream, mimeType ? { mimeType, audioBitsPerSecond: 32000 } : undefined);
+        const chunks = [];
+        recorder.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+        rec.current = { recorder, chunks, stream, start: Date.now() };
+        recorder.start(250);
+        timer = setInterval(() => {
+          const s = Math.floor((Date.now() - rec.current.start) / 1000);
+          setSeconds(s);
+          if (s >= maxSeconds) finish(true);
+        }, 250);
+      } catch (e) {
+        showToast(e.name === 'NotAllowedError' ? 'اجازه دسترسی به میکروفون داده نشد' : e.message);
+        onCancel();
+      }
+    })();
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+      rec.current?.stream.getTracks().forEach((t) => t.stop());
+      if (rec.current?.recorder.state === 'recording') rec.current.recorder.stop();
+    };
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  async function finish(send) {
+    const r = rec.current;
+    if (done.current) return;
+    done.current = true;
+    if (!r) return onCancel();
+    await new Promise((ok) => {
+      r.recorder.onstop = ok;
+      if (r.recorder.state === 'recording') r.recorder.stop();
+      else ok();
+    });
+    r.stream.getTracks().forEach((t) => t.stop());
+    if (!send) return onCancel();
+    onSend(new Blob(r.chunks, { type: r.recorder.mimeType || 'audio/webm' }), (Date.now() - r.start) / 1000);
+  }
+  const mmss = `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+  return (
+    <div className="composer tele-recorder">
+      <button className="send-btn" aria-label="ارسال پیام صوتی" onClick={() => finish(true)}>
+        <SendHorizontal size={20} />
+      </button>
+      <span className="grow tele-rec-time">
+        <span className="tele-rec-dot" /> {toFa(mmss)}
+      </span>
+      <button className="icon-btn" aria-label="لغو ضبط" onClick={() => finish(false)}>
+        <Trash2 size={20} />
+      </button>
+    </div>
+  );
+}
+
+function TeleMessage({ m, grouped, showSender, showAvatar, withDate, allowMedia, allowVoice, onReply, onJump, onForward }) {
   const mine = m.direction === 'out';
-  // Without a photo shown, the text keeps its "📷 عکس" label; with it, only the caption is left.
-  const text = m.photo && allowMedia ? m.text.replace(/^📷 عکس\n?/, '') : m.text;
+  const [menu, setMenu] = useState(false);
+  const showVoice = m.voice && allowVoice;
+  // Without a photo / player shown, the text keeps its "📷 عکس" / "🎤 پیام صوتی" label; with it, only the caption.
+  const text = m.photo && allowMedia ? m.text.replace(/^📷 عکس\n?/, '') : showVoice ? m.text.replace(/^🎤 پیام صوتی\n?/, '') : m.text;
   return (
     <div className={`msg-row ${mine ? 'mine' : ''} ${grouped ? 'grouped' : ''}`} id={m.tgMsgId ? `tm-${m.tgMsgId}` : undefined}>
       {showAvatar && <div className="msg-avatar">{!grouped && <Avatar id={num(m.senderId)} name={m.senderName} size={34} />}</div>}
@@ -671,9 +781,9 @@ function TeleMessage({ m, grouped, showSender, showAvatar, withDate, allowMedia,
           className={`bubble ${m.photo && allowMedia ? 'has-media' : ''}`}
           onDoubleClick={() => onReply?.(m)}
           onContextMenu={(e) => {
-            if (!onReply) return;
+            if (!onReply && !onForward) return;
             e.preventDefault();
-            onReply(m);
+            setMenu(true);
           }}
         >
           {showSender && m.senderName && (
@@ -688,6 +798,7 @@ function TeleMessage({ m, grouped, showSender, showAvatar, withDate, allowMedia,
             </button>
           )}
           {m.photo && allowMedia && <TelePhoto m={m} />}
+          {showVoice && <TeleVoice m={m} />}
           {text && (
             <div className={`text ${m.kind !== 'text' && !(m.photo && allowMedia) ? 'tele-media' : ''}`} dir="auto">
               {text}
@@ -701,6 +812,38 @@ function TeleMessage({ m, grouped, showSender, showAvatar, withDate, allowMedia,
             <button className="msg-more" aria-label="پاسخ" title="پاسخ" onClick={() => onReply(m)}>
               <Reply size={17} />
             </button>
+          )}
+          {onForward && (
+            <button className="msg-more msg-fwd" aria-label="ارسال به چت داخلی" title="ارسال به چت داخلی" onClick={() => onForward(m)}>
+              <Forward size={17} />
+            </button>
+          )}
+          {menu && (
+            <div className="tele-msg-menu" onClick={(e) => e.stopPropagation()}>
+              {onReply && (
+                <button
+                  onClick={() => {
+                    setMenu(false);
+                    onReply(m);
+                  }}
+                >
+                  <Reply size={16} /> پاسخ
+                </button>
+              )}
+              {onForward && (
+                <button
+                  onClick={() => {
+                    setMenu(false);
+                    onForward(m);
+                  }}
+                >
+                  <Forward size={16} /> ارسال به چت داخلی
+                </button>
+              )}
+              <button onClick={() => setMenu(false)}>
+                <X size={16} /> بستن
+              </button>
+            </div>
           )}
         </div>
       </div>
@@ -738,6 +881,37 @@ function TelePhoto({ m }) {
           <span className="tele-photo-cta">{state === 'loading' ? 'در حال دانلود…' : state === 'error' ? error : '📷 دانلود عکس'}</span>
         </>
       )}
+    </button>
+  );
+}
+
+function TeleVoice({ m }) {
+  const [src, setSrc] = useState(null);
+  const [state, setState] = useState('idle'); // idle | loading | error
+  const [error, setError] = useState('');
+  useEffect(() => () => src && URL.revokeObjectURL(src), [src]);
+  const d = m.voice.duration || 0;
+  const len = `${Math.floor(d / 60)}:${String(d % 60).padStart(2, '0')}`;
+  const load = async () => {
+    if (state === 'loading') return;
+    setState('loading');
+    try {
+      const res = await fetch(`/api/tele/messages/${m.id}/voice`, { credentials: 'same-origin', headers: { 'x-requested-with': 'amorechat' } });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'دانلود پیام صوتی ناموفق بود');
+      setSrc(URL.createObjectURL(await res.blob()));
+      setState('idle');
+    } catch (e) {
+      setError(e.message);
+      setState('error');
+    }
+  };
+  if (src) return <audio className="tele-voice-audio" src={src} controls autoPlay preload="auto" />;
+  return (
+    <button className="tele-voice" onClick={load} title="دانلود و پخش">
+      <span className="tele-voice-play">
+        <Play size={18} />
+      </span>
+      <span className="grow">{state === 'loading' ? 'در حال دانلود…' : state === 'error' ? error : `پیام صوتی · ${toFa(len)}`}</span>
     </button>
   );
 }

@@ -11,6 +11,9 @@ export const DEFAULTS = {
   max_upload_mb: '100',
   // Tele: largest Telegram photo (MB) users with media permission may load or send
   tele_media_max_mb: '5',
+  // Tele: monthly traffic per user (MB, sent + received through the VPN); 0 = no cap. Each user can
+  // have their own cap instead.
+  tele_quota_mb: '0',
   // Total upload quota per user in MB; 0 = unlimited.
   user_quota_mb: '0',
   // Delete uploaded media older than this many days; 0 = keep forever.

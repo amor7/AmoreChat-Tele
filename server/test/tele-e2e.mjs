@@ -14,7 +14,8 @@ import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import zlib from 'node:zlib';
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
+import { DatabaseSync } from 'node:sqlite';
 import { fileURLToPath } from 'node:url';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -61,7 +62,7 @@ setTimeout(() => {
 // ---------- A SOCKS5 proxy (no auth) that counts what goes through it ----------
 const socksStats = { connections: 0 };
 const sockets = new Set();
-const socks = net.createServer((c) => {
+const socksHandler = (c) => {
   sockets.add(c);
   c.on('close', () => sockets.delete(c));
   c.on('error', () => {});
@@ -93,7 +94,8 @@ const socks = net.createServer((c) => {
       up.on('error', () => c.destroy());
     });
   });
-});
+};
+const socks = net.createServer(socksHandler);
 await new Promise((ok) => socks.listen(0, '127.0.0.1', ok));
 const SOCKS_PORT = socks.address().port;
 
@@ -103,7 +105,7 @@ let serverEnv = {};
 async function startServer(env = serverEnv) {
   serverEnv = env;
   const out = fs.openSync(LOG, 'a');
-  server = spawn(process.execPath, [path.join(ROOT, 'server/src/index.js')], { env: { ...process.env, PORT: String(PORT), ...env }, stdio: ['ignore', out, out] });
+  server = spawn(process.execPath, [path.join(ROOT, 'server/src/index.js')], { env: { ...process.env, PORT: String(PORT), TELE_ALERT_CHECK_MS: '1000', TELE_SWEEP_MS: '2000', ...env }, stdio: ['ignore', out, out] });
   await until('server up', async () => (await fetch(`${BASE}/healthz`)).ok, 30000);
 }
 async function stopServer() {
@@ -125,7 +127,7 @@ function client() {
     const res = await fetch(BASE + url, { method, headers: h, body: form || (body && JSON.stringify(body)) });
     const set = res.headers.get('set-cookie');
     if (set) cookie = set.split(';')[0];
-    if (/^image\//.test(res.headers.get('content-type') || '')) return { http: res.status, bytes: Buffer.from(await res.arrayBuffer()), type: res.headers.get('content-type') };
+    if (/^(image|audio)\//.test(res.headers.get('content-type') || '')) return { http: res.status, bytes: Buffer.from(await res.arrayBuffer()), type: res.headers.get('content-type') };
     return { ...(await res.json().catch(() => ({}))), http: res.status };
   }
   return { call, cookie: () => cookie };
@@ -169,6 +171,16 @@ async function addProxies(owner) {
   });
   return goodId;
 }
+/** Texts in a user's Saved Messages (where alerts arrive). */
+async function savedTexts(who) {
+  const saved = ok(await who.call('GET', '/api/chats'), 'chats').chats.find((c) => c.type === 'saved');
+  if (!saved) return [];
+  return ok(await who.call('GET', `/api/chats/${saved.id}/messages?limit=100`), 'saved').messages.map((m) => m.text || '');
+}
+const alertsOf = async (who) => (await savedTexts(who)).filter((t) => t.startsWith('⚠️ تلگرام'));
+// An unencrypted SQLite file starts with this; TDLib's encrypted database does not.
+const PLAIN_SQLITE = 'SQLite format 3\0';
+const sqliteHeader = (file) => fs.readFileSync(file).subarray(0, 16).toString('latin1');
 const tunnelRunning = async (owner) => (await owner.call('GET', '/api/admin/tele/proxies')).egress?.running;
 
 // ---------- A PNG photo, made here ----------
@@ -207,6 +219,11 @@ function png(w, h, seed) {
   ihdr[9] = 2;
   return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
 }
+const fileForm = (buf, type, name) => {
+  const form = new FormData();
+  form.append('file', new Blob([buf], { type }), name);
+  return form;
+};
 const photoForm = (buf, type = 'image/png') => {
   const form = new FormData();
   form.append('file', new Blob([buf], { type }), 'p.png');
@@ -254,6 +271,11 @@ async function part1() {
   assert.equal(r.account.status, 'awaiting_code', 'a wrong code keeps the code step');
   assert.ok(!r.account.phone.includes(alicePhone.slice(4, 8)), 'phone must be masked');
 
+  log('The Telegram session on disk is encrypted');
+  const sess1 = path.join(DATA_DIR, 'tele-sessions', '1', 'db', 'db.sqlite');
+  await until('session database', () => fs.existsSync(sess1), 15000);
+  assert.notEqual(sqliteHeader(sess1), PLAIN_SQLITE, 'the Telegram session is stored unencrypted');
+
   log('Server restart: a login left at the code step starts over; the tunnel comes back');
   await stopServer();
   await startServer();
@@ -283,6 +305,91 @@ async function part1() {
   ok(await alice.call('POST', '/api/tele/disconnect', {}), 'disconnect');
   r = ok(await alice.call('GET', '/api/tele/status'), 'status');
   assert.ok(!r.account || r.account.status === 'disconnected');
+
+  log('Alerts: only admins see and change them; bad values are refused');
+  r = await alice.call('GET', '/api/admin/tele/alerts');
+  assert.equal(r.http, 403);
+  r = await alice.call('PATCH', '/api/admin/tele/alerts', { enabled: false });
+  assert.equal(r.http, 403);
+  r = await alice.call('POST', '/api/admin/tele/alerts/test', {});
+  assert.equal(r.http, 403);
+  for (const bad of [{ events: ['nope'] }, { events: 'down' }, { delayMin: -1 }, { repeatMin: 1.5 }, { delayMin: 99999 }, { to: 'everyone' }]) {
+    r = await owner.call('PATCH', '/api/admin/tele/alerts', bad);
+    assert.equal(r.http, 400, `accepted ${JSON.stringify(bad)}`);
+  }
+  r = ok(await owner.call('GET', '/api/admin/tele/alerts'), 'alerts');
+  assert.equal(r.alerts.enabled, true, 'alerts are on by default');
+  ok(await owner.call('PATCH', '/api/admin/tele/alerts', { delayMin: 0, repeatMin: 0, events: ['down', 'up', 'proxy', 'quota'], to: 'admins' }), 'alert settings');
+  r = ok(await owner.call('POST', '/api/admin/tele/alerts/test', {}), 'test alert');
+  assert.equal(r.recipients, 1, 'only the owner is an admin here');
+  await until('test alert arrives', async () => (await alertsOf(owner)).some((t) => t.includes('🔔')), 10000);
+
+  log('Alerts: a proxy breaks; Telegram goes down and comes back');
+  const socks2 = net.createServer(socksHandler);
+  await new Promise((done) => socks2.listen(0, '127.0.0.1', done));
+  const port2 = socks2.address().port;
+  r = ok(await owner.call('POST', '/api/admin/tele/proxies', { form: { type: 'socks5', server: '127.0.0.1', port: port2 }, name: 'second', priority: 50 }), 'add second proxy');
+  const secondId = r.proxy.id;
+  r = ok(await owner.call('POST', `/api/admin/tele/proxies/${secondId}/probe`, {}), 'probe second');
+  assert.equal(r.proxy.lastStatus, 'healthy', r.proxy.lastError);
+  socks2.close();
+  for (const sk of sockets) if (sk.localPort === port2) sk.destroy();
+  r = ok(await owner.call('POST', `/api/admin/tele/proxies/${secondId}/probe`, {}), 'probe second again');
+  assert.equal(r.proxy.lastStatus, 'unhealthy');
+  await until('proxy alert', async () => (await alertsOf(owner)).some((t) => t.includes('🟠') && t.includes('second')), 10000);
+  assert.ok(await tunnelRunning(owner), 'the working proxy still carries Telegram');
+  ok(await owner.call('PATCH', `/api/admin/tele/proxies/${goodId}`, { enabled: false }), 'disable proxy');
+  await until('down alert', async () => (await alertsOf(owner)).some((t) => t.includes('🔴')), 20000);
+  ok(await owner.call('PATCH', `/api/admin/tele/proxies/${goodId}`, { enabled: true }), 'enable proxy');
+  ok(await owner.call('POST', `/api/admin/tele/proxies/${goodId}/probe`, {}), 'probe');
+  await until('back alert', async () => (await alertsOf(owner)).some((t) => t.includes('✅')), 20000);
+  assert.equal((await alertsOf(owner)).filter((t) => t.includes('🔴')).length, 1, 'the outage was announced more than once (reminders are off)');
+  assert.equal((await alertsOf(alice)).length, 0, 'a user who is not an admin got an alert');
+
+  log('Alerts off: nothing is sent, and no "back" message later');
+  ok(await owner.call('PATCH', '/api/admin/tele/alerts', { enabled: false }), 'alerts off');
+  const count = (await alertsOf(owner)).length;
+  ok(await owner.call('PATCH', `/api/admin/tele/proxies/${goodId}`, { enabled: false }), 'disable proxy');
+  await until('tunnel stopped', async () => !(await tunnelRunning(owner)), 20000);
+  await sleep(4000);
+  ok(await owner.call('PATCH', `/api/admin/tele/proxies/${goodId}`, { enabled: true }), 'enable proxy');
+  ok(await owner.call('POST', `/api/admin/tele/proxies/${goodId}/probe`, {}), 'probe');
+  await until('tunnel back', () => tunnelRunning(owner), 30000);
+  ok(await owner.call('PATCH', '/api/admin/tele/alerts', { enabled: true }), 'alerts on');
+  await sleep(4000);
+  const after = await alertsOf(owner);
+  assert.ok(after.length <= count + 1 && !after.slice(count).some((t) => t.includes('✅')), `alerts while off: ${JSON.stringify(after.slice(count))}`);
+
+  log('Usage caps and permissions: admin only, values checked, partial changes');
+  r = await alice.call('GET', '/api/admin/tele/accounts');
+  assert.equal(r.http, 403);
+  r = await alice.call('PATCH', '/api/admin/tele/quota', { defaultMb: 0 });
+  assert.equal(r.http, 403);
+  for (const bad of [-1, 1.5, 'x']) {
+    r = await owner.call('PATCH', '/api/admin/tele/quota', { defaultMb: bad });
+    assert.equal(r.http, 400, `accepted default cap ${bad}`);
+  }
+  r = ok(await owner.call('GET', '/api/admin/tele/accounts'), 'accounts');
+  const acc = r.accounts.find((a) => a.username === 'alice');
+  assert.ok(acc && typeof acc.used === 'number', 'alice is listed with her usage');
+  r = await alice.call('PATCH', `/api/admin/tele/accounts/${acc.id}`, { allowVoice: true });
+  assert.equal(r.http, 403);
+  for (const bad of [-1, 2.5, 'abc']) {
+    r = await owner.call('PATCH', `/api/admin/tele/accounts/${acc.id}`, { quotaMb: bad });
+    assert.equal(r.http, 400, `accepted cap ${bad}`);
+  }
+  r = await owner.call('PATCH', '/api/admin/tele/accounts/99999', { allowVoice: true });
+  assert.equal(r.http, 404);
+  ok(await owner.call('PATCH', `/api/admin/tele/accounts/${acc.id}`, { allowMedia: true }), 'allow media');
+  ok(await owner.call('PATCH', `/api/admin/tele/accounts/${acc.id}`, { allowVoice: true, quotaMb: 50 }), 'allow voice + cap');
+  r = ok(await owner.call('GET', '/api/admin/tele/accounts'), 'accounts').accounts.find((a) => a.id === acc.id);
+  assert.deepEqual([r.allowMedia, r.allowVoice, r.quotaMb, r.effectiveQuotaMb], [true, true, 50, 50], 'one change undid another');
+  ok(await owner.call('PATCH', '/api/admin/tele/quota', { defaultMb: 30 }), 'default cap');
+  ok(await owner.call('PATCH', `/api/admin/tele/accounts/${acc.id}`, { quotaMb: null }), 'back to default');
+  r = ok(await owner.call('GET', '/api/admin/tele/accounts'), 'accounts').accounts.find((a) => a.id === acc.id);
+  assert.deepEqual([r.quotaMb, r.effectiveQuotaMb], [null, 30]);
+  r = ok(await alice.call('GET', '/api/tele/status'), 'status');
+  ok(await owner.call('PATCH', '/api/admin/tele/quota', { defaultMb: 0 }), 'no default cap');
   await stopServer();
 }
 
@@ -329,6 +436,10 @@ async function part2() {
   assert.equal(r.account.status, 'connected');
   assert.equal(Number(r.account.tgUserId), meta.userId, 'Telegram user id of the account');
   assert.ok(r.live);
+
+  log('The saved session (from before encryption) is now stored encrypted');
+  assert.equal(sqliteHeader(path.join(SESSION_DIR, 'db', 'db.sqlite')), PLAIN_SQLITE, 'the test session should start unencrypted');
+  await until('encrypted', () => sqliteHeader(path.join(DATA_DIR, 'tele-sessions', '1', 'db', 'db.sqlite')) !== PLAIN_SQLITE, 15000);
 
   log('"Add a chat" lists the bot chat and the group; nothing is selected on its own');
   const { pd, gd } = await until('bot chat and group in the list', async () => {
@@ -452,6 +563,117 @@ async function part2() {
   r = await alice.call('POST', `/api/tele/dialogs/${pd.id}/photo`, null, { form: photoForm(Buffer.from('not an image'), 'text/plain') });
   assert.equal(r.http, 400);
 
+  log('Voice: off by default, then on for Alice only');
+  const oggFile = path.join(botDir, 'voice.ogg');
+  const webmFile = path.join(botDir, 'rec.webm');
+  execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=2', '-c:a', 'libopus', '-b:a', '24k', oggFile]);
+  execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-f', 'lavfi', '-i', 'sine=frequency=300:duration=2', '-c:a', 'libopus', '-b:a', '24k', webmFile]);
+  await bot.invoke({
+    _: 'sendMessage', chat_id: meta.userId,
+    input_message_content: { _: 'inputMessageVoiceNote', voice_note: { _: 'inputVoiceNote', voice_note: { _: 'inputFileLocal', path: oggFile }, duration: 2, waveform: '' }, caption: { _: 'formattedText', text: `voice ${RUN}` } },
+  });
+  const voiceMsg = await until('voice at Alice', async () => {
+    const x = ok(await alice.call('GET', `/api/tele/dialogs/${pd.id}/messages`), 'messages');
+    return x.messages.find((m) => m.voice && m.text.includes(`voice ${RUN}`));
+  }, 60000);
+  assert.equal(voiceMsg.kind, 'voice');
+  assert.equal(voiceMsg.voice.duration, 2);
+  r = await alice.call('GET', `/api/tele/messages/${voiceMsg.id}/voice`);
+  assert.equal(r.http, 403, 'voice loaded before the admin allowed it');
+  r = await alice.call('POST', `/api/tele/dialogs/${pd.id}/voice?duration=2`, null, { form: fileForm(fs.readFileSync(webmFile), 'audio/webm', 'rec.webm') });
+  assert.equal(r.http, 403, 'voice sent before the admin allowed it');
+  const aliceAcc = ok(await owner.call('GET', '/api/admin/tele/accounts'), 'accounts').accounts.find((a) => a.username === 'alice');
+  ok(await owner.call('PATCH', `/api/admin/tele/accounts/${aliceAcc.id}`, { allowVoice: true }), 'allow voice');
+  r = await alice.call('GET', `/api/tele/messages/${voiceMsg.id}/voice`);
+  assert.equal(r.http, 200, JSON.stringify(r).slice(0, 300));
+  assert.equal(r.type, 'audio/mp4', 'voice is converted for iPhones');
+  assert.ok(r.bytes.length > 500);
+  r = await bob.call('GET', `/api/tele/messages/${voiceMsg.id}/voice`);
+  assert.ok([403, 404].includes(r.http));
+  r = await alice.call('POST', `/api/tele/dialogs/${pd.id}/voice?duration=2&caption=${encodeURIComponent(`my voice ${RUN}`)}`, null, { form: fileForm(fs.readFileSync(webmFile), 'audio/webm', 'rec.webm') });
+  assert.equal(r.http, 201, JSON.stringify(r));
+  assert.equal(r.message.kind, 'voice');
+  const gotVoice = await until('the bot receives the voice', () => botMsgs.find((m) => m.content?._ === 'messageVoiceNote' && textOf(m) === `my voice ${RUN}`), 60000);
+  assert.ok(gotVoice.content.voice_note.duration >= 1, 'voice without a length');
+  r = await alice.call('POST', `/api/tele/dialogs/${pd.id}/voice`, null, { form: fileForm(Buffer.from('not audio'), 'text/plain', 'x.txt') });
+  assert.equal(r.http, 400);
+
+  log('Forward Telegram messages into the app: text, photo, voice');
+  const savedChat = ok(await alice.call('GET', '/api/chats'), 'chats').chats.find((c) => c.type === 'saved');
+  const savedMsgs = async () => ok(await alice.call('GET', `/api/chats/${savedChat.id}/messages?limit=100`), 'saved').messages;
+  r = ok(await alice.call('POST', `/api/tele/messages/${hello.id}/forward`, { chatIds: [savedChat.id] }), 'forward text');
+  assert.deepEqual(r.sent, [savedChat.id]);
+  let fm = (await savedMsgs()).find((m) => m.text === helloText);
+  assert.ok(fm, 'forwarded text not in the chat');
+  assert.match(fm.forwardedFrom || '', /^تلگرام · /);
+  ok(await alice.call('POST', `/api/tele/messages/${photoMsg.id}/forward`, { chatIds: [savedChat.id] }), 'forward photo');
+  fm = (await savedMsgs()).find((m) => m.text === `photo ${RUN}`);
+  assert.equal(fm?.type, 'image', 'the photo did not come along');
+  ok(await alice.call('POST', `/api/tele/messages/${voiceMsg.id}/forward`, { chatIds: [savedChat.id] }), 'forward voice');
+  fm = (await savedMsgs()).find((m) => m.text === `voice ${RUN}`);
+  assert.equal(fm?.type, 'voice', 'the voice did not come along');
+  r = await alice.call('POST', `/api/tele/messages/${hello.id}/forward`, { chatIds: [999999] });
+  assert.equal(r.http, 400, 'forwarded into a chat Alice is not in');
+  r = await alice.call('POST', `/api/tele/messages/${hello.id}/forward`, { chatIds: [] });
+  assert.equal(r.http, 400);
+  const bobSaved = ok(await bob.call('GET', '/api/chats'), 'chats').chats.find((c) => c.type === 'saved');
+  r = await bob.call('POST', `/api/tele/messages/${hello.id}/forward`, { chatIds: [bobSaved.id] });
+  assert.equal(r.http, 404, "Bob forwarded Alice's Telegram message");
+
+  log('Send messages of the app to Telegram: text and photo');
+  const appText = `from the app ${RUN}`;
+  const appMsg = ok(await alice.call('POST', `/api/chats/${savedChat.id}/messages`, { text: appText }), 'app message').message;
+  r = ok(await alice.call('POST', '/api/tele/forward', { messageId: appMsg.id, dialogIds: [pd.id] }), 'to telegram');
+  assert.deepEqual(r.sent, [pd.id]);
+  await until('the bot gets the app text', () => botMsgs.find((m) => textOf(m) === appText), 30000);
+  const up = await alice.call('POST', '/api/upload', null, { form: fileForm(png(120, 90, 7), 'image/png', 'a.png') });
+  assert.equal(up.http, 201, JSON.stringify(up));
+  const appPhoto = ok(await alice.call('POST', `/api/chats/${savedChat.id}/messages`, { fileId: up.file.id, type: 'image', text: `app photo ${RUN}` }), 'app photo').message;
+  ok(await alice.call('POST', '/api/tele/forward', { messageId: appPhoto.id, dialogIds: [pd.id] }), 'photo to telegram');
+  await until('the bot gets the photo', () => botMsgs.find((m) => m.content?._ === 'messagePhoto' && textOf(m) === `app photo ${RUN}`), 60000);
+  r = await bob.call('POST', '/api/tele/forward', { messageId: appMsg.id, dialogIds: [pd.id] });
+  assert.ok([400, 403, 404].includes(r.http), "Bob sent Alice's message");
+  r = await alice.call('POST', '/api/tele/forward', { messageId: appMsg.id, dialogIds: [99999] });
+  assert.equal(r.http, 400);
+
+  log('Usage: counted per month; the heaviest users come first');
+  r = await until('usage counted', async () => {
+    const x = ok(await alice.call('GET', '/api/tele/status'), 'status');
+    return x.usage?.used > 0 && x;
+  }, 20000);
+  r = ok(await owner.call('GET', '/api/admin/tele/accounts'), 'accounts');
+  assert.equal(r.accounts[0].username, 'alice');
+  assert.ok(r.accounts[0].used > 0);
+
+  log('Monthly cap reached: stored messages only, nothing sent, the admin is told');
+  ok(await owner.call('PATCH', `/api/admin/tele/accounts/${aliceAcc.id}`, { quotaMb: 1 }), 'cap 1 MB');
+  // A test moves far less than any real cap: add the rest of a heavy month directly.
+  const db = new DatabaseSync(path.join(DATA_DIR, 'amorechat.db'));
+  db.exec('PRAGMA busy_timeout = 5000');
+  const month = new Date().toISOString().slice(0, 7);
+  db.prepare('INSERT INTO tele_usage (account_id, month, sent, received) VALUES (?, ?, 0, ?) ON CONFLICT(account_id, month) DO UPDATE SET received = received + excluded.received').run(aliceAcc.id, month, 5 * 1048576);
+  r = await alice.call('POST', `/api/tele/dialogs/${pd.id}/messages`, { text: `over cap ${RUN}` });
+  assert.equal(r.http, 429, JSON.stringify(r));
+  r = ok(await alice.call('GET', `/api/tele/dialogs/${pd.id}/messages`), 'stored messages');
+  assert.match(r.notice || '', /سقف/);
+  assert.ok(r.messages.some((m) => m.text === helloText));
+  r = ok(await alice.call('GET', `/api/tele/dialogs/${pd.id}/search?q=${encodeURIComponent(helloText)}`), 'search over cap');
+  assert.equal(r.messages.length, 1, 'search of stored messages over the cap');
+  r = ok(await alice.call('POST', '/api/tele/dialogs/refresh', {}), 'refresh over cap');
+  assert.match(r.notice || '', /سقف/);
+  r = await alice.call('POST', `/api/tele/dialogs/${pd.id}/photo`, null, { form: photoForm(png(64, 64, 9)) });
+  assert.equal(r.http, 429);
+  r = ok(await alice.call('GET', '/api/tele/status'), 'status');
+  assert.ok(r.usage.used >= r.usage.quotaMb * 1048576);
+  await until('cap alert to the admin', async () => (await alertsOf(owner)).some((t) => t.includes('📊') && t.includes('Alice')), 20000);
+  await until('connection closed over the cap', async () => !(await alice.call('GET', '/api/tele/status')).live, 20000);
+  ok(await owner.call('PATCH', `/api/admin/tele/accounts/${aliceAcc.id}`, { quotaMb: 0 }), 'no cap for Alice');
+  ok(await alice.call('POST', `/api/tele/dialogs/${pd.id}/messages`, { text: `cap lifted ${RUN}` }), 'send after the cap is lifted');
+  await until('the bot receives it', () => botMsgs.find((m) => textOf(m) === `cap lifted ${RUN}`), 30000);
+  assert.ok(!botMsgs.some((m) => textOf(m) === `over cap ${RUN}`), 'a message went out over the cap');
+  ok(await owner.call('PATCH', `/api/admin/tele/accounts/${aliceAcc.id}`, { quotaMb: null }), 'default cap');
+  db.close();
+
   log('Edited and deleted in Telegram: the same here');
   const editId = await botSendFinal(meta.userId, `to edit ${RUN}`);
   const delId = await botSendFinal(meta.userId, `to delete ${RUN}`);
@@ -464,7 +686,7 @@ async function part2() {
     return !x.messages.some((m) => m.text === `to delete ${RUN}` || m.text === `to edit ${RUN}`);
   }, 30000);
 
-  await uiChecks({ alice, bob, pd, gd, meta, photoMsg, helloText, botSend, botMsgs, textOf });
+  await uiChecks({ owner, alice, bob, pd, gd, meta, photoMsg, voiceMsg, savedChat, helloText, botSend, botMsgs, textOf });
 
   log('Server restart: the account reconnects from its saved session');
   await stopServer();
@@ -495,9 +717,10 @@ async function part2() {
 }
 
 // ---------- The Telegram page in a real browser (desktop, then phone) ----------
-async function uiChecks({ alice, bob, pd, gd, meta, photoMsg, helloText, botSend, botMsgs, textOf }) {
+async function uiChecks({ owner, alice, bob, pd, gd, meta, photoMsg, voiceMsg, savedChat, helloText, botSend, botMsgs, textOf }) {
   const { default: puppeteer } = await import('puppeteer');
-  const browser = await puppeteer.launch({ args: ['--no-sandbox'] });
+  // A fake microphone, allowed without asking (for recording a voice message).
+  const browser = await puppeteer.launch({ args: ['--no-sandbox', '--use-fake-ui-for-media-stream', '--use-fake-device-for-media-stream'] });
   const shots = [];
   try {
     const page = await browser.newPage();
@@ -578,6 +801,77 @@ async function uiChecks({ alice, bob, pd, gd, meta, photoMsg, helloText, botSend
     assert.deepEqual(await texts('.tele-chat .msg-row .text'), [helloText]);
     await page.click('button[aria-label="بستن جستجو"]');
     await page.waitForSelector('.tele-chat textarea');
+
+    const clickText = async (sel, text) => {
+      await waitText(sel, text);
+      await page.evaluate((sel, text) => [...document.querySelectorAll(sel)].find((e) => e.textContent.includes(text)).click(), sel, text);
+    };
+
+    log('UI: forward a Telegram message into the app');
+    const savedCount = async () => ok(await alice.call('GET', `/api/chats/${savedChat.id}/messages?limit=100`), 'saved').messages.filter((m) => m.text === helloText).length;
+    const before = await savedCount();
+    await page.evaluate((t) => {
+      const row = [...document.querySelectorAll('.tele-chat .msg-row')].find((r) => r.querySelector('.text')?.textContent.trim() === t);
+      row.querySelector('.msg-fwd').click();
+    }, helloText);
+    await page.waitForSelector('.modal[aria-label="ارسال پیام تلگرام به…"] .user-list input[type=checkbox]');
+    await page.click('.modal .user-list input[type=checkbox]');
+    await clickText('.modal button.btn.primary', 'ارسال');
+    await until('forwarded from the UI', async () => (await savedCount()) === before + 1, 20000);
+
+    log('UI: the voice message plays on tap');
+    await page.evaluate((cap) => {
+      const row = [...document.querySelectorAll('.tele-chat .msg-row')].find((r) => r.textContent.includes(cap) && r.querySelector('.tele-voice'));
+      row.querySelector('.tele-voice').click();
+    }, `voice ${voiceMsg.text.split('voice ')[1] || ''}`.trim());
+    await page.waitForFunction(() => {
+      const a = document.querySelector('.tele-chat audio.tele-voice-audio');
+      return a && a.readyState >= 1 && a.duration > 1;
+    }, { timeout: 60000 });
+
+    log('UI: record and send a voice message');
+    const voicesBefore = botMsgs.filter((m) => m.content?._ === 'messageVoiceNote').length;
+    await page.click('.tele-chat button[aria-label="ضبط پیام صوتی"]');
+    await page.waitForSelector('.tele-recorder');
+    await sleep(2500);
+    await page.click('.tele-recorder button[aria-label="ارسال پیام صوتی"]');
+    const rec = await until('the bot receives the recording', () => botMsgs.filter((m) => m.content?._ === 'messageVoiceNote').length > voicesBefore && botMsgs.filter((m) => m.content?._ === 'messageVoiceNote').at(-1), 60000);
+    assert.ok(rec.content.voice_note.duration >= 1, 'recording without a length');
+    await page.waitForSelector('.tele-chat textarea');
+    await shot('voice');
+
+    log('UI: a message of the app → Telegram, from its menu');
+    const menuText = `from the menu ${RUN}`;
+    ok(await alice.call('POST', `/api/chats/${savedChat.id}/messages`, { text: menuText }), 'app message');
+    await page.goto(`${BASE}/#/chat/${savedChat.id}`, { waitUntil: 'networkidle0' });
+    await waitText('.bubble', menuText);
+    const bubble = await page.evaluateHandle((t) => [...document.querySelectorAll('.bubble')].reverse().find((b) => b.textContent.includes(t)), menuText);
+    await bubble.click({ button: 'right' });
+    await clickText('.menu.floating button', 'ارسال به تلگرام');
+    await page.waitForSelector('.modal .user-list input[type=checkbox]');
+    await page.evaluate((title) => {
+      const row = [...document.querySelectorAll('.modal .user-list label')].find((l) => l.textContent.includes(title));
+      row.querySelector('input').click();
+    }, pd.title);
+    await clickText('.modal button.btn.primary', 'ارسال');
+    await until('the bot gets the message from the menu', () => botMsgs.find((m) => textOf(m) === menuText), 30000);
+
+    log('UI: admin panel → Tele / VPN shows alerts and the users');
+    await open(owner, '#/', { width: 1280, height: 900 });
+    await page.click('.menu-btn');
+    await clickText('.sidebar .menu > button', 'پنل مدیریت');
+    await clickText('.modal .tabs button', 'Tele / VPN');
+    await waitText('.modal h4', 'هشدارها');
+    await waitText('.modal .tele-users', 'Alice');
+    await shot('admin');
+    // Turning voice off for Alice from the panel works.
+    await page.evaluate(() => {
+      const row = [...document.querySelectorAll('.tele-users li')].find((l) => l.textContent.includes('Alice'));
+      [...row.querySelectorAll('label.check')].find((l) => l.textContent.includes('صوت')).querySelector('input').click();
+    });
+    await until('voice turned off from the panel', async () => !ok(await owner.call('GET', '/api/admin/tele/accounts'), 'accounts').accounts.find((a) => a.username === 'alice').allowVoice, 10000);
+    const aliceId = ok(await owner.call('GET', '/api/admin/tele/accounts'), 'accounts').accounts.find((a) => a.username === 'alice').id;
+    ok(await owner.call('PATCH', `/api/admin/tele/accounts/${aliceId}`, { allowVoice: true }), 'voice back on');
 
     log('UI (phone): list, open chat, back');
     await open(alice, '#/tele', { width: 390, height: 844, isMobile: true, hasTouch: true });

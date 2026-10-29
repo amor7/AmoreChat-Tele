@@ -16,7 +16,7 @@ export const mediaReady = new Promise((resolve) => {
   });
 });
 
-function ffmpeg(args) {
+export function ffmpeg(args) {
   return new Promise((resolve, reject) => {
     // Lower priority on Linux so transcoding never starves the chat server.
     const [cmd, argv] = process.platform === 'linux' ? ['nice', ['-n', '10', FFMPEG, ...args]] : [FFMPEG, args];

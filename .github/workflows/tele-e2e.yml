@@ -36,6 +36,9 @@ jobs:
           cache: npm
       - if: steps.keys.outputs.ok
         run: npm ci
+      - name: ffmpeg (voice messages)
+        if: steps.keys.outputs.ok
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
       - name: Install sing-box (the version and checksum the image uses)
         if: steps.keys.outputs.ok
         run: |

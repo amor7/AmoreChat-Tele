@@ -37,7 +37,7 @@ function kindOf(mime) {
 
 const num = (v) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : null);
 
-const newRel = () => path.posix.join(new Date().toISOString().slice(0, 7), crypto.randomBytes(16).toString('hex'));
+export const newRel = () => path.posix.join(new Date().toISOString().slice(0, 7), crypto.randomBytes(16).toString('hex'));
 
 function checkLimits(user, size = 0) {
   const limits = effectiveLimits(user);
@@ -50,7 +50,7 @@ function checkLimits(user, size = 0) {
 }
 
 // Records a finished upload (already at UPLOAD_DIR/rel) and starts voice/video processing.
-async function registerFile(user, { rel, mime, name, q = {} }) {
+export async function registerFile(user, { rel, mime, name, q = {} }) {
   const size = fs.statSync(path.join(UPLOAD_DIR, rel)).size;
   mime = String(mime || 'application/octet-stream').toLowerCase().split(';')[0];
   const kind = kindOf(mime);

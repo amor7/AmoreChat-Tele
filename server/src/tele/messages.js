@@ -5,6 +5,7 @@ import { get, all, run, now, DATA_DIR } from '../db.js';
 import { settingNumber } from '../settings.js';
 import { getAccountForUser, liveClient, listDialogs, upsertDialog, onTeleUpdate } from './accounts.js';
 import { ensureEgress } from './egress.js';
+import { ffmpeg, mediaReady } from '../media.js';
 
 const UPLOADS = path.join(DATA_DIR, 'tele-uploads');
 export const mediaMaxBytes = () => (settingNumber('tele_media_max_mb') || 5) * 1048576;
@@ -28,6 +29,13 @@ function photoInfo(content) {
   const big = sizes.at(-1);
   return { type: 'photo', w: big?.w || 0, h: big?.h || 0, mini: content.photo.minithumbnail?.data || '', sizes };
 }
+// Voice message: length, the waveform Telegram sends with it (for the bars) and the file to fetch on request.
+function voiceInfo(content) {
+  if (content?._ !== 'messageVoiceNote' || !content.voice_note) return null;
+  const v = content.voice_note;
+  return { type: 'voice', duration: v.duration || 0, mime: v.mime_type || '', size: v.voice?.size || v.voice?.expected_size || 0, remote: v.voice?.remote?.id || '', wave: v.waveform || '' };
+}
+const mediaInfo = (content) => photoInfo(content) || voiceInfo(content);
 const parseMedia = (s) => {
   try {
     return s ? JSON.parse(s) : null;
@@ -60,6 +68,7 @@ export function publicMessage(row, quoted = null) {
     id: row.id, dialogId: row.dialog_id, tgMsgId: row.tg_msg_id, direction: row.direction, kind: row.kind, text: row.text,
     createdAt: row.created_at, senderId: row.sender_id || '', senderName: row.sender_name || '', replyTo,
     photo: media?.type === 'photo' ? { w: media.w, h: media.h, mini: media.mini } : null,
+    voice: media?.type === 'voice' ? { duration: media.duration, wave: media.wave, size: media.size } : null,
   };
 }
 function storeMessage(accountId, dialogId, { tgMsgId, direction, kind, text, createdAt, senderId = '', senderName = '', replyTo = null, media = null }) {
@@ -100,7 +109,7 @@ export function contentText(content) {
   if (content._ === 'messageDocument' && content.document?.file_name) return `${label}: ${content.document.file_name}${caption ? '\n' + caption : ''}`;
   return caption ? `${label}\n${caption}` : label;
 }
-const kindOf = (content) => (content?._ === 'messageText' ? 'text' : content?._ === 'messagePhoto' ? 'photo' : 'other');
+const kindOf = (content) => ({ messageText: 'text', messagePhoto: 'photo', messageVoiceNote: 'voice' })[content?._] || 'other';
 
 // Display names of senders, per TDLib client (users and chats rarely change name).
 const names = new WeakMap();
@@ -133,7 +142,7 @@ async function storeTdMessage(client, accountId, dialogId, m) {
   const s = await senderOf(client, m.sender_id);
   return storeMessage(accountId, dialogId, {
     tgMsgId: m.id, direction: m.is_outgoing ? 'out' : 'in', kind: kindOf(m.content), text: contentText(m.content),
-    createdAt: m.date ? m.date * 1000 : now(), senderId: s.id, senderName: s.name, replyTo: replyIdOf(m), media: photoInfo(m.content),
+    createdAt: m.date ? m.date * 1000 : now(), senderId: s.id, senderName: s.name, replyTo: replyIdOf(m), media: mediaInfo(m.content),
   });
 }
 async function storeTdMessages(client, accountId, dialogId, messages) {
@@ -176,7 +185,7 @@ function applyChange(accountId, u) {
     run(`DELETE FROM tele_messages WHERE account_id = ? AND dialog_id = ? AND tg_msg_id IN (${u.message_ids.map(() => '?').join(',')})`, accountId, dialog.id, ...u.message_ids);
     return;
   }
-  const media = photoInfo(u.new_content);
+  const media = mediaInfo(u.new_content);
   run(
     'UPDATE tele_messages SET text = ?, kind = ?, media = COALESCE(?, media) WHERE account_id = ? AND dialog_id = ? AND tg_msg_id = ?',
     contentText(u.new_content).slice(0, 8000), kindOf(u.new_content), media ? JSON.stringify(media) : null, accountId, dialog.id, u.message_id,
@@ -197,7 +206,7 @@ function applySent(accountId, u) {
   const m = u.message;
   const final = get('SELECT id FROM tele_messages WHERE account_id = ? AND dialog_id = ? AND tg_msg_id = ?', accountId, temp.dialog_id, m.id);
   if (final) run('DELETE FROM tele_messages WHERE id = ?', final.id);
-  const media = photoInfo(m.content);
+  const media = mediaInfo(m.content);
   run(
     'UPDATE tele_messages SET tg_msg_id = ?, created_at = ?, media = ? WHERE id = ?',
     m.id, m.date ? m.date * 1000 : temp.created_at, media ? JSON.stringify(media) : temp.media, temp.id,
@@ -252,7 +261,10 @@ export async function searchDialogMessages(userId, dialogId, query) {
   const q = String(query || '').trim();
   if (q.length < 2) throw Object.assign(new Error('حداقل ۲ حرف بنویسید'), { statusCode: 400 });
   const { account, dialog } = ownDialog(userId, dialogId);
-  const client = await liveClient(account);
+  const client = await liveClient(account).catch((e) => {
+    if (e.quota) return null;
+    throw e;
+  });
   if (!client) {
     const rows = all(`SELECT * FROM tele_messages WHERE account_id = ? AND dialog_id = ? AND text LIKE ? ORDER BY tg_msg_id DESC LIMIT 50`, account.id, dialog.id, `%${q}%`);
     return { messages: publicMessages(rows) };
@@ -281,7 +293,7 @@ async function sendContent(userId, dialogId, content, { replyTo = null, text = '
   const t = result?.date ? result.date * 1000 : now();
   upsertDialog(account.id, { tgChatId: dialog.tg_chat_id, lastText: text, lastAt: t, lastOut: true });
   // Stored under the temporary id; moved to the final one when Telegram confirms (onTeleUpdate above).
-  const row = storeMessage(account.id, dialog.id, { tgMsgId: result?.id, direction: 'out', kind, text, createdAt: t, replyTo, media: media || photoInfo(result?.content) });
+  const row = storeMessage(account.id, dialog.id, { tgMsgId: result?.id, direction: 'out', kind, text, createdAt: t, replyTo, media: media || mediaInfo(result?.content) });
   const confirmed = early.get(`${account.id}:${result?.id}`);
   if (confirmed) {
     early.delete(`${account.id}:${result.id}`);
@@ -298,9 +310,11 @@ export async function sendTeleMessage(userId, dialogId, text, replyTo = null) {
 }
 
 // ---------- Photos: only for accounts an admin allowed, and up to the size limit ----------
-function mediaAccount(userId) {
+function mediaAccount(userId, kind = 'photo') {
   const account = getAccountForUser(userId);
-  if (!account?.allow_media) throw Object.assign(new Error('دسترسی به عکس‌های تلگرام برای شما فعال نیست'), { statusCode: 403 });
+  if (kind === 'voice' ? !account?.allow_voice : !account?.allow_media) {
+    throw Object.assign(new Error(kind === 'voice' ? 'دسترسی به پیام صوتی تلگرام برای شما فعال نیست' : 'دسترسی به عکس‌های تلگرام برای شما فعال نیست'), { statusCode: 403 });
+  }
   return account;
 }
 
@@ -311,7 +325,7 @@ export async function sendTelePhoto(userId, dialogId, file, { caption = '', repl
   const content = { _: 'inputMessagePhoto', photo: { _: 'inputPhoto', photo: { _: 'inputFileLocal', path: file } }, caption: text ? { _: 'formattedText', text } : undefined };
   return sendContent(userId, dialogId, content, { replyTo, text: text ? `📷 عکس\n${text}` : '📷 عکس', kind: 'photo' });
 }
-export function newUploadPath() {
+export function newUploadPath(ext = '.jpg') {
   fs.mkdirSync(UPLOADS, { recursive: true, mode: 0o700 });
   // TDLib uploads in the background after sendMessage returns: keep files a day, then clean up.
   for (const f of fs.readdirSync(UPLOADS)) {
@@ -322,7 +336,7 @@ export function newUploadPath() {
       /* ignore */
     }
   }
-  return path.join(UPLOADS, crypto.randomBytes(12).toString('hex') + '.jpg');
+  return path.join(UPLOADS, crypto.randomBytes(12).toString('hex') + ext);
 }
 
 /** Local path of a message's photo, downloaded through the tunnel on first request. */
@@ -357,7 +371,13 @@ const KIND = (chat) =>
 export async function refreshDialogsFromTelegram(userId, { all: everything = false } = {}) {
   const account = getAccountForUser(userId);
   if (!account) throw Object.assign(new Error('حساب وصل نیست'), { statusCode: 400 });
-  const client = await liveClient(account);
+  let client;
+  try {
+    client = await liveClient(account);
+  } catch (e) {
+    if (e.quota) return { dialogs: listDialogs(account.id), notice: e.message };
+    throw e;
+  }
   if (!client) return { dialogs: listDialogs(account.id), notice: 'حساب تلگرام وصل نیست' };
   await ensureEgress();
   let ids;
@@ -381,4 +401,70 @@ export async function refreshDialogsFromTelegram(userId, { all: everything = fal
     }
   }
   return { dialogs: listDialogs(account.id) };
+}
+
+// ---------- Voice messages: only for accounts an admin allowed, and up to the size limit ----------
+
+/**
+ * A message's voice file, downloaded through the tunnel on first request. Telegram voice is
+ * Ogg/Opus, which iPhones can't play: it is converted to AAC (m4a) once when ffmpeg is there.
+ */
+export async function teleVoiceFile(userId, messageId) {
+  const account = mediaAccount(userId, 'voice');
+  const row = get('SELECT * FROM tele_messages WHERE id = ? AND account_id = ?', Number(messageId), account.id);
+  const media = parseMedia(row?.media);
+  if (media?.type !== 'voice' || !media.remote) throw Object.assign(new Error('پیام صوتی پیدا نشد'), { statusCode: 404 });
+  if (media.size > mediaMaxBytes()) throw Object.assign(new Error(`حجم این پیام صوتی بیشتر از سقف مجاز (${settingNumber('tele_media_max_mb') || 5} مگابایت) است`), { statusCode: 413 });
+  const client = await liveClient(account);
+  if (!client) throw Object.assign(new Error('اتصال به تلگرام برقرار نیست'), { statusCode: 503, expose: true });
+  let file = await client.invoke({ _: 'getRemoteFile', remote_file_id: media.remote, file_type: { _: 'fileTypeVoiceNote' } });
+  if (!file.local?.is_downloading_completed) {
+    await ensureEgress();
+    file = await client.invoke({ _: 'downloadFile', file_id: file.id, priority: 16, offset: 0, limit: 0, synchronous: true });
+  }
+  const src = file.local?.path;
+  if (!src || !fs.existsSync(src)) throw Object.assign(new Error('دانلود پیام صوتی ناموفق بود'), { statusCode: 502, expose: true });
+  const m4a = src + '.m4a';
+  if (!fs.existsSync(m4a) && (await mediaReady)) {
+    try {
+      await ffmpeg(['-y', '-i', src, '-vn', '-ac', '1', '-c:a', 'aac', '-b:a', '48k', '-movflags', '+faststart', m4a]);
+    } catch {
+      fs.rmSync(m4a, { force: true });
+    }
+  }
+  return fs.existsSync(m4a) ? { file: m4a, type: 'audio/mp4' } : { file: src, type: 'audio/ogg' };
+}
+
+/** Sends a recorded voice message: converted to Ogg/Opus (what Telegram plays as a voice message). */
+export async function sendTeleVoice(userId, dialogId, file, { duration = 0, caption = '', replyTo = null } = {}) {
+  mediaAccount(userId, 'voice');
+  const out = file.replace(/\.[^.\/]+$/, '') + '.voice.ogg';
+  if (await mediaReady) {
+    try {
+      await ffmpeg(['-y', '-i', file, '-vn', '-ac', '1', '-c:a', 'libopus', '-b:a', '32k', '-application', 'voip', out]);
+    } catch {
+      throw Object.assign(new Error('فایل صوتی قابل تبدیل نبود'), { statusCode: 400 });
+    } finally {
+      fs.rmSync(file, { force: true });
+    }
+  } else {
+    throw Object.assign(new Error('برای ارسال پیام صوتی ffmpeg روی سرور لازم است'), { statusCode: 503, expose: true });
+  }
+  const text = String(caption || '').trim();
+  const dur = Math.max(1, Math.min(3600, Math.round(Number(duration) || 1)));
+  const content = {
+    _: 'inputMessageVoiceNote',
+    voice_note: { _: 'inputVoiceNote', voice_note: { _: 'inputFileLocal', path: out }, duration: dur, waveform: '' },
+    caption: text ? { _: 'formattedText', text } : undefined,
+  };
+  return sendContent(userId, dialogId, content, { replyTo, text: text ? `🎤 پیام صوتی\n${text}` : '🎤 پیام صوتی', kind: 'voice' });
+}
+
+/** A stored Telegram message of this user (for forwarding it into the app's own chats). */
+export function ownTeleMessage(userId, messageId) {
+  const account = getAccountForUser(userId);
+  const row = account && get('SELECT * FROM tele_messages WHERE id = ? AND account_id = ?', Number(messageId), account.id);
+  if (!row) throw Object.assign(new Error('پیام پیدا نشد'), { statusCode: 404 });
+  const dialog = get('SELECT * FROM tele_dialogs WHERE id = ?', row.dialog_id);
+  return { account, row, dialog, media: parseMedia(row.media) };
 }
