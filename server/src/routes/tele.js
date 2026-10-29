@@ -2,7 +2,7 @@ import { hasSitePerm } from '../perms.js';
 import { fail, audit } from '../chats.js';
 import { listProxies, getProxy, createProxy, updateProxy, deleteProxy, getRoutePolicy, setRoutePolicy, publicProxy, PROTOCOL_HINTS, ROUTE_MODES } from '../tele/proxies.js';
 import { probeViaEgress, egressStatus, ensureEgress, stopEgress, refreshEgress } from '../tele/egress.js';
-import { beginLogin, submitCode, submitPassword, disconnectAccount, getAccountForUser, publicAccount, listDialogs, setDialogSelected, teleRuntimeInfo, clearStaleLogin } from '../tele/accounts.js';
+import { beginLogin, submitCode, submitPassword, disconnectAccount, getAccountForUser, publicAccount, listDialogs, setDialogSelected, teleRuntimeInfo, clearStaleLogin, isLive, trafficOf } from '../tele/accounts.js';
 import { syncDialogMessages, sendTeleMessage, refreshDialogsFromTelegram, listStoredMessages, publicMessage, searchDialogMessages } from '../tele/messages.js';
 
 const needTeleAdmin = (req) => {
@@ -67,7 +67,8 @@ export default async function teleRoutes(app) {
   });
   app.get('/api/tele/status', async (req) => {
     const account = clearStaleLogin(getAccountForUser(req.user.id));
-    return { account: publicAccount(account), runtime: teleRuntimeInfo(), dialogs: account ? listDialogs(account.id) : [] };
+    // live: whether the TDLib connection is open right now (it closes when idle); traffic: what it moved since opening.
+    return { account: publicAccount(account), runtime: teleRuntimeInfo(), live: account ? isLive(account.id) : false, traffic: account ? await trafficOf(account.id) : null, dialogs: account ? listDialogs(account.id) : [] };
   });
   app.post('/api/tele/login/phone', async (req) => beginLogin(req.user.id, req.body?.phone));
   app.post('/api/tele/login/code', async (req) => submitCode(req.user.id, req.body?.code));
@@ -78,13 +79,13 @@ export default async function teleRoutes(app) {
     if (!account) fail(400, 'حساب وصل نیست');
     return { dialogs: setDialogSelected(account.id, req.params.id, req.body?.selected !== false) };
   });
-  app.post('/api/tele/dialogs/refresh', async (req) => refreshDialogsFromTelegram(req.user.id));
+  app.post('/api/tele/dialogs/refresh', async (req) => refreshDialogsFromTelegram(req.user.id, { all: !!req.body?.all }));
   app.get('/api/tele/dialogs/:id/messages', async (req) => {
     const account = getAccountForUser(req.user.id);
     if (!account) fail(400, 'حساب وصل نیست');
     const before = Number(req.query?.before) || null;
     try {
-      return await syncDialogMessages(req.user.id, req.params.id, { limit: Number(req.query?.limit) || 40, before });
+      return await syncDialogMessages(req.user.id, req.params.id, { limit: Number(req.query?.limit) || 40, before, local: req.query?.local === '1' });
     } catch (e) {
       if (e.statusCode === 404 || e.statusCode === 400) throw e;
       // Telegram unreachable (tunnel down, TDLib error): show what is stored, with the reason.

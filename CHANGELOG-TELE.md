@@ -1,5 +1,17 @@
 # AmoreChat-Tele Changelog
 
+## [1.0.5] — 2026-10-29
+
+### رفع اشکال
+- `liveClient()`: کلاینت TDLib بعد از ری‌استارت از نشست ذخیره‌شده باز می‌شود (قبلاً فقط در حافظه بود و بعد از هر آپدیت «اتصال برقرار نیست» می‌داد)
+
+### مصرف VPN
+- فقط گفتگوهای انتخاب‌شده (`selected`) به‌روز می‌شوند؛ فهرست کامل فقط با `refresh {all: true}` هنگام افزودن
+- بستن کلاینت بعد از `TELE_IDLE_MINUTES` (پیش‌فرض ۱۰) بی‌استفاده بودن؛ ورود نیمه‌کاره بعد از ۳۰ دقیقه
+- `setAutoDownloadSettings` خاموش برای همه شبکه‌ها، `online = false`
+- `getChatHistory only_local` برای بررسی دوره‌ای؛ `openChat` حذف شد (بدون `closeChat` آپدیت‌های گروه را باز نگه می‌داشت)
+- `getNetworkStatistics` در `/api/tele/status` (`live`, `traffic`)
+
 ## [1.0.4] — 2026-10-29
 
 ### رابط کاربری
