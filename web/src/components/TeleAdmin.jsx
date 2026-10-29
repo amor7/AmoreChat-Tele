@@ -131,7 +131,7 @@ export default function TeleAdmin() {
               dir="ltr"
               list="tele-dns-presets"
               style={{ width: 170 }}
-              placeholder="خالی = DNS خود سرور"
+              placeholder="خالی = خودکار"
               defaultValue={(policy.dns || '').replace(/:53$/, '')}
               key={policy.dns || ''}
               onBlur={(e) => {
@@ -149,7 +149,7 @@ export default function TeleAdmin() {
           </label>
         </div>
         <small className="muted">
-          اگر پروکسی با دامنه وارد شده و تست خطای <code dir="ltr">lookup … deadline exceeded</code> می‌دهد، DNS خود سرور (معمولاً خارجی) در قطعی جواب نمی‌دهد؛ یک DNS داخلی بگذارید (مثلاً شکن). فقط آدرس خود پروکسی با آن پیدا می‌شود؛ ترافیک تلگرام از پروکسی می‌رود.
+          آدرس پروکسی‌هایی که با دامنه وارد شده‌اند خودکار هم‌زمان از DNS سرور و چند DNS داخلی (شکن، ۴۰۳، الکترو، رادار) پرسیده می‌شود و آخرین IP سالم برای زمان قطعی نگه داشته می‌شود؛ معمولاً لازم نیست چیزی بنویسید. اگر DNS دیگری دارید (مثلاً DNS دیتاسنتر) اینجا بگذارید تا آن هم پرسیده شود. فقط آدرس خود پروکسی پیدا می‌شود؛ ترافیک تلگرام از پروکسی می‌رود.
         </small>
 
         <div className="tele-health">

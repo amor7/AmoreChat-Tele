@@ -9,6 +9,7 @@ import { spawn, execFileSync } from 'node:child_process';
 import { DATA_DIR } from '../db.js';
 import { getProxy, selectActiveProxy, getRoutePolicy, recordHealth, listProxies } from './proxies.js';
 import { outboundFromConfig } from './uri.js';
+import { pinProxyAddresses, setResolveCache } from './resolve.js';
 
 const EGRESS_DIR = path.join(DATA_DIR, 'tele-egress');
 const CONFIG_PATH = path.join(EGRESS_DIR, 'sing-box.json');
@@ -33,6 +34,7 @@ function summarize(text) {
 
 function ensureDir() {
   fs.mkdirSync(EGRESS_DIR, { recursive: true, mode: 0o700 });
+  setResolveCache(EGRESS_DIR);
 }
 // The config holds proxy credentials and private keys: readable by this user only.
 const writePrivate = (file, data) => fs.writeFileSync(file, data, { mode: 0o600 });
@@ -73,7 +75,7 @@ const atLeast = (v, want) => {
 };
 
 /** sing-box config: one local SOCKS inbound → the proxy. Nothing else, and no direct route. */
-function buildConfig(row, port, bin) {
+async function buildConfig(row, port, bin) {
   const version = singBoxVersion(bin);
   let out;
   try {
@@ -81,6 +83,10 @@ function buildConfig(row, port, bin) {
   } catch (e) {
     throw Object.assign(new Error(e.message || 'کانفیگ پروکسی نامعتبر است'), { statusCode: 400 });
   }
+  const dns = String(getRoutePolicy().dns || '').split(',').filter(Boolean)[0];
+  // A proxy given by domain: its IP is looked up here (several DNS servers at once, the last
+  // answer kept for a shutdown), so sing-box does not depend on one DNS server.
+  await pinProxyAddresses(out, dns);
   const config = {
     log: { level: 'warn' },
     // Only loopback: never reachable from outside the container.
@@ -100,10 +106,8 @@ function buildConfig(row, port, bin) {
   } else {
     config.outbounds.unshift(out);
   }
-  // How a proxy given by domain is found: the admin's DNS server if set (the server's own DNS is
-  // often foreign and unreachable during a shutdown), else the system resolver. Only the proxy's
-  // own address is looked up this way; Telegram traffic itself goes through the proxy.
-  const dns = String(getRoutePolicy().dns || '').split(',').filter(Boolean)[0];
+  // A domain nothing above could resolve is left to sing-box: the admin's DNS server if set, else
+  // the system resolver. Only the proxy's own address is looked up; Telegram traffic goes through it.
   const [, dnsHost, dnsPort] = dns?.match(/^\[?([^\]]+?)\]?:(\d+)$/) || [];
   if (atLeast(version, '1.12.0')) {
     config.dns = { servers: [dnsHost ? { type: 'udp', tag: 'proxy-dns', server: dnsHost, server_port: Number(dnsPort) } : { type: 'local', tag: 'proxy-dns' }] };
@@ -240,7 +244,7 @@ export const ensureEgress = () =>
     }
     let config;
     try {
-      config = buildConfig(proxy, LOCAL_SOCKS_PORT, bin);
+      config = await buildConfig(proxy, LOCAL_SOCKS_PORT, bin);
     } catch (e) {
       lastError = e.message;
       recordHealth(proxy.id, { ok: false, error: e.message });
@@ -358,7 +362,7 @@ export async function probeViaEgress(proxyId) {
   let proc = null;
   try {
     const port = await freePort();
-    writePrivate(file, JSON.stringify(buildConfig(row, port, bin)));
+    writePrivate(file, JSON.stringify(await buildConfig(row, port, bin)));
     proc = await startSingBox(bin, file, port);
     let lastErr = null;
     for (const [host, dport] of TELEGRAM_TARGETS) {
