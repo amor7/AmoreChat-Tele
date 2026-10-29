@@ -14,6 +14,7 @@ for (const k of ['TELEGRAM_API_ID', 'TELEGRAM_API_HASH', 'TG_TEST_PHONE', 'TG_TE
   if (!env(k)) throw new Error(`${k} is not set`);
 }
 const GROUP_TITLE = 'AmoreChat E2E';
+const CHANNEL_TITLE = 'AmoreChat E2E channel';
 
 const tdl = await import('tdl');
 const { getTdjson } = await import('prebuilt-tdlib');
@@ -83,7 +84,28 @@ try {
       groupChatId = g.chat_id ?? g.id;
       console.log('group made');
     }
-    fs.writeFileSync(metaFile, JSON.stringify({ userId: me.id, botUserId: bot.result.id, botChatId: botChat.id, groupChatId, groupTitle: GROUP_TITLE }), { mode: 0o600 });
+    // A channel of the account where the bot posts (for mirroring channels into the app).
+    let channelChatId = meta.channelChatId;
+    if (channelChatId) {
+      try {
+        const c = await client.invoke({ _: 'getChat', chat_id: channelChatId });
+        if (c.title !== CHANNEL_TITLE) channelChatId = null;
+      } catch {
+        channelChatId = null;
+      }
+    }
+    if (!channelChatId) {
+      const c = await client.invoke({ _: 'createNewSupergroupChat', title: CHANNEL_TITLE, is_forum: false, is_channel: true, description: 'AmoreChat test', location: null, message_auto_delete_time: 0, for_import: false });
+      channelChatId = c.id;
+      console.log('channel made');
+    }
+    await client.invoke({
+      _: 'setChatMemberStatus',
+      chat_id: channelChatId,
+      member_id: { _: 'messageSenderUser', user_id: bot.result.id },
+      status: { _: 'chatMemberStatusAdministrator', can_be_edited: true, rights: { _: 'chatAdministratorRights', can_manage_chat: true, can_post_messages: true, can_edit_messages: true, can_delete_messages: true } },
+    });
+    fs.writeFileSync(metaFile, JSON.stringify({ userId: me.id, botUserId: bot.result.id, botChatId: botChat.id, groupChatId, groupTitle: GROUP_TITLE, channelChatId, channelTitle: CHANNEL_TITLE }), { mode: 0o600 });
     console.log('\nReady: the Tele e2e test can now use this account.');
   }
 } catch (e) {
