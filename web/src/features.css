@@ -1178,3 +1178,8 @@ body:has(.room-view, .call-view) .toast {
 .tele-guide code {
   word-break: break-all;
 }
+/* Phones: the Telegram login sits in the list column (the chat pane is hidden there). */
+.tele-side .tele-login {
+  height: auto;
+  padding: 24px 12px 32px;
+}
