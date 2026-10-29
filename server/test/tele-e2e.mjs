@@ -407,7 +407,10 @@ async function part2() {
   const tdl = await import('tdl');
   const { getTdjson } = await import('prebuilt-tdlib');
   tdl.configure({ tdjson: getTdjson(), verbosityLevel: 1 });
-  const botDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tele-bot-'));
+  // The bot's session is kept with the account's (saved by the workflow): Telegram limits how often
+  // a bot may log in, and a fresh login on every run soon has to wait a quarter of an hour.
+  const botDir = path.join(path.dirname(SESSION_DIR), 'tele-bot');
+  fs.mkdirSync(botDir, { recursive: true, mode: 0o700 });
   bot = tdl.createClient({ apiId: API_ID, apiHash: API_HASH, databaseDirectory: path.join(botDir, 'db'), filesDirectory: path.join(botDir, 'files') });
   bot.on('error', (e) => console.warn('[bot]', e?.message || e));
   const botMsgs = [];
@@ -954,8 +957,17 @@ async function uiChecks({ owner, alice, bob, pd, gd, meta, photoMsg, voiceMsg, s
     ok(await alice.call('POST', `/api/chats/${savedChat.id}/messages`, { text: menuText }), 'app message');
     await page.goto(`${BASE}/#/chat/${savedChat.id}`, { waitUntil: 'networkidle0' });
     await waitText('.bubble', menuText);
-    const bubble = await page.evaluateHandle((t) => [...document.querySelectorAll('.bubble')].reverse().find((b) => b.textContent.includes(t)), menuText);
-    await bubble.click({ button: 'right' });
+    // The menu opens on the bubble's contextmenu event (sent to the element itself: the list may
+    // re-render between finding it and clicking it).
+    await until('message menu open', async () => {
+      await page.evaluate((t) => {
+        const b = [...document.querySelectorAll('.bubble')].reverse().find((x) => x.textContent.includes(t));
+        const r = b.getBoundingClientRect();
+        b.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.left + 10, clientY: r.top + 10 }));
+      }, menuText);
+      await sleep(300);
+      return page.evaluate(() => [...document.querySelectorAll('.menu.floating button')].some((x) => x.textContent.includes('ارسال به تلگرام')));
+    }, 15000);
     await clickText('.menu.floating button', 'ارسال به تلگرام');
     await page.waitForSelector('.modal .user-list input[type=checkbox]');
     await page.evaluate((title) => {
