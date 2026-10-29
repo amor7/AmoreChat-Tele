@@ -1,0 +1,47 @@
+name: tele-e2e
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# One run at a time: the test logs in to Telegram's test servers, which limit how often a number logs in.
+concurrency:
+  group: tele-e2e
+  cancel-in-progress: false
+
+jobs:
+  tele:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TELEGRAM_API_ID: ${{ secrets.TG_API_ID }}
+      TELEGRAM_API_HASH: ${{ secrets.TG_API_HASH }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Skip without Telegram API keys (e.g. pull requests from forks)
+        id: keys
+        run: |
+          if [ -n "$TELEGRAM_API_ID" ] && [ -n "$TELEGRAM_API_HASH" ]; then echo "ok=1" >> "$GITHUB_OUTPUT"; else echo "::warning::TG_API_ID / TG_API_HASH secrets not available; Tele e2e skipped"; fi
+      - uses: actions/setup-node@v4
+        if: steps.keys.outputs.ok
+        with:
+          node-version: 24
+          cache: npm
+      - if: steps.keys.outputs.ok
+        run: npm ci
+      - name: Install sing-box (the version and checksum the image uses)
+        if: steps.keys.outputs.ok
+        run: |
+          V=$(grep -oP 'ARG SING_BOX_VERSION=\K\S+' Dockerfile)
+          SUM=$(grep -oP 'amd64\) sum=\K[0-9a-f]+' Dockerfile)
+          wget -qO /tmp/sb.tgz "https://github.com/SagerNet/sing-box/releases/download/v$V/sing-box-$V-linux-amd64.tar.gz"
+          echo "$SUM  /tmp/sb.tgz" | sha256sum -c -
+          tar xzf /tmp/sb.tgz -C /tmp && sudo install -m 755 /tmp/sing-box-*/sing-box /usr/local/bin/sing-box
+          sing-box version
+      - name: Tele end-to-end test (Telegram test servers, through a local SOCKS proxy)
+        if: steps.keys.outputs.ok
+        run: node server/test/tele-e2e.mjs
+      - name: Server log
+        if: always() && steps.keys.outputs.ok
+        run: cat tele-server.log || true
