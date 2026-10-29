@@ -164,6 +164,8 @@ export async function beginLogin(userId, phone) {
     if (!status) throw new Error(`وضعیت غیرمنتظره TDLib: ${state}`);
     live.set(row.id, { client, phase: status === 'connected' ? 'ready' : status, userId, lastUsed: Date.now() });
     run(`UPDATE tele_accounts SET status = ?, updated_at = ? WHERE id = ?`, status, now(), row.id);
+    // The saved session was still logged in: no code needed, but keep who the account is.
+    if (status === 'connected') return loggedIn(row, live.get(row.id));
     const result = { awaiting_code: 'code_required', awaiting_password: 'password_required', connected: 'ready' }[status];
     return { status: result, account: publicAccount(getAccountForUser(userId)) };
   } catch (e) {

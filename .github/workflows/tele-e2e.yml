@@ -4,6 +4,9 @@ on:
     branches: [main]
   pull_request:
   workflow_dispatch:
+  # Weekly: keeps the saved session of the spare account in the cache (unused caches expire after 7 days).
+  schedule:
+    - cron: '17 3 * * 1'
 
 # One run at a time: the test logs in to Telegram's test servers, which limit how often a number logs in.
 concurrency:
@@ -17,6 +20,9 @@ jobs:
     env:
       TELEGRAM_API_ID: ${{ secrets.TG_API_ID }}
       TELEGRAM_API_HASH: ${{ secrets.TG_API_HASH }}
+      TG_TEST_PHONE: ${{ secrets.TG_TEST_PHONE }}
+      TG_TEST_BOT_TOKEN: ${{ secrets.TG_TEST_BOT_TOKEN }}
+      SESSION_KEY: ${{ secrets.TG_API_HASH }}${{ secrets.TG_TEST_BOT_TOKEN }}
     steps:
       - uses: actions/checkout@v4
       - name: Skip without Telegram API keys (e.g. pull requests from forks)
@@ -39,9 +45,31 @@ jobs:
           echo "$SUM  /tmp/sb.tgz" | sha256sum -c -
           tar xzf /tmp/sb.tgz -C /tmp && sudo install -m 755 /tmp/sing-box-*/sing-box /usr/local/bin/sing-box
           sing-box version
-      - name: Tele end-to-end test (Telegram test servers, through a local SOCKS proxy)
+      # The spare account's session from the tele-login workflow (encrypted), for part 2 on real Telegram.
+      - uses: actions/cache/restore@v4
+        if: steps.keys.outputs.ok && env.TG_TEST_BOT_TOKEN != ''
+        with:
+          path: tele-session.enc
+          key: tele-session-none
+          restore-keys: tele-session-
+      - name: Decrypt the saved session
+        if: steps.keys.outputs.ok
+        run: |
+          if [ -f tele-session.enc ]; then
+            mkdir -p /tmp/sess && openssl enc -d -aes-256-cbc -pbkdf2 -pass env:SESSION_KEY -in tele-session.enc | tar xz -C /tmp/sess
+            echo "TELE_SESSION_DIR=/tmp/sess/tele-session" >> "$GITHUB_ENV"
+          fi
+      - name: Tele end-to-end test (through a local SOCKS proxy)
         if: steps.keys.outputs.ok
         run: node server/test/tele-e2e.mjs
       - name: Server log
         if: always() && steps.keys.outputs.ok
         run: cat tele-server.log || true
+      - name: Re-save the session (refreshes its place in the cache)
+        if: always() && env.TELE_SESSION_DIR != ''
+        run: tar cz -C /tmp/sess tele-session | openssl enc -aes-256-cbc -pbkdf2 -salt -pass env:SESSION_KEY -out tele-session.enc
+      - uses: actions/cache/save@v4
+        if: always() && env.TELE_SESSION_DIR != '' && github.event_name != 'pull_request'
+        with:
+          path: tele-session.enc
+          key: tele-session-${{ github.run_id }}

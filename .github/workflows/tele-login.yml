@@ -1,0 +1,63 @@
+name: tele-login
+# One-time login of the spare Telegram account the Tele e2e test uses. Run it without a code (the
+# code goes to the account), then again with the code. The session is kept encrypted in the
+# Actions cache; anyone without the secrets (e.g. a fork's pull request) can't read it.
+on:
+  workflow_dispatch:
+    inputs:
+      code:
+        description: Login code Telegram sent to the spare account (empty on the first run)
+        required: false
+        default: ''
+
+concurrency:
+  group: tele-e2e
+  cancel-in-progress: false
+
+jobs:
+  login:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      TELEGRAM_API_ID: ${{ secrets.TG_API_ID }}
+      TELEGRAM_API_HASH: ${{ secrets.TG_API_HASH }}
+      TG_TEST_PHONE: ${{ secrets.TG_TEST_PHONE }}
+      TG_TEST_BOT_TOKEN: ${{ secrets.TG_TEST_BOT_TOKEN }}
+      TG_TEST_PASSWORD: ${{ secrets.TG_TEST_PASSWORD }}
+      SESSION_KEY: ${{ secrets.TG_API_HASH }}${{ secrets.TG_TEST_BOT_TOKEN }}
+    steps:
+      - name: Hide the code in the log
+        env:
+          CODE: ${{ inputs.code }}
+        run: |
+          if [ -n "$CODE" ]; then echo "::add-mask::$CODE"; fi
+          echo "TG_TEST_CODE=$CODE" >> "$GITHUB_ENV"
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - uses: actions/cache/restore@v4
+        with:
+          path: tele-session.enc
+          key: tele-session-${{ github.run_id }}
+          restore-keys: tele-session-
+      - name: Decrypt the saved session
+        run: |
+          if [ -f tele-session.enc ]; then
+            openssl enc -d -aes-256-cbc -pbkdf2 -pass env:SESSION_KEY -in tele-session.enc | tar xz
+          fi
+      - name: Log in
+        run: node server/test/tele-login.mjs tele-session
+      - name: Encrypt the session
+        if: always()
+        run: |
+          if [ -d tele-session ]; then
+            tar cz tele-session | openssl enc -aes-256-cbc -pbkdf2 -salt -pass env:SESSION_KEY -out tele-session.enc
+          fi
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: tele-session.enc
+          key: tele-session-${{ github.run_id }}
