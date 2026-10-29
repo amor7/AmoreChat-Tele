@@ -13,6 +13,9 @@ import { pinProxyAddresses, setResolveCache } from './resolve.js';
 
 const EGRESS_DIR = path.join(DATA_DIR, 'tele-egress');
 const CONFIG_PATH = path.join(EGRESS_DIR, 'sing-box.json');
+// The running tunnel's process id: a sing-box left by an earlier server process (it outlives a crash)
+// would keep the local port, so the new tunnel could not start.
+const PID_PATH = path.join(EGRESS_DIR, 'sing-box.pid');
 const LOCAL_SOCKS_HOST = '127.0.0.1';
 const LOCAL_SOCKS_PORT = Number(process.env.TELE_SOCKS_PORT || 17890);
 
@@ -171,7 +174,44 @@ async function stopNow() {
   child = null;
   currentProxyId = null;
   await killProc(proc);
+  fs.rmSync(PID_PATH, { force: true });
 }
+
+const alive = (pid) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
+/** Stops a sing-box an earlier server process left running (only if it really is sing-box). */
+async function killStale() {
+  const pid = Number(fs.readFileSync(PID_PATH, 'utf8').trim()) || 0;
+  fs.rmSync(PID_PATH, { force: true });
+  if (!pid || pid === child?.pid || !alive(pid)) return;
+  if (!fs.readFileSync(`/proc/${pid}/cmdline`, 'utf8').includes('sing-box')) return;
+  process.kill(pid, 'SIGTERM');
+  for (let i = 0; i < 30 && alive(pid); i++) await new Promise((r) => setTimeout(r, 100));
+  if (alive(pid)) process.kill(pid, 'SIGKILL');
+}
+const portBusy = (port) =>
+  new Promise((resolve) => {
+    const s = net.createConnection({ host: LOCAL_SOCKS_HOST, port }, () => {
+      s.destroy();
+      resolve(true);
+    });
+    s.on('error', () => resolve(false));
+  });
+// Never leave the tunnel running without its server process.
+process.on('exit', () => {
+  try {
+    child?.kill('SIGKILL');
+    fs.rmSync(PID_PATH, { force: true });
+  } catch {
+    /* exiting anyway */
+  }
+});
 export const stopEgress = () => serial(stopNow);
 
 /** Starts sing-box with a config file; resolves once its SOCKS port accepts connections. */
@@ -251,6 +291,11 @@ export const ensureEgress = () =>
       throw e;
     }
     writePrivate(CONFIG_PATH, JSON.stringify(config, null, 2));
+    await killStale().catch(() => {});
+    if (await portBusy(LOCAL_SOCKS_PORT)) {
+      lastError = `پورت ${LOCAL_SOCKS_PORT} دست برنامه دیگری است`;
+      throw Object.assign(new Error(`پورت تونل (${LOCAL_SOCKS_PORT}) دست برنامه دیگری است؛ TELE_SOCKS_PORT را عوض کنید`), { statusCode: 503, expose: true });
+    }
     try {
       child = await startSingBox(bin, CONFIG_PATH, LOCAL_SOCKS_PORT, {
         // Only for the current process: after a restart the old one exits later.
@@ -268,6 +313,7 @@ export const ensureEgress = () =>
     }
     currentProxyId = proxy.id;
     lastError = '';
+    writePrivate(PID_PATH, String(child.pid));
     return { host: LOCAL_SOCKS_HOST, port: LOCAL_SOCKS_PORT, proxyId: proxy.id };
   });
 
