@@ -49,10 +49,7 @@ function buildConfig(proxyRow) {
         // Only loopback — never expose this to the LAN.
       },
     ],
-    outbounds: [
-      outbound,
-      { type: 'block', tag: 'block' },
-    ],
+    outbounds: [outbound, { type: 'block', tag: 'block' }],
     route: {
       // Everything that enters the local SOCKS goes out via the selected proxy. No direct.
       final: outbound.tag,
@@ -67,11 +64,10 @@ function findSingBox() {
     path.join(DATA_DIR, 'bin', 'sing-box'),
     '/usr/local/bin/sing-box',
     '/usr/bin/sing-box',
-    'sing-box',
   ].filter(Boolean);
   for (const c of candidates) {
     try {
-      if (c === 'sing-box' || fs.existsSync(c)) return c;
+      if (fs.existsSync(c) && fs.statSync(c).isFile()) return c;
     } catch {
       /* continue */
     }
@@ -143,7 +139,9 @@ export async function ensureEgress() {
   if (!bin) {
     lastError = 'sing-box binary not found';
     throw Object.assign(
-      new Error('باینری sing-box پیدا نشد. آن را نصب کنید یا SING_BOX_PATH را تنظیم کنید.'),
+      new Error(
+        'باینری sing-box پیدا نشد. روی هاست نصب کنید و با volume به کانتینر بدهید، یا در data/bin/sing-box بگذارید.',
+      ),
       { statusCode: 500 },
     );
   }
