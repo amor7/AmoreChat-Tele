@@ -1274,13 +1274,14 @@ body:has(.room-view, .call-view) .toast {
 }
 .tele-usage {
   display: flex;
+  width: 100%;
   align-items: center;
   gap: 8px;
   margin-top: 4px;
 }
 .tele-usage-bar {
-  flex: 1;
-  max-width: 220px;
+  width: min(220px, 45vw);
+  flex: none;
   height: 6px;
   border-radius: 3px;
   background: var(--hover);
