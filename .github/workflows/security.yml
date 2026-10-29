@@ -1,0 +1,54 @@
+name: security
+# Security scans: known vulnerabilities in the server's packages and in the Docker image, leaked
+# secrets in the code, and CodeQL's analysis of the code itself. Weekly too, since new problems
+# are found in old packages.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    - cron: '41 4 * * 2'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  packages:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+      - name: npm audit of what runs on the server (fails on moderate or worse)
+        run: npm audit --package-lock-only --omit=dev --audit-level=moderate
+      - name: npm audit of everything (build tools too; report only)
+        run: npm audit --package-lock-only || true
+
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the image
+        run: docker build -q -t amorechat:scan .
+      - name: Trivy — image (fails on CRITICAL with a fix available; HIGH is reported)
+        run: |
+          T="docker run --rm -v /var/run/docker.sock:/var/run/docker.sock -v $HOME/.cache/trivy:/root/.cache aquasec/trivy:0.58.1"
+          $T image --quiet --severity HIGH,CRITICAL --ignore-unfixed --exit-code 0 amorechat:scan
+          $T image --quiet --severity CRITICAL --ignore-unfixed --exit-code 1 amorechat:scan
+      - name: Trivy — secrets in the code (keys, tokens, passwords committed by mistake)
+        run: docker run --rm -v "$PWD":/src aquasec/trivy:0.58.1 fs --quiet --scanners secret --exit-code 1 /src
+
+  codeql:
+    runs-on: ubuntu-latest
+    permissions:
+      security-events: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+          queries: security-extended
+      - uses: github/codeql-action/analyze@v3
