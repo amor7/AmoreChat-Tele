@@ -9,14 +9,21 @@ const live = new Map();
 export function getLiveClient(accountId) {
   return live.get(Number(accountId))?.client || null;
 }
-export function upsertDialog(accountId, { tgChatId, kind, title, username }) {
+export function upsertDialog(accountId, { tgChatId, kind, title, username, lastText, lastAt, lastOut, unread }) {
   const existing = get('SELECT * FROM tele_dialogs WHERE account_id = ? AND tg_chat_id = ?', accountId, String(tgChatId));
   const t = now();
   if (existing) {
-    run(`UPDATE tele_dialogs SET kind = ?, title = ?, username = ?, updated_at = ? WHERE id = ?`, kind || existing.kind, title || existing.title, username || existing.username, t, existing.id);
+    run(
+      `UPDATE tele_dialogs SET kind = ?, title = ?, username = ?, last_text = ?, last_at = ?, last_out = ?, unread = ?, updated_at = ? WHERE id = ?`,
+      kind || existing.kind, title || existing.title, username || existing.username,
+      lastText ?? existing.last_text, lastAt ?? existing.last_at, lastOut == null ? existing.last_out : lastOut ? 1 : 0, unread ?? existing.unread, t, existing.id,
+    );
     return existing.id;
   }
-  const r = run(`INSERT INTO tele_dialogs (account_id, tg_chat_id, kind, title, username, selected, created_at, updated_at) VALUES (?,?,?,?,?,0,?,?)`, accountId, String(tgChatId), kind || 'private', title || '', username || '', t, t);
+  const r = run(
+    `INSERT INTO tele_dialogs (account_id, tg_chat_id, kind, title, username, selected, last_text, last_at, last_out, unread, created_at, updated_at) VALUES (?,?,?,?,?,0,?,?,?,?,?,?)`,
+    accountId, String(tgChatId), kind || 'private', title || '', username || '', lastText || '', lastAt || 0, lastOut ? 1 : 0, unread || 0, t, t,
+  );
   return Number(r.lastInsertRowid);
 }
 function apiCredentials() {
@@ -42,8 +49,9 @@ export function publicAccount(row) {
   return { id: row.id, phone, tgUserId: row.tg_user_id, displayName: row.display_name, username: row.username, status: row.status, allowShared: !!row.allow_shared, createdAt: row.created_at, updatedAt: row.updated_at };
 }
 export function listDialogs(accountId) {
-  return all('SELECT * FROM tele_dialogs WHERE account_id = ? ORDER BY selected DESC, title', accountId).map((d) => ({
+  return all('SELECT * FROM tele_dialogs WHERE account_id = ? ORDER BY last_at DESC, title', accountId).map((d) => ({
     id: d.id, tgChatId: d.tg_chat_id, kind: d.kind, title: d.title, username: d.username, selected: !!d.selected, lastSyncedMsgId: d.last_synced_msg_id,
+    lastText: d.last_text, lastAt: d.last_at || null, lastOut: !!d.last_out, unread: d.unread,
   }));
 }
 export function setDialogSelected(accountId, dialogId, selected) {

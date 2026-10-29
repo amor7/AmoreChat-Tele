@@ -153,7 +153,7 @@ export default function Sidebar() {
               </div>
               {multiServer && <ServerSwitcher onPick={() => setMenu(false)} />}
               {item(<><UserRound size={18} /> پروفایل و تنظیمات</>, () => openModal('profile'))}
-              {item(<><Cable size={18} /> Tele (تلگرام)</>, () => openModal('tele'))}
+              {item(<><Cable size={18} /> تلگرام</>, () => (location.hash = '#/tele'))}
               {item(<><SquarePen size={18} /> گفتگوی جدید</>, () => openModal('newChat'))}
               {item(<><Compass size={18} /> کاوش گروه‌ها و کانال‌ها</>, () => openModal('discover'))}
               {item(<><FolderPlus size={18} /> پوشه‌های گفتگو</>, () => openModal('folders'))}

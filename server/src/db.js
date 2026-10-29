@@ -326,6 +326,16 @@ const migrations = [
   );
   CREATE INDEX tele_messages_dialog ON tele_messages(account_id, dialog_id, id);
   `,
+  // v10: Tele messenger view: who sent each message, and the chat list preview / unread count
+  `
+  ALTER TABLE tele_messages ADD COLUMN sender_id TEXT NOT NULL DEFAULT '';
+  ALTER TABLE tele_messages ADD COLUMN sender_name TEXT NOT NULL DEFAULT '';
+  ALTER TABLE tele_dialogs ADD COLUMN last_text TEXT NOT NULL DEFAULT '';
+  ALTER TABLE tele_dialogs ADD COLUMN last_at INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE tele_dialogs ADD COLUMN last_out INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE tele_dialogs ADD COLUMN unread INTEGER NOT NULL DEFAULT 0;
+  CREATE INDEX tele_messages_tg ON tele_messages(account_id, dialog_id, tg_msg_id);
+  `,
 ];
 
 const current = db.prepare('PRAGMA user_version').get().user_version;

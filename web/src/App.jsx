@@ -8,6 +8,7 @@ import { loadEmoji } from './components/Emoji';
 import Auth from './components/Auth';
 import Sidebar from './components/Sidebar';
 import ChatView from './components/ChatView';
+import TeleView from './components/TeleView';
 import Modals from './components/Modals';
 import { VoiceBar, RoomView, IncomingCall, useAutoExpandCalls } from './components/Voice';
 import { initNative } from './native';
@@ -75,6 +76,7 @@ export default function App() {
 
 function Main() {
   const activeChatId = useStore((s) => s.activeChatId);
+  const tele = useStore((s) => s.tele);
   const connected = useStore((s) => s.connected);
   const [ready, setReady] = useState(false);
   useAutoExpandCalls();
@@ -94,7 +96,12 @@ function Main() {
     const onHash = () => {
       const { kind, value } = parseHash();
       const st = useStore.getState();
-      if (kind === 'chat') {
+      // Telegram (#/tele, #/tele/<dialogId>) takes the place of the app's own chat list and chat.
+      const tele = location.hash.match(/^#\/tele(?:\/(\d+))?\/?$/);
+      useStore.setState({ tele: tele ? { dialogId: Number(tele[1]) || null } : null });
+      if (tele) {
+        useStore.setState({ activeChatId: null });
+      } else if (kind === 'chat') {
         useStore.setState({ activeChatId: Number(value), replyTo: null, editing: null });
       } else {
         useStore.setState({ activeChatId: null });
@@ -109,14 +116,20 @@ function Main() {
   if (!ready) return <div className="splash">در حال بارگذاری…</div>;
 
   return (
-    <div className={`layout ${activeChatId ? 'has-chat' : ''}`}>
+    <div className={`layout ${activeChatId || tele?.dialogId ? 'has-chat' : ''}`}>
       {!connected && <OfflineBar />}
       <EmergencyBanner />
       <div className="voice-area">
         <VoiceBar />
       </div>
-      <Sidebar />
-      <main className="chat-pane">{activeChatId ? <ChatView key={activeChatId} chatId={activeChatId} /> : <Empty />}</main>
+      {tele ? (
+        <TeleView dialogId={tele.dialogId} />
+      ) : (
+        <>
+          <Sidebar />
+          <main className="chat-pane">{activeChatId ? <ChatView key={activeChatId} chatId={activeChatId} /> : <Empty />}</main>
+        </>
+      )}
       <Modals />
       <RoomView />
       <IncomingCall />

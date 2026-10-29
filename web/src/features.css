@@ -996,3 +996,48 @@ body:has(.room-view, .call-view) .toast {
 .danger-text {
   color: var(--danger);
 }
+
+/* ---------- Telegram (Tele) page: same layout as the app's own chats ---------- */
+.tele-brand {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+}
+.tele-warn {
+  color: var(--danger, #d33);
+}
+.tele-notice {
+  padding: 6px 14px;
+  font-size: 13px;
+  color: var(--muted);
+  background: var(--hover);
+  border-bottom: 1px solid var(--border);
+}
+.tele-login .form {
+  width: min(340px, 100%);
+  text-align: start;
+}
+.tele-login .error {
+  width: min(340px, 100%);
+}
+.tele-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+.tele-chat .chat-head-info {
+  cursor: default;
+}
+.tele-chat .text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.tele-chat .text.tele-media {
+  color: var(--muted);
+}
+.icon-btn.spin svg {
+  animation: spin 1s linear infinite;
+}

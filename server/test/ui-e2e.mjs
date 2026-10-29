@@ -92,6 +92,15 @@ for (const [label, viewport] of [
     if (/خروج/.test(item)) continue;
     await page.click('.menu-btn');
     await clickText('.sidebar .menu > button', item);
+    if (/تلگرام/.test(item)) {
+      // Telegram is a page of its own (#/tele), not a dialog: Back returns to the chat list.
+      await waitFor(() => location.hash === '#/tele' && !!document.querySelector('.tele-side'), null, 'Telegram page');
+      console.log(`   ${item} → Telegram page`);
+      await page.goBack().catch(() => {});
+      await waitFor(() => !document.querySelector('.tele-side') && !!document.querySelector('.sidebar .menu-btn'), null, 'Telegram page: Back returns to the chats');
+      await sleep(300);
+      continue;
+    }
     await expectModalStays(item);
     console.log(`   ${item} → ${await modalTitle()}`);
     await backCloses(item);

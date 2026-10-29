@@ -3,7 +3,7 @@ import { fail, audit } from '../chats.js';
 import { listProxies, getProxy, createProxy, updateProxy, deleteProxy, getRoutePolicy, setRoutePolicy, publicProxy, PROTOCOL_HINTS, ROUTE_MODES } from '../tele/proxies.js';
 import { probeViaEgress, egressStatus, ensureEgress, stopEgress, refreshEgress } from '../tele/egress.js';
 import { beginLogin, submitCode, submitPassword, disconnectAccount, getAccountForUser, publicAccount, listDialogs, setDialogSelected, teleRuntimeInfo, clearStaleLogin } from '../tele/accounts.js';
-import { syncDialogMessages, sendTeleMessage, refreshDialogsFromTelegram, listStoredMessages, publicMessage } from '../tele/messages.js';
+import { syncDialogMessages, sendTeleMessage, refreshDialogsFromTelegram, listStoredMessages, publicMessage, searchDialogMessages } from '../tele/messages.js';
 
 const needTeleAdmin = (req) => {
   if (!hasSitePerm(req.user, 'manage_settings') && req.user.role !== 'owner') fail(403, 'دسترسی ندارید');
@@ -82,15 +82,17 @@ export default async function teleRoutes(app) {
   app.get('/api/tele/dialogs/:id/messages', async (req) => {
     const account = getAccountForUser(req.user.id);
     if (!account) fail(400, 'حساب وصل نیست');
+    const before = Number(req.query?.before) || null;
     try {
-      return await syncDialogMessages(req.user.id, req.params.id, { limit: Number(req.query?.limit) || 40 });
+      return await syncDialogMessages(req.user.id, req.params.id, { limit: Number(req.query?.limit) || 40, before });
     } catch (e) {
-      if (e.statusCode === 503 || /TDLib/i.test(String(e.message))) {
-        return { messages: listStoredMessages(account.id, Number(req.params.id)).map(publicMessage), notice: e.message };
-      }
-      throw e;
+      if (e.statusCode === 404 || e.statusCode === 400) throw e;
+      // Telegram unreachable (tunnel down, TDLib error): show what is stored, with the reason.
+      req.log.warn(e);
+      return { messages: listStoredMessages(account.id, Number(req.params.id), { beforeTgId: before }).map(publicMessage), notice: e.message };
     }
   });
+  app.get('/api/tele/dialogs/:id/search', async (req) => searchDialogMessages(req.user.id, req.params.id, req.query?.q));
   app.post('/api/tele/dialogs/:id/messages', async (req) => {
     return { message: await sendTeleMessage(req.user.id, req.params.id, req.body?.text) };
   });
