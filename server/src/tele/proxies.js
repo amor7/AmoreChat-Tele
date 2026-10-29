@@ -136,6 +136,12 @@ const TELE_DEFAULTS = {
   // DNS server sing-box asks for proxy addresses (empty: the server's own). During a shutdown the
   // server's foreign DNS (8.8.8.8 …) does not answer, so a domestic one is needed for domain proxies.
   tele_dns: '',
+  // Alerts to admins (see alerts.js): on, which kinds, to whom, after how long, and reminders.
+  tele_alert_enabled: '1',
+  tele_alert_events: 'down,up,quota',
+  tele_alert_to: 'admins',
+  tele_alert_delay_min: '2',
+  tele_alert_repeat_min: '60',
 };
 
 export function getTeleSetting(key) {
@@ -233,9 +239,22 @@ export function selectActiveProxy({ currentId = null } = {}) {
 /**
  * Record a health-check result. Real probe logic lives elsewhere (sing-box / curl via proxy).
  */
+const healthHandlers = [];
+/** Called when a proxy that was working fails a check: (proxy row, ok, error). */
+export const onHealthChange = (fn) => healthHandlers.push(fn);
+
 export function recordHealth(id, { ok, latencyMs = null, error = '' }) {
   const row = getProxy(id);
   if (!row) return null;
+  if (row.last_status === 'healthy' && !ok) {
+    for (const fn of healthHandlers) {
+      try {
+        fn(row, ok, error);
+      } catch {
+        /* an alert must never break the health check */
+      }
+    }
+  }
   run(
     `UPDATE tele_proxies SET last_status = ?, last_latency_ms = ?, last_checked_at = ?, last_error = ?, updated_at = ?
      WHERE id = ?`,

@@ -28,6 +28,7 @@ import appRoutes from './routes/app.js';
 import folderRoutes from './routes/folders.js';
 import teleRoutes from './routes/tele.js';
 import { refreshEgress, startHealthLoop, stopEgress } from './tele/egress.js';
+import { startAlertLoop } from './tele/alerts.js';
 import { startVoiceSync } from './voice.js';
 import { startHealth } from './health.js';
 import { startCertCheck } from './certcheck.js';
@@ -112,6 +113,7 @@ await app.register(teleRoutes);
 refreshEgress();
 // Scheduled proxy checks (when the admin turned them on): test all, move to the best healthy one.
 startHealthLoop();
+startAlertLoop();
 await app.register(backupRoutes);
 await app.register(appRoutes);
 await app.register(folderRoutes);

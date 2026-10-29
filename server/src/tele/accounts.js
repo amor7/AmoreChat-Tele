@@ -1,7 +1,10 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
 import { get, all, run, now, DATA_DIR } from '../db.js';
+import { settingNumber } from '../settings.js';
 import { ensureEgress, egressStatus } from './egress.js';
+import { teleAlert } from './alerts.js';
 
 const SESSIONS_ROOT = path.join(DATA_DIR, 'tele-sessions');
 const live = new Map();
@@ -20,7 +23,8 @@ const TEST_DC = process.env.TELE_TEST_DC === '1';
  * The account's TDLib client, opened again from its saved session when needed (after a server
  * restart, or after it was closed for being idle). No new login is needed for that.
  */
-export async function liveClient(account) {
+export async function liveClient(account, { ignoreQuota = false } = {}) {
+  if (!ignoreQuota) assertQuota(account);
   const handle = live.get(account.id);
   if (handle?.client) {
     handle.lastUsed = Date.now();
@@ -51,31 +55,115 @@ export async function liveClient(account) {
 }
 export const isLive = (accountId) => !!live.get(Number(accountId))?.client;
 
-setInterval(() => {
+setInterval(async () => {
   for (const [id, h] of live) {
+    await flushUsage(id);
+    // Over the monthly cap: close the connection (an open one keeps receiving updates).
+    const account = get('SELECT * FROM tele_accounts WHERE id = ?', id);
+    if (account && overQuota(account)) {
+      noteOverQuota(account);
+      closeLive(id);
+      continue;
+    }
     // A login left at the code/password step is dropped after half an hour.
     const limit = h.phase === 'ready' ? IDLE_MS : 30 * 60000;
     if (Date.now() - (h.lastUsed || 0) > limit) closeLive(id);
   }
-}, 60000).unref();
+}, Number(process.env.TELE_SWEEP_MS) || 60000).unref();
 
-/** Data this account's TDLib client moved since it was opened (null when it is not open). */
-export async function trafficOf(accountId) {
+// ---------- Traffic per account and month, and the monthly cap ----------
+const thisMonth = () => new Date().toISOString().slice(0, 7);
+
+/**
+ * Adds what the open TDLib client moved since the last count to this month's usage. TDLib counts
+ * everything it sends and receives (messages, updates, files), which is the VPN traffic.
+ */
+function flushUsage(accountId) {
   const h = live.get(Number(accountId));
-  if (!h?.client) return null;
-  try {
-    const s = await h.client.invoke({ _: 'getNetworkStatistics', only_current: true });
+  if (!h?.client) return Promise.resolve(null);
+  // One count at a time per client, so the same bytes are never added twice.
+  h.flushing = (h.flushing || Promise.resolve()).then(async () => {
+    let s;
+    try {
+      s = await h.client.invoke({ _: 'getNetworkStatistics', only_current: true });
+    } catch {
+      return null;
+    }
     let sent = 0;
     let received = 0;
     for (const e of s.entries || []) {
       sent += Number(e.sent_bytes) || 0;
       received += Number(e.received_bytes) || 0;
     }
+    const base = h.counted || { sent: 0, received: 0 };
+    const ds = Math.max(0, sent - base.sent);
+    const dr = Math.max(0, received - base.received);
+    h.counted = { sent, received };
+    if (ds || dr) {
+      run(
+        `INSERT INTO tele_usage (account_id, month, sent, received) VALUES (?, ?, ?, ?)
+         ON CONFLICT(account_id, month) DO UPDATE SET sent = sent + excluded.sent, received = received + excluded.received`,
+        Number(accountId), thisMonth(), ds, dr,
+      );
+    }
     return { sent, received, since: s.since_date ? s.since_date * 1000 : null };
-  } catch {
-    return null;
-  }
+  });
+  return h.flushing;
 }
+
+/** Data this account's TDLib client moved since it was opened (null when it is not open). */
+export const trafficOf = (accountId) => flushUsage(accountId);
+
+/** This month's traffic of an account, in bytes. */
+export function usageOf(accountId, month = thisMonth()) {
+  const r = get('SELECT sent, received FROM tele_usage WHERE account_id = ? AND month = ?', Number(accountId), month);
+  return { sent: r?.sent || 0, received: r?.received || 0, used: (r?.sent || 0) + (r?.received || 0) };
+}
+/** The account's monthly cap in MB (its own, else the default); 0 = none. */
+export const quotaOf = (account) => Math.max(0, Number(account.quota_mb ?? settingNumber('tele_quota_mb')) || 0);
+export const overQuota = (account) => {
+  const q = quotaOf(account);
+  return q > 0 && usageOf(account.id).used >= q * 1048576;
+};
+function assertQuota(account) {
+  if (!overQuota(account)) return;
+  throw Object.assign(new Error(`سقف مصرف ماهانه تلگرام شما (${quotaOf(account)} مگابایت) تمام شده است؛ پیام‌های ذخیره‌شده دیده می‌شوند. برای افزایش سقف به مدیر خبر دهید.`), { statusCode: 429, expose: true, quota: true });
+}
+// Once per account and month.
+function noteOverQuota(account) {
+  if (account.quota_alerted === thisMonth()) return;
+  run('UPDATE tele_accounts SET quota_alerted = ? WHERE id = ?', thisMonth(), account.id);
+  const u = get('SELECT display_name, username FROM users WHERE id = ?', account.user_id);
+  teleAlert('quota', `📊 ${u?.display_name || '?'} (@${u?.username || '?'}) به سقف مصرف ماهانه تلگرام (${quotaOf(account)} مگابایت) رسید؛ تلگرامش تا ماه بعد یا افزایش سقف فقط پیام‌های ذخیره‌شده را نشان می‌دهد.`);
+}
+
+// ---------- Session encryption ----------
+// TDLib keeps each account's session (its login keys) and message cache in a database. It is stored
+// encrypted with a key made from TELE_SESSION_KEY (.env, outside the data folder), so a copy of the
+// data folder or a backup alone does not give anyone the Telegram accounts. Encryption is local
+// only: it adds no network traffic.
+let secret = null;
+function sessionSecret() {
+  if (secret) return secret;
+  secret = String(process.env.TELE_SESSION_KEY || '').trim();
+  if (!secret) {
+    // No key in the environment (e.g. run without docker compose): one kept next to the sessions.
+    const file = path.join(SESSIONS_ROOT, '.key');
+    try {
+      secret = fs.readFileSync(file, 'utf8').trim();
+    } catch {
+      secret = '';
+    }
+    if (!secret) {
+      secret = crypto.randomBytes(32).toString('hex');
+      fs.mkdirSync(SESSIONS_ROOT, { recursive: true, mode: 0o700 });
+      fs.writeFileSync(file, secret, { mode: 0o600 });
+    }
+  }
+  return secret;
+}
+// TDLib takes the key as bytes (base64 in JSON); a different one per account.
+const dbKey = (accountId) => crypto.createHash('sha256').update(`${sessionSecret()}:tele-session:${accountId}`).digest('base64');
 export function upsertDialog(accountId, { tgChatId, kind, title, username, lastText, lastAt, lastOut, unread }) {
   const existing = get('SELECT * FROM tele_dialogs WHERE account_id = ? AND tg_chat_id = ?', accountId, String(tgChatId));
   const t = now();
@@ -113,7 +201,7 @@ export function publicAccount(row) {
   if (!row) return null;
   const s = String(row.phone || '');
   const phone = s.length < 6 ? '***' : s.slice(0, 4) + '***' + s.slice(-2);
-  return { id: row.id, phone, tgUserId: row.tg_user_id, displayName: row.display_name, username: row.username, status: row.status, allowShared: !!row.allow_shared, allowMedia: !!row.allow_media, createdAt: row.created_at, updatedAt: row.updated_at };
+  return { id: row.id, phone, tgUserId: row.tg_user_id, displayName: row.display_name, username: row.username, status: row.status, allowShared: !!row.allow_shared, allowMedia: !!row.allow_media, allowVoice: !!row.allow_voice, createdAt: row.created_at, updatedAt: row.updated_at };
 }
 export function listDialogs(accountId) {
   return all('SELECT * FROM tele_dialogs WHERE account_id = ? ORDER BY last_at DESC, title', accountId).map((d) => ({
@@ -180,6 +268,7 @@ export async function beginLogin(userId, phone) {
   }
 }
 async function closeLive(accountId) {
+  await flushUsage(accountId).catch(() => null);
   const handle = live.get(accountId);
   live.delete(accountId);
   if (handle?.client) await handle.client.close().catch(() => {});
@@ -190,7 +279,9 @@ async function authState(client, timeoutMs = 20000) {
   for (;;) {
     const s = (await client.invoke({ _: 'getAuthorizationState' }))._;
     if (s !== 'authorizationStateWaitTdlibParameters' && s !== 'authorizationStateWaitEncryptionKey') return s;
-    if (Date.now() > until) throw new Error('TDLib آماده نشد');
+    if (Date.now() > until) {
+      throw new Error(s === 'authorizationStateWaitTdlibParameters' ? 'نشست تلگرام باز نشد (کلید رمزنگاری نشست، TELE_SESSION_KEY، عوض شده؟)' : 'TDLib آماده نشد');
+    }
     await new Promise((r) => setTimeout(r, 200));
   }
 }
@@ -271,10 +362,10 @@ export async function disconnectAccount(userId) {
   const row = getAccountForUser(userId);
   if (!row) return { ok: true };
   // Closed for being idle: open it once more, so the session is also ended on Telegram's side.
-  const client = live.get(row.id)?.client || (row.status === 'connected' ? await liveClient(row).catch(() => null) : null);
+  const client = live.get(row.id)?.client || (row.status === 'connected' ? await liveClient(row, { ignoreQuota: true }).catch(() => null) : null);
   if (client) { try { await client.invoke({ _: 'logOut' }); } catch {} }
   await closeLive(row.id);
-  run(`UPDATE tele_accounts SET status = 'disconnected', session_dir = '', tg_user_id = NULL, display_name = '', username = '' WHERE id = ?`, row.id);
+  run(`UPDATE tele_accounts SET status = 'disconnected', session_dir = '', tg_user_id = NULL, display_name = '', username = '', db_encrypted = 0 WHERE id = ?`, row.id);
   run('DELETE FROM tele_dialogs WHERE account_id = ?', row.id);
   try { if (row.session_dir?.startsWith(SESSIONS_ROOT)) fs.rmSync(row.session_dir, { recursive: true, force: true }); } catch {}
   return { ok: true };
@@ -283,8 +374,17 @@ async function createTdlibClient(row, cred) {
   const tdl = await import('tdl');
   try { const { getTdjson } = await import('prebuilt-tdlib'); tdl.configure({ tdjson: getTdjson() }); } catch {}
   const socks = await ensureEgress();
+  const dir = row.session_dir || sessionDir(row.id);
+  // A new session is encrypted from the start. One from before encryption opens without a key and
+  // is encrypted once logged in (TDLib changes the key only for a logged-in session).
+  const exists = ['td.binlog', 'td_test.binlog'].some((b) => fs.existsSync(path.join(dir, 'db', b)));
+  const encrypted = !exists || !!row.db_encrypted;
+  if (!exists) run('UPDATE tele_accounts SET db_encrypted = 1 WHERE id = ?', row.id);
   // tdl 8 connects in createClient (there is no connect()) and answers setTdlibParameters itself.
-  const client = tdl.createClient({ apiId: cred.apiId, apiHash: cred.apiHash, databaseDirectory: path.join(row.session_dir || sessionDir(row.id), 'db'), filesDirectory: path.join(row.session_dir || sessionDir(row.id), 'files'), useTestDc: TEST_DC });
+  const client = tdl.createClient({
+    apiId: cred.apiId, apiHash: cred.apiHash, databaseDirectory: path.join(dir, 'db'), filesDirectory: path.join(dir, 'files'),
+    databaseEncryptionKey: encrypted ? dbKey(row.id) : '', useTestDc: TEST_DC,
+  });
   client.on('error', (e) => console.warn('[tele] tdlib:', e?.message || e));
   client.on('update', (u) => {
     for (const fn of updateHandlers) {
@@ -296,7 +396,11 @@ async function createTdlibClient(row, cred) {
     }
   });
   try {
-    await authState(client);
+    const state = await authState(client);
+    if (!encrypted && state === 'authorizationStateReady') {
+      await client.invoke({ _: 'setDatabaseEncryptionKey', new_encryption_key: dbKey(row.id) });
+      run('UPDATE tele_accounts SET db_encrypted = 1 WHERE id = ?', row.id);
+    }
     await useProxy(client, socks);
     await saveData(client);
   } catch (e) {

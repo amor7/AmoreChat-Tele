@@ -15,6 +15,7 @@ import { Readers } from './ChatExtras';
 import { ShareTarget, AppUpdateNotes } from './AndroidApp';
 import { FoldersModal, FolderEditor } from './Folders';
 import { useBackClose } from '../backnav';
+import { TeleToChat, ChatToTele } from './TeleForward';
 
 export function Modal({ title, onClose, children, size = '' }) {
   useEffect(() => {
@@ -344,6 +345,10 @@ export default function Modals() {
       return <ImageViewer fileId={modal.fileId} name={modal.name} onClose={close} />;
     case 'forward':
       return <Forward message={modal.message} onClose={close} />;
+    case 'teleToChat':
+      return <TeleToChat message={modal.message} onClose={close} />;
+    case 'chatToTele':
+      return <ChatToTele message={modal.message} onClose={close} />;
     case 'folders':
       return <FoldersModal onClose={close} />;
     case 'folderEdit':

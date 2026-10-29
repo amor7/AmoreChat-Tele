@@ -12,6 +12,14 @@ if ! has LIVEKIT_API_SECRET; then
   echo ">> Generated a LiveKit secret in .env"
 fi
 
+# Encrypts the users' Telegram sessions on disk. Changing or losing it means users log in to
+# Telegram again (their accounts are not affected).
+if ! has TELE_SESSION_KEY; then
+  sed -i '/^TELE_SESSION_KEY=/d' .env
+  echo "TELE_SESSION_KEY=$(od -An -tx1 -N32 /dev/urandom | tr -d ' \n')" >> .env
+  echo ">> Generated a Telegram session key in .env"
+fi
+
 if ! has PUBLIC_IP; then
   IP=$(ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i = 1; i <= NF; i++) if ($i == "src") { print $(i + 1); exit }}' || true)
   sed -i '/^PUBLIC_IP=/d' .env

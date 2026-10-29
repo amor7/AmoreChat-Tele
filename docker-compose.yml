@@ -19,6 +19,8 @@ services:
       - SING_BOX_PATH=${SING_BOX_PATH:-/usr/local/bin/sing-box}
       - TELE_SOCKS_PORT=${TELE_SOCKS_PORT:-17890}
       - TELE_IDLE_MINUTES=${TELE_IDLE_MINUTES:-10}
+      # Key for the encrypted Telegram sessions (made by deploy/ensure-env.sh; keep it with the .env)
+      - TELE_SESSION_KEY=${TELE_SESSION_KEY:-}
     volumes:
       - ./data:/data
       # Second backup copy (another disk / USB / network share): BACKUP_MIRROR_DIR in .env

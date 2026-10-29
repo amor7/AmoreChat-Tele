@@ -9,7 +9,7 @@ import { VoiceBanner } from './Voice';
 import { isStageAdmin } from './VoiceTools';
 import { EmojiImg, EmojiPicker, RichText } from './Emoji';
 import PreviewIcon from './PreviewIcon';
-import { ArrowLeft, ChevronDown, Timer, Phone, Video, Mic, Search, Pin, PinOff, Reply, Forward, Copy, Pencil, Flag, Trash2, Plus, Eye, BellOff } from 'lucide-react';
+import { ArrowLeft, ChevronDown, Timer, Phone, Video, Mic, Search, Pin, PinOff, Reply, Forward, Copy, Pencil, Flag, Trash2, Plus, Eye, BellOff, Send } from 'lucide-react';
 import { startCall, joinVoice } from '../rtc';
 import { isChatMuted } from '../socket';
 import { outboxMessage, retryOutbox, dropFromOutbox } from '../offline';
@@ -184,6 +184,7 @@ export default function ChatView({ chatId }) {
       if (action === 'edit') useStore.setState({ editing: m, replyTo: null });
       if (action === 'copy') (await copyText(m.text)) && st().showToast('کپی شد');
       if (action === 'forward') st().openModal('forward', { message: m });
+      if (action === 'toTele') st().openModal('chatToTele', { message: m });
       if (action === 'readers') st().openModal('readers', { message: m });
       if (action === 'pin' || action === 'unpin') await api('POST', `/messages/${m.id}/pin`, { pinned: action === 'pin' });
       if (action === 'delete' && confirm('این پیام برای همه حذف شود؟')) await api('DELETE', `/messages/${m.id}`);
@@ -466,6 +467,11 @@ function MessageMenu({ m, x, y, mine, canPin, canDelete, canReport, canReaders, 
         {!deleted && (
           <button onClick={() => onAction('forward')}>
             <Forward size={17} /> فوروارد
+          </button>
+        )}
+        {!deleted && m.type !== 'call' && (
+          <button onClick={() => onAction('toTele')}>
+            <Send size={17} /> ارسال به تلگرام
           </button>
         )}
         {!deleted && m.text && (

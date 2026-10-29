@@ -3,12 +3,18 @@ import { fail, audit } from '../chats.js';
 import { listProxies, getProxy, createProxy, updateProxy, deleteProxy, getRoutePolicy, setRoutePolicy, publicProxy, PROTOCOL_HINTS, ROUTE_MODES } from '../tele/proxies.js';
 import { probeViaEgress, probeAll, egressStatus, ensureEgress, stopEgress, refreshEgress, liveTunnelError } from '../tele/egress.js';
 import { splitConfigs, outboundFromForm } from '../tele/uri.js';
-import { beginLogin, submitCode, submitPassword, disconnectAccount, getAccountForUser, publicAccount, listDialogs, setDialogSelected, teleRuntimeInfo, clearStaleLogin, isLive, trafficOf } from '../tele/accounts.js';
+import { beginLogin, submitCode, submitPassword, disconnectAccount, getAccountForUser, publicAccount, listDialogs, setDialogSelected, teleRuntimeInfo, clearStaleLogin, isLive, trafficOf, usageOf, quotaOf } from '../tele/accounts.js';
 import fs from 'node:fs';
+import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
-import { all, run, now } from '../db.js';
+import { get, all, run, now, UPLOAD_DIR } from '../db.js';
 import { settingNumber, setSetting } from '../settings.js';
-import { syncDialogMessages, sendTeleMessage, sendTelePhoto, telePhotoFile, newUploadPath, mediaMaxBytes, refreshDialogsFromTelegram, listStoredMessages, publicMessages, searchDialogMessages } from '../tele/messages.js';
+import { syncDialogMessages, sendTeleMessage, sendTelePhoto, sendTeleVoice, telePhotoFile, teleVoiceFile, ownTeleMessage, newUploadPath, mediaMaxBytes, refreshDialogsFromTelegram, listStoredMessages, publicMessages, searchDialogMessages } from '../tele/messages.js';
+import { getAlertSettings, setAlertSettings, teleAlert, ALERT_KINDS } from '../tele/alerts.js';
+import { getMember, postMessage } from '../chats.js';
+import { requireChat } from './chats.js';
+import { assertCanPost } from './messages.js';
+import { registerFile, newRel } from './files.js';
 
 const loginLimit = { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } };
 // Each of these costs the server's VPN traffic (and too many sends get a Telegram account limited).
@@ -105,7 +111,9 @@ export default async function teleRoutes(app) {
     const admin = hasSitePerm(req.user, 'manage_settings') || req.user.role === 'owner';
     if (!admin) runtime.egress = { running: runtime.egress.running, lastError: runtime.egress.running ? null : 'تونل تلگرام در دسترس نیست؛ به مدیر خبر دهید' };
     // live: whether the TDLib connection is open right now (it closes when idle); traffic: what it moved since opening.
-    return { account: publicAccount(account), mediaMaxMb: settingNumber('tele_media_max_mb') || 5, runtime, live: account ? isLive(account.id) : false, traffic: account ? await trafficOf(account.id) : null, dialogs: account ? listDialogs(account.id) : [] };
+    const traffic = account ? await trafficOf(account.id) : null;
+    const usage = account ? { used: usageOf(account.id).used, quotaMb: quotaOf(account) } : null;
+    return { account: publicAccount(account), mediaMaxMb: settingNumber('tele_media_max_mb') || 5, runtime, live: account ? isLive(account.id) : false, traffic, usage, dialogs: account ? listDialogs(account.id) : [] };
   });
   // Telegram limits attempts itself; this keeps one user from hammering the login through the VPN.
   app.post('/api/tele/login/phone', loginLimit, async (req) => beginLogin(req.user.id, req.body?.phone));
@@ -136,14 +144,16 @@ export default async function teleRoutes(app) {
     return { message: await sendTeleMessage(req.user.id, req.params.id, req.body?.text, Number(req.body?.replyTo) || null) };
   });
 
-  // ---------- Photos (only for accounts an admin allowed) ----------
-  app.post('/api/tele/dialogs/:id/photo', limit(10), async (req, reply) => {
-    const account = getAccountForUser(req.user.id);
-    if (!account?.allow_media) fail(403, 'دسترسی به عکس‌های تلگرام برای شما فعال نیست');
+  // One uploaded file (photo or voice) into a temporary file, within the size limit.
+  async function receiveUpload(req, { kind, ext }) {
     const part = await req.file({ limits: { fileSize: mediaMaxBytes(), files: 1 } });
-    if (!part) fail(400, 'عکسی ارسال نشده');
-    if (!/^image\//.test(part.mimetype || '')) fail(400, 'فقط عکس قابل ارسال است');
-    const file = newUploadPath();
+    if (!part) fail(400, kind === 'image' ? 'عکسی ارسال نشده' : 'صدایی ارسال نشده');
+    const okType = kind === 'image' ? /^image\//.test(part.mimetype || '') : /^(audio|video)\/(webm|ogg|mp4|mpeg|aac|x-m4a|wav)/.test(part.mimetype || '');
+    if (!okType) {
+      part.file.resume();
+      fail(400, kind === 'image' ? 'فقط عکس قابل ارسال است' : 'فقط صدا قابل ارسال است');
+    }
+    const file = newUploadPath(ext);
     try {
       await pipeline(part.file, fs.createWriteStream(file));
     } catch (e) {
@@ -152,8 +162,16 @@ export default async function teleRoutes(app) {
     }
     if (part.file.truncated) {
       fs.rmSync(file, { force: true });
-      fail(413, `حداکثر حجم عکس ${settingNumber('tele_media_max_mb') || 5} مگابایت است`);
+      fail(413, `حداکثر حجم فایل ${settingNumber('tele_media_max_mb') || 5} مگابایت است`);
     }
+    return file;
+  }
+
+  // ---------- Photos (only for accounts an admin allowed) ----------
+  app.post('/api/tele/dialogs/:id/photo', limit(10), async (req, reply) => {
+    const account = getAccountForUser(req.user.id);
+    if (!account?.allow_media) fail(403, 'دسترسی به عکس‌های تلگرام برای شما فعال نیست');
+    const file = await receiveUpload(req, { kind: 'image', ext: '.jpg' });
     reply.code(201);
     return { message: await sendTelePhoto(req.user.id, req.params.id, file, { caption: req.query?.caption, replyTo: Number(req.query?.replyTo) || null }) };
   });
@@ -164,21 +182,162 @@ export default async function teleRoutes(app) {
     return reply.send(fs.createReadStream(file));
   });
 
-  // ---------- Admin: who may load and send photos, and up to which size ----------
+  // ---------- Voice messages (only for accounts an admin allowed) ----------
+  app.get('/api/tele/messages/:id/voice', limit(60), async (req, reply) => {
+    const { file, type } = await teleVoiceFile(req.user.id, req.params.id);
+    reply.header('cache-control', 'private, max-age=86400');
+    reply.type(type);
+    return reply.send(fs.createReadStream(file));
+  });
+  app.post('/api/tele/dialogs/:id/voice', limit(10), async (req, reply) => {
+    const account = getAccountForUser(req.user.id);
+    if (!account?.allow_voice) fail(403, 'دسترسی به پیام صوتی تلگرام برای شما فعال نیست');
+    const file = await receiveUpload(req, { kind: 'audio', ext: '.rec' });
+    reply.code(201);
+    return { message: await sendTeleVoice(req.user.id, req.params.id, file, { duration: req.query?.duration, caption: req.query?.caption, replyTo: Number(req.query?.replyTo) || null }) };
+  });
+
+  // ---------- Forwarding between Telegram and the app's own chats ----------
+  // Telegram → app chats: the text, and the photo / voice when this user may load them.
+  app.post('/api/tele/messages/:id/forward', limit(20), async (req) => {
+    const { account, row, dialog, media } = ownTeleMessage(req.user.id, req.params.id);
+    const ids = Array.isArray(req.body?.chatIds) ? [...new Set(req.body.chatIds.map(Number))].slice(0, 20) : [];
+    if (!ids.length) fail(400, 'گفتگویی انتخاب نشده');
+    const targets = [];
+    for (const chatId of ids) {
+      const member = getMember(chatId, req.user.id);
+      const chat = get('SELECT * FROM chats WHERE id = ?', chatId);
+      if (!chat || !member) continue;
+      try {
+        assertCanPost(req.user, chat, member);
+      } catch {
+        continue;
+      }
+      targets.push(chat);
+    }
+    if (!targets.length) fail(400, 'به هیچ‌کدام از گفتگوهای انتخاب‌شده نمی‌توانید پیام بفرستید');
+    let type = 'text';
+    let fileId = null;
+    let text = row.text;
+    const attach = async (src, { mime, name, kind, q }) => {
+      const rel = newRel() + path.extname(src);
+      fs.mkdirSync(path.dirname(path.join(UPLOAD_DIR, rel)), { recursive: true });
+      fs.copyFileSync(src, path.join(UPLOAD_DIR, rel));
+      fileId = (await registerFile(req.user, { rel, mime, name, q })).id;
+      type = kind;
+    };
+    if (media?.type === 'photo' && account.allow_media) {
+      const src = await telePhotoFile(req.user.id, row.id);
+      await attach(src, { mime: /\.png$/i.test(src) ? 'image/png' : /\.webp$/i.test(src) ? 'image/webp' : 'image/jpeg', name: 'telegram-photo.jpg', kind: 'image', q: { w: media.w, h: media.h } });
+      text = text.replace(/^📷 عکس\n?/, '');
+    } else if (media?.type === 'voice' && account.allow_voice) {
+      const v = await teleVoiceFile(req.user.id, row.id);
+      await attach(v.file, { mime: v.type, name: 'telegram-voice.m4a', kind: 'voice', q: { dur: media.duration } });
+      text = text.replace(/^🎤 پیام صوتی\n?/, '');
+    }
+    const who = row.direction === 'out' ? '' : row.sender_name && row.sender_name !== dialog.title ? ` · ${row.sender_name}` : '';
+    const from = `تلگرام · ${dialog.title || 'گفتگو'}${who}`.slice(0, 120);
+    const sent = [];
+    for (const chat of targets) {
+      postMessage({ chatId: chat.id, senderId: req.user.id, type, text: String(text || '').slice(0, 4000), fileId, forwardedFrom: from });
+      sent.push(chat.id);
+    }
+    return { sent };
+  });
+
+  // App chat → Telegram: the text, and an image / voice message when this user may send them.
+  app.post('/api/tele/forward', limit(20), async (req) => {
+    const m = get('SELECT * FROM messages WHERE id = ?', Number(req.body?.messageId));
+    if (!m || m.deleted) fail(404, 'پیام پیدا نشد');
+    requireChat(req, m.chat_id);
+    if (m.type === 'system' || m.type === 'call') fail(400, 'این پیام قابل ارسال به تلگرام نیست');
+    const account = getAccountForUser(req.user.id);
+    if (!account || account.status !== 'connected') fail(400, 'حساب تلگرام شما وصل نیست');
+    const ids = Array.isArray(req.body?.dialogIds) ? [...new Set(req.body.dialogIds.map(Number))].slice(0, 10) : [];
+    const dialogs = ids.map((id) => get('SELECT * FROM tele_dialogs WHERE id = ? AND account_id = ?', id, account.id)).filter(Boolean);
+    if (!dialogs.length) fail(400, 'گفتگوی تلگرامی انتخاب نشده');
+    const f = m.file_id ? get('SELECT * FROM files WHERE id = ?', m.file_id) : null;
+    const src = f ? path.join(UPLOAD_DIR, f.path) : null;
+    const fits = f && f.size <= mediaMaxBytes() && fs.existsSync(src);
+    const asPhoto = fits && f.kind === 'image' && account.allow_media;
+    const asVoice = fits && f.kind === 'audio' && m.type === 'voice' && account.allow_voice;
+    // Anything else that can't go as media is named in the text instead.
+    let text = String(m.text || '').trim();
+    if (f && !asPhoto && !asVoice) text = [text, `📎 ${f.name}`].filter(Boolean).join('\n');
+    if (!text && !asPhoto && !asVoice) fail(400, 'این پیام چیزی برای ارسال ندارد');
+    const sent = [];
+    for (const d of dialogs) {
+      if (asPhoto || asVoice) {
+        const tmp = newUploadPath(asPhoto ? '.jpg' : path.extname(src) || '.rec');
+        fs.copyFileSync(src, tmp);
+        if (asPhoto) await sendTelePhoto(req.user.id, d.id, tmp, { caption: text });
+        else await sendTeleVoice(req.user.id, d.id, tmp, { duration: f.duration, caption: text });
+      } else {
+        await sendTeleMessage(req.user.id, d.id, text);
+      }
+      sent.push(d.id);
+    }
+    return { sent };
+  });
+
+  // ---------- Admin: users, their permissions, traffic and caps ----------
   app.get('/api/admin/tele/accounts', async (req) => {
     needTeleAdmin(req);
+    const month = new Date().toISOString().slice(0, 7);
+    // Highest traffic first: who uses the VPN the most this month.
     const accounts = all(
-      `SELECT a.id, a.user_id, a.status, a.display_name AS tg_name, a.allow_media, u.display_name, u.username
-       FROM tele_accounts a JOIN users u ON u.id = a.user_id ORDER BY u.display_name`,
-    ).map((a) => ({ id: a.id, userId: a.user_id, name: a.display_name, username: a.username, tgName: a.tg_name, status: a.status, allowMedia: !!a.allow_media }));
-    return { accounts, mediaMaxMb: settingNumber('tele_media_max_mb') || 5 };
+      `SELECT a.*, a.display_name AS tg_name, u.display_name AS name, u.username, IFNULL(t.sent, 0) + IFNULL(t.received, 0) AS used
+       FROM tele_accounts a JOIN users u ON u.id = a.user_id LEFT JOIN tele_usage t ON t.account_id = a.id AND t.month = ?
+       ORDER BY used DESC, u.display_name`,
+      month,
+    ).map((a) => ({
+      id: a.id, userId: a.user_id, name: a.name, username: a.username, tgName: a.tg_name, status: a.status, live: isLive(a.id),
+      allowMedia: !!a.allow_media, allowVoice: !!a.allow_voice, used: a.used, quotaMb: a.quota_mb, effectiveQuotaMb: quotaOf(a),
+    }));
+    return { accounts, month, mediaMaxMb: settingNumber('tele_media_max_mb') || 5, defaultQuotaMb: settingNumber('tele_quota_mb') };
   });
   app.patch('/api/admin/tele/accounts/:id', async (req) => {
     needTeleAdmin(req);
-    const allow = req.body?.allowMedia ? 1 : 0;
-    run('UPDATE tele_accounts SET allow_media = ?, updated_at = ? WHERE id = ?', allow, now(), Number(req.params.id));
-    audit(req.user.id, 'tele.account.media', req.params.id, { allowMedia: !!allow });
+    const id = Number(req.params.id);
+    if (!get('SELECT id FROM tele_accounts WHERE id = ?', id)) fail(404, 'حساب پیدا نشد');
+    const b = req.body || {};
+    if (b.allowMedia != null) run('UPDATE tele_accounts SET allow_media = ?, updated_at = ? WHERE id = ?', b.allowMedia ? 1 : 0, now(), id);
+    if (b.allowVoice != null) run('UPDATE tele_accounts SET allow_voice = ?, updated_at = ? WHERE id = ?', b.allowVoice ? 1 : 0, now(), id);
+    if (b.quotaMb !== undefined) {
+      // null / '' = the default cap; 0 = no cap for this user; otherwise MB per month.
+      const q = b.quotaMb === null || b.quotaMb === '' ? null : Number(b.quotaMb);
+      if (q !== null && !(Number.isInteger(q) && q >= 0 && q <= 1000000)) fail(400, 'سقف مصرف باید عدد صحیح مگابایت باشد');
+      // A new cap also allows a new alert this month.
+      run("UPDATE tele_accounts SET quota_mb = ?, quota_alerted = '', updated_at = ? WHERE id = ?", q, now(), id);
+    }
+    audit(req.user.id, 'tele.account', id, { allowMedia: b.allowMedia, allowVoice: b.allowVoice, quotaMb: b.quotaMb });
     return { ok: true };
+  });
+  app.patch('/api/admin/tele/quota', async (req) => {
+    needTeleAdmin(req);
+    const mb = Number(req.body?.defaultMb);
+    if (!(Number.isInteger(mb) && mb >= 0 && mb <= 1000000)) fail(400, 'سقف مصرف باید عدد صحیح مگابایت باشد (۰ = بدون سقف)');
+    setSetting('tele_quota_mb', mb);
+    run("UPDATE tele_accounts SET quota_alerted = ''");
+    audit(req.user.id, 'tele.quota', '', { mb });
+    return { defaultQuotaMb: mb };
+  });
+
+  // ---------- Admin: alerts ----------
+  app.get('/api/admin/tele/alerts', async (req) => {
+    needTeleAdmin(req);
+    return { alerts: getAlertSettings(), kinds: ALERT_KINDS };
+  });
+  app.patch('/api/admin/tele/alerts', async (req) => {
+    needTeleAdmin(req);
+    const alerts = setAlertSettings(req.body || {});
+    audit(req.user.id, 'tele.alerts', '', alerts);
+    return { alerts };
+  });
+  app.post('/api/admin/tele/alerts/test', limit(5), async (req) => {
+    needTeleAdmin(req);
+    const n = teleAlert('test', '🔔 پیام آزمایشی هشدارها؛ اگر این را می‌بینید، هشدارها به شما می‌رسد.', { force: true });
+    return { recipients: n };
   });
   app.patch('/api/admin/tele/media', async (req) => {
     needTeleAdmin(req);

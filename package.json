@@ -1,7 +1,7 @@
 {
   "name": "amorechat",
   "private": true,
-  "version": "1.0.12",
+  "version": "1.0.13",
   "description": "AmoreChat-Tele: self-hosted messenger + Telegram bridge",
   "workspaces": [
     "server",

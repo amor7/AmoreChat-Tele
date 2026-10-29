@@ -342,6 +342,21 @@ const migrations = [
   ALTER TABLE tele_messages ADD COLUMN media TEXT NOT NULL DEFAULT '';
   ALTER TABLE tele_accounts ADD COLUMN allow_media INTEGER NOT NULL DEFAULT 0;
   `,
+  // v12: Tele voice messages (per account, like photos), monthly traffic per account and its cap,
+  // and whether the account's TDLib session is stored encrypted.
+  `
+  ALTER TABLE tele_accounts ADD COLUMN allow_voice INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE tele_accounts ADD COLUMN quota_mb INTEGER;
+  ALTER TABLE tele_accounts ADD COLUMN quota_alerted TEXT NOT NULL DEFAULT '';
+  ALTER TABLE tele_accounts ADD COLUMN db_encrypted INTEGER NOT NULL DEFAULT 0;
+  CREATE TABLE tele_usage (
+    account_id INTEGER NOT NULL REFERENCES tele_accounts(id) ON DELETE CASCADE,
+    month TEXT NOT NULL,
+    sent INTEGER NOT NULL DEFAULT 0,
+    received INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (account_id, month)
+  );
+  `,
 ];
 
 const current = db.prepare('PRAGMA user_version').get().user_version;
