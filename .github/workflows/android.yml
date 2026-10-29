@@ -45,7 +45,17 @@ jobs:
           mkdir -p android-dist
           cp android/app/build/outputs/apk/release/app-release*.apk android-dist/amorechat.apk
           cp android/app/build/outputs/apk/debug/app-debug.apk android-dist/amorechat-debug.apk
-          "$ANDROID_HOME"/build-tools/$(ls "$ANDROID_HOME"/build-tools | sort -V | tail -1)/apksigner verify --print-certs android-dist/amorechat.apk | head -5 || true
+          SIGNER="$ANDROID_HOME"/build-tools/$(ls "$ANDROID_HOME"/build-tools | sort -V | tail -1)/apksigner
+          if OUT=$("$SIGNER" verify --print-certs android-dist/amorechat.apk 2>&1); then
+            echo "$OUT" | head -5
+            echo "release APK is signed"
+          elif [ -n "${{ inputs.version }}" ]; then
+            # Android refuses to install an unsigned APK: never ship one in a release.
+            echo "::error::The release APK is not signed. Set the ANDROID_KEYSTORE_B64 and ANDROID_KEYSTORE_PASSWORD repository secrets."
+            exit 1
+          else
+            echo "::warning::Release APK not signed (no keystore secret); only the debug APK is usable from this run."
+          fi
           ls -lh android-dist
       - uses: actions/upload-artifact@v4
         with:
