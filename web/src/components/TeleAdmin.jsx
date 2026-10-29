@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { api } from '../api';
 import { useStore } from '../store';
 import { toFa, formatDateTime } from '../util';
-import { Cable, RefreshCw, Plus, Trash2, Activity, Power } from 'lucide-react';
+import { Cable, RefreshCw, Plus, Trash2, Activity, Power, Image as ImageIcon } from 'lucide-react';
 
 export default function TeleAdmin() {
   const showToast = useStore((s) => s.showToast);
@@ -184,6 +184,78 @@ export default function TeleAdmin() {
       <button type="button" className="btn sm" onClick={load}>
         <RefreshCw size={14} /> به‌روزرسانی
       </button>
+
+      <TeleMediaAccess />
+    </div>
+  );
+}
+
+// Photos cost VPN traffic: off for everyone by default, on for the accounts chosen here.
+function TeleMediaAccess() {
+  const showToast = useStore((s) => s.showToast);
+  const [data, setData] = useState(null);
+  const [maxMb, setMaxMb] = useState('');
+  const load = () =>
+    api('GET', '/admin/tele/accounts')
+      .then((r) => {
+        setData(r);
+        setMaxMb(String(r.mediaMaxMb));
+      })
+      .catch((e) => showToast(e.message));
+  useEffect(() => {
+    load();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  if (!data) return null;
+
+  const toggle = async (a) => {
+    try {
+      await api('PATCH', `/admin/tele/accounts/${a.id}`, { allowMedia: !a.allowMedia });
+      await load();
+    } catch (e) {
+      showToast(e.message);
+    }
+  };
+  const saveMax = async (e) => {
+    e.preventDefault();
+    try {
+      await api('PATCH', '/admin/tele/media', { maxMb: Number(maxMb) });
+      showToast('ذخیره شد');
+      await load();
+    } catch (err) {
+      showToast(err.message);
+    }
+  };
+
+  return (
+    <div className="boxed" style={{ marginTop: 16 }}>
+      <h4 className="with-icon">
+        <ImageIcon size={16} /> عکس در تلگرام
+      </h4>
+      <p className="hint">پیش‌فرض همه فقط متن می‌بینند. برای هر کاربر جدا اجازه بدهید عکس ببیند و بفرستد؛ عکس فقط با زدن روی آن دانلود می‌شود.</p>
+      <form className="inline-form" onSubmit={saveMax}>
+        <label className="grow">
+          حداکثر حجم هر عکس (مگابایت)
+          <input type="number" min={1} max={50} dir="ltr" value={maxMb} onChange={(e) => setMaxMb(e.target.value)} />
+        </label>
+        <button className="btn sm">ذخیره</button>
+      </form>
+      <ul className="user-list">
+        {data.accounts.map((a) => (
+          <li key={a.id} className="row-item">
+            <span className="grow">
+              <b>{a.name}</b> <small className="muted">@{a.username}</small>
+              <br />
+              <small className="muted">
+                تلگرام: {a.tgName || '—'} · {a.status === 'connected' ? 'وصل' : 'وصل نیست'}
+              </small>
+            </span>
+            <label className="check">
+              <input type="checkbox" checked={a.allowMedia} onChange={() => toggle(a)} /> اجازه عکس
+            </label>
+          </li>
+        ))}
+        {!data.accounts.length && <li className="muted">هنوز کسی حساب تلگرام وصل نکرده است.</li>}
+      </ul>
     </div>
   );
 }

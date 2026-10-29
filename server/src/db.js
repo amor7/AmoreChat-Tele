@@ -336,6 +336,12 @@ const migrations = [
   ALTER TABLE tele_dialogs ADD COLUMN unread INTEGER NOT NULL DEFAULT 0;
   CREATE INDEX tele_messages_tg ON tele_messages(account_id, dialog_id, tg_msg_id);
   `,
+  // v11: Tele replies and photos (photos only for accounts an admin allowed)
+  `
+  ALTER TABLE tele_messages ADD COLUMN reply_to INTEGER;
+  ALTER TABLE tele_messages ADD COLUMN media TEXT NOT NULL DEFAULT '';
+  ALTER TABLE tele_accounts ADD COLUMN allow_media INTEGER NOT NULL DEFAULT 0;
+  `,
 ];
 
 const current = db.prepare('PRAGMA user_version').get().user_version;

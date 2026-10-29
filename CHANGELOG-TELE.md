@@ -1,5 +1,18 @@
 # AmoreChat-Tele Changelog
 
+## [1.0.6] — 2026-10-29
+
+### رفع اشکال
+- `syncDialogMessages` دیگر `selected = 1` نمی‌کند (حذف گفتگو با polling بعدی خنثی می‌شد)
+- پیام ارسالی: `updateMessageSendSucceeded` ردیف موقت را به شناسه نهایی منتقل می‌کند؛ پیام‌های `sending_state` از history ذخیره نمی‌شوند؛ UI صفحه آخر را جایگزین می‌کند و کلید رندر شناسه ردیف است
+
+### ویژگی
+- ریپلای: `reply_to` (مایگریشن v11)، `inputMessageReplyToMessage`، نقل‌قول با `getMessage` برای پیام‌های ذخیره‌نشده
+- عکس: `tele_accounts.allow_media` (پیش‌فرض ۰)، تنظیم `tele_media_max_mb` (پیش‌فرض ۵)
+  - `minithumbnail` در خود پیام؛ `GET /api/tele/messages/:id/photo` با `getRemoteFile` + `downloadFile` (بزرگ‌ترین اندازه زیر سقف)
+  - `POST /api/tele/dialogs/:id/photo` (multipart، `inputMessagePhoto` / `inputPhoto`)؛ فایل موقت تا یک روز در `data/tele-uploads`
+  - پنل مدیریت: `GET /api/admin/tele/accounts`، `PATCH /api/admin/tele/accounts/:id`، `PATCH /api/admin/tele/media`
+
 ## [1.0.5] — 2026-10-29
 
 ### رفع اشکال
