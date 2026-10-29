@@ -2,7 +2,7 @@ import { hasSitePerm } from '../perms.js';
 import { fail, audit } from '../chats.js';
 import { listProxies, getProxy, createProxy, updateProxy, deleteProxy, getRoutePolicy, setRoutePolicy, publicProxy, PROTOCOL_HINTS, ROUTE_MODES } from '../tele/proxies.js';
 import { probeViaEgress, egressStatus, ensureEgress, stopEgress, refreshEgress } from '../tele/egress.js';
-import { beginLogin, submitCode, submitPassword, disconnectAccount, getAccountForUser, publicAccount, listDialogs, setDialogSelected, teleRuntimeInfo } from '../tele/accounts.js';
+import { beginLogin, submitCode, submitPassword, disconnectAccount, getAccountForUser, publicAccount, listDialogs, setDialogSelected, teleRuntimeInfo, clearStaleLogin } from '../tele/accounts.js';
 import { syncDialogMessages, sendTeleMessage, refreshDialogsFromTelegram, listStoredMessages, publicMessage } from '../tele/messages.js';
 
 const needTeleAdmin = (req) => {
@@ -66,7 +66,7 @@ export default async function teleRoutes(app) {
     return { egress: egressStatus(), endpoint: ep };
   });
   app.get('/api/tele/status', async (req) => {
-    const account = getAccountForUser(req.user.id);
+    const account = clearStaleLogin(getAccountForUser(req.user.id));
     return { account: publicAccount(account), runtime: teleRuntimeInfo(), dialogs: account ? listDialogs(account.id) : [] };
   });
   app.post('/api/tele/login/phone', async (req) => beginLogin(req.user.id, req.body?.phone));

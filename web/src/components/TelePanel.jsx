@@ -36,7 +36,9 @@ export default function TelePanel({ onClose }) {
       await load();
       return r;
     } catch (e) {
-      showToast(e.message);
+      // Keep the reason on screen and show the step the server is really on (e.g. back to the phone step).
+      setNotice(e.message);
+      await load();
     } finally {
       setBusy(false);
     }
@@ -91,7 +93,7 @@ export default function TelePanel({ onClose }) {
         </form>
       )}
 
-      {(phase === 'awaiting_code' || phase === 'awaiting_tdlib') && (
+      {phase === 'awaiting_code' && (
         <form
           className="form"
           onSubmit={(e) => {
