@@ -5,6 +5,9 @@ import { ensureEgress, egressStatus } from './egress.js';
 
 const SESSIONS_ROOT = path.join(DATA_DIR, 'tele-sessions');
 const live = new Map();
+// TDLib updates (e.g. a sent message got its final id) for code that keeps state per account.
+const updateHandlers = [];
+export const onTeleUpdate = (fn) => updateHandlers.push(fn);
 
 const opening = new Map();
 // Nobody used Telegram for this long: close the TDLib connection. A connected client receives
@@ -108,7 +111,7 @@ export function publicAccount(row) {
   if (!row) return null;
   const s = String(row.phone || '');
   const phone = s.length < 6 ? '***' : s.slice(0, 4) + '***' + s.slice(-2);
-  return { id: row.id, phone, tgUserId: row.tg_user_id, displayName: row.display_name, username: row.username, status: row.status, allowShared: !!row.allow_shared, createdAt: row.created_at, updatedAt: row.updated_at };
+  return { id: row.id, phone, tgUserId: row.tg_user_id, displayName: row.display_name, username: row.username, status: row.status, allowShared: !!row.allow_shared, allowMedia: !!row.allow_media, createdAt: row.created_at, updatedAt: row.updated_at };
 }
 export function listDialogs(accountId) {
   return all('SELECT * FROM tele_dialogs WHERE account_id = ? ORDER BY last_at DESC, title', accountId).map((d) => ({
@@ -260,6 +263,15 @@ async function createTdlibClient(row, cred) {
   // tdl 8 connects in createClient (there is no connect()) and answers setTdlibParameters itself.
   const client = tdl.createClient({ apiId: cred.apiId, apiHash: cred.apiHash, databaseDirectory: path.join(row.session_dir || sessionDir(row.id), 'db'), filesDirectory: path.join(row.session_dir || sessionDir(row.id), 'files') });
   client.on('error', (e) => console.warn('[tele] tdlib:', e?.message || e));
+  client.on('update', (u) => {
+    for (const fn of updateHandlers) {
+      try {
+        fn(row.id, u);
+      } catch (e) {
+        console.warn('[tele] update handler:', e?.message || e);
+      }
+    }
+  });
   try {
     await authState(client);
     await useProxy(client, socks);

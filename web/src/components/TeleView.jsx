@@ -3,7 +3,7 @@ import { api } from '../api';
 import { useStore } from '../store';
 import { colorFor, formatDay, formatListTime, formatTime, sameDay, toFa } from '../util';
 import Avatar from './Avatar';
-import { ArrowRight, Cable, Check, LogOut, Megaphone, Plus, RefreshCw, Search, SendHorizontal, Users, X, CircleMinus } from 'lucide-react';
+import { ArrowRight, Cable, Check, LogOut, Megaphone, Plus, RefreshCw, Search, SendHorizontal, Users, X, CircleMinus, Reply, ImagePlus } from 'lucide-react';
 
 // Telegram, in the same look as the app's own chats: chat list on the side, the open chat beside it.
 // Route: #/tele (list) and #/tele/<dialogId> (an open chat).
@@ -66,7 +66,9 @@ export default function TeleView({ dialogId }) {
   const mine = useMemo(() => dialogs.filter((d) => d.selected), [dialogs]);
   const list = useMemo(() => {
     const q = query.trim().toLowerCase();
-    return (picking ? dialogs : mine).filter((d) => (tab === 'all' || d.kind === tab) && (!q || `${d.title} ${d.username}`.toLowerCase().includes(q)));
+    const shown = (picking ? dialogs : mine).filter((d) => (tab === 'all' || d.kind === tab) && (!q || `${d.title} ${d.username}`.toLowerCase().includes(q)));
+    // While adding: the chats already added first, so they are easy to find (and to take out again).
+    return picking ? [...shown.filter((d) => d.selected), ...shown.filter((d) => !d.selected)] : shown;
   }, [dialogs, mine, picking, query, tab]);
   const unreadOf = (kind) => mine.filter((d) => (kind === 'all' || d.kind === kind) && d.unread > 0).length;
   const active = dialogs.find((d) => d.id === dialogId);
@@ -201,7 +203,7 @@ export default function TeleView({ dialogId }) {
         {!status ? null : !connected ? (
           <TeleLogin status={status} reload={load} />
         ) : active ? (
-          <TeleChat key={active.id} dialog={active} onChanged={load} onRemove={() => remove(active)} />
+          <TeleChat key={active.id} dialog={active} onChanged={load} onRemove={() => remove(active)} allowMedia={!!account?.allowMedia} mediaMaxMb={status?.mediaMaxMb || 5} />
         ) : (
           <div className="empty-pane">
             <Cable size={64} className="muted" />
@@ -354,36 +356,47 @@ function TeleLogin({ status, reload }) {
   );
 }
 
+
 // ---------- An open chat ----------
-function TeleChat({ dialog, onChanged, onRemove }) {
+function TeleChat({ dialog, onChanged, onRemove, allowMedia, mediaMaxMb }) {
   const [messages, setMessages] = useState(null);
   const [notice, setNotice] = useState('');
   const [hasMore, setHasMore] = useState(true);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
+  const [replyTo, setReplyTo] = useState(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [q, setQ] = useState('');
   const [found, setFound] = useState(null);
   const listRef = useRef(null);
+  const inputRef = useRef(null);
+  const fileRef = useRef(null);
   const stick = useRef(true); // keep the view at the newest message while the user is there
   const keepFrom = useRef(null); // scroll height before older messages were added on top
   const showToast = useStore((s) => s.showToast);
   const isGroup = dialog.kind === 'group';
   const isChannel = dialog.kind === 'channel';
 
-  // Merge by Telegram id: polling returns the latest page, which overlaps what is shown.
-  const merge = (older, newer) => {
-    const map = new Map();
-    for (const m of [...(older || []), ...newer]) map.set(m.tgMsgId ?? `r${m.id}`, m);
-    return [...map.values()].sort((a, b) => (a.tgMsgId ?? 0) - (b.tgMsgId ?? 0) || a.id - b.id);
+  const byTg = (a, b) => (a.tgMsgId ?? 0) - (b.tgMsgId ?? 0) || a.id - b.id;
+  // The server's latest page replaces everything shown from its oldest message on: a message sent
+  // from here moves from its temporary id to its final one, and must not stay twice on screen.
+  const withLatest = (cur, page) => {
+    if (!page.length) return cur || [];
+    const from = Math.min(...page.map((m) => m.tgMsgId ?? Infinity));
+    const ids = new Set(page.map((m) => m.id));
+    return [...(cur || []).filter((m) => (m.tgMsgId ?? 0) < from && !ids.has(m.id)), ...page].sort(byTg);
+  };
+  const withOlder = (cur, older) => {
+    const ids = new Set((cur || []).map((m) => m.id));
+    return [...older.filter((m) => !ids.has(m.id)), ...(cur || [])].sort(byTg);
   };
 
   const fetchLatest = async (first) => {
     try {
       // Later checks ask TDLib for what it already received (local=1): no network traffic.
       const r = await api('GET', `/tele/dialogs/${dialog.id}/messages${first ? '' : '?local=1'}`);
-      setMessages((cur) => merge(first ? [] : cur, r.messages || []));
+      setMessages((cur) => withLatest(first ? [] : cur, r.messages || []));
       setNotice(r.notice || '');
       if (first) {
         setHasMore(r.hasMore !== false);
@@ -410,7 +423,7 @@ function TeleChat({ dialog, onChanged, onRemove }) {
       const r = await api('GET', `/tele/dialogs/${dialog.id}/messages?before=${oldest.tgMsgId}`);
       const older = r.messages || [];
       if (!older.length) setHasMore(false);
-      setMessages((cur) => merge(older, cur || []));
+      setMessages((cur) => withOlder(cur, older));
     } catch (e) {
       showToast(e.message);
     } finally {
@@ -435,21 +448,56 @@ function TeleChat({ dialog, onChanged, onRemove }) {
     if (el.scrollTop < 60) loadOlder();
   };
 
+  const sent = (message) => {
+    setDraft('');
+    setReplyTo(null);
+    stick.current = true;
+    setMessages((cur) => withOlder(cur, [message]));
+    onChanged();
+  };
   const send = async () => {
     const text = draft.trim();
     if (!text || sending) return;
     setSending(true);
     try {
-      const r = await api('POST', `/tele/dialogs/${dialog.id}/messages`, { text });
-      setDraft('');
-      stick.current = true;
-      setMessages((cur) => merge(cur, [r.message]));
-      onChanged();
+      sent((await api('POST', `/tele/dialogs/${dialog.id}/messages`, { text, replyTo: replyTo?.tgMsgId || null })).message);
     } catch (e) {
       showToast(e.message);
     } finally {
       setSending(false);
     }
+  };
+  // A photo, with the text box as its caption.
+  const sendPhoto = async (file) => {
+    if (!file) return;
+    if (file.size > mediaMaxMb * 1048576) return showToast(`حداکثر حجم عکس ${toFa(mediaMaxMb)} مگابایت است`);
+    setSending(true);
+    try {
+      const qs = new URLSearchParams({ caption: draft.trim(), ...(replyTo ? { replyTo: String(replyTo.tgMsgId) } : {}) });
+      const body = new FormData();
+      body.append('file', file);
+      const res = await fetch(`/api/tele/dialogs/${dialog.id}/photo?${qs}`, { method: 'POST', body, credentials: 'same-origin', headers: { 'x-requested-with': 'amorechat' } });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'ارسال عکس ناموفق بود');
+      sent(data.message);
+    } catch (e) {
+      showToast(e.message);
+    } finally {
+      setSending(false);
+    }
+  };
+
+  const startReply = (m) => {
+    if (isChannel || !m.tgMsgId) return;
+    setReplyTo(m);
+    inputRef.current?.focus();
+  };
+  const jumpTo = (tgMsgId) => {
+    const el = document.getElementById(`tm-${tgMsgId}`);
+    if (!el) return showToast('این پیام در بخش بارگذاری‌شده نیست');
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    el.classList.add('flash');
+    setTimeout(() => el.classList.remove('flash'), 1200);
   };
 
   const search = async (e) => {
@@ -468,6 +516,7 @@ function TeleChat({ dialog, onChanged, onRemove }) {
   };
 
   const subtitle = isChannel ? 'کانال' : isGroup ? 'گروه' : dialog.username ? `@${dialog.username}` : 'گفتگوی خصوصی';
+  const replyName = (m) => (m.direction === 'out' ? 'خودتان' : m.senderName || dialog.title);
 
   return (
     <div className="chat-view tele-chat">
@@ -494,14 +543,16 @@ function TeleChat({ dialog, onChanged, onRemove }) {
             <button className="icon-btn" aria-label="جستجو در این گفتگو" title="جستجو در این گفتگو" onClick={() => setSearchOpen(true)}>
               <Search size={20} />
             </button>
-            <button
-              className="icon-btn"
-              aria-label="حذف از گفتگوهای من"
-              title="حذف از گفتگوهای من (دیگر به‌روز نمی‌شود)"
-              onClick={() => confirm(`«${dialog.title || 'این گفتگو'}» از فهرست شما حذف شود؟ در تلگرام چیزی پاک نمی‌شود.`) && onRemove()}
-            >
-              <CircleMinus size={20} />
-            </button>
+            {dialog.selected && (
+              <button
+                className="icon-btn"
+                aria-label="حذف از گفتگوهای من"
+                title="حذف از گفتگوهای من (دیگر به‌روز نمی‌شود)"
+                onClick={() => confirm(`«${dialog.title || 'این گفتگو'}» از فهرست شما حذف شود؟ در تلگرام چیزی پاک نمی‌شود.`) && onRemove()}
+              >
+                <CircleMinus size={20} />
+              </button>
+            )}
           </>
         )}
         <a className="icon-btn back" href="#/tele" aria-label="بازگشت">
@@ -514,7 +565,7 @@ function TeleChat({ dialog, onChanged, onRemove }) {
         <div className="messages">
           <div className="day-sep">{found.length ? `${toFa(found.length)} نتیجه برای «${q.trim()}»` : `نتیجه‌ای برای «${q.trim()}» نیست`}</div>
           {found.map((m) => (
-            <TeleMessage key={m.id} m={m} showSender={!isChannel} showAvatar={false} grouped={false} withDate />
+            <TeleMessage key={m.id} m={m} showSender={!isChannel} showAvatar={false} grouped={false} withDate allowMedia={allowMedia} />
           ))}
         </div>
       ) : (
@@ -528,9 +579,17 @@ function TeleChat({ dialog, onChanged, onRemove }) {
             const grouped = !newDay && prev && prev.direction === m.direction && prev.senderId === m.senderId && m.createdAt - prev.createdAt < 5 * 60000;
             const mine = m.direction === 'out';
             return (
-              <Fragment key={m.tgMsgId ?? `r${m.id}`}>
+              <Fragment key={m.id}>
                 {newDay && <div className="day-sep">{formatDay(m.createdAt)}</div>}
-                <TeleMessage m={m} grouped={grouped} showSender={isGroup && !mine && !grouped} showAvatar={isGroup && !mine} />
+                <TeleMessage
+                  m={m}
+                  grouped={grouped}
+                  showSender={isGroup && !mine && !grouped}
+                  showAvatar={isGroup && !mine}
+                  allowMedia={allowMedia}
+                  onReply={isChannel ? null : startReply}
+                  onJump={jumpTo}
+                />
               </Fragment>
             );
           })}
@@ -539,11 +598,43 @@ function TeleChat({ dialog, onChanged, onRemove }) {
 
       {!isChannel && !found && (
         <div className="composer-wrap">
+          {replyTo && (
+            <div className="composer-bar">
+              <span className="bar-icon">
+                <Reply size={20} />
+              </span>
+              <span className="bar-body">
+                <b>پاسخ به {replyName(replyTo)}</b>
+                <span className="preview">{(replyTo.text || '').split('\n')[0]}</span>
+              </span>
+              <button className="icon-btn" aria-label="لغو پاسخ" onClick={() => setReplyTo(null)}>
+                <X size={20} />
+              </button>
+            </div>
+          )}
           <div className="composer">
             <button className="send-btn" aria-label="ارسال" disabled={!draft.trim() || sending} onMouseDown={(e) => e.preventDefault()} onClick={send}>
               <SendHorizontal size={20} />
             </button>
+            {allowMedia && (
+              <>
+                <button className="icon-btn" aria-label="ارسال عکس" title={`ارسال عکس (تا ${toFa(mediaMaxMb)} مگابایت؛ متن بالا توضیح عکس می‌شود)`} disabled={sending} onClick={() => fileRef.current.click()}>
+                  <ImagePlus size={22} />
+                </button>
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept="image/*"
+                  hidden
+                  onChange={(e) => {
+                    sendPhoto(e.target.files[0]);
+                    e.target.value = '';
+                  }}
+                />
+              </>
+            )}
             <textarea
+              ref={inputRef}
               rows={1}
               dir="auto"
               placeholder="پیام…"
@@ -554,6 +645,8 @@ function TeleChat({ dialog, onChanged, onRemove }) {
                 if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
                   e.preventDefault();
                   send();
+                } else if (e.key === 'Escape' && replyTo) {
+                  setReplyTo(null);
                 }
               }}
             />
@@ -564,26 +657,85 @@ function TeleChat({ dialog, onChanged, onRemove }) {
   );
 }
 
-function TeleMessage({ m, grouped, showSender, showAvatar, withDate }) {
+function TeleMessage({ m, grouped, showSender, showAvatar, withDate, allowMedia, onReply, onJump }) {
   const mine = m.direction === 'out';
+  // Without a photo shown, the text keeps its "📷 عکس" label; with it, only the caption is left.
+  const text = m.photo && allowMedia ? m.text.replace(/^📷 عکس\n?/, '') : m.text;
   return (
-    <div className={`msg-row ${mine ? 'mine' : ''} ${grouped ? 'grouped' : ''}`}>
+    <div className={`msg-row ${mine ? 'mine' : ''} ${grouped ? 'grouped' : ''}`} id={m.tgMsgId ? `tm-${m.tgMsgId}` : undefined}>
       {showAvatar && <div className="msg-avatar">{!grouped && <Avatar id={num(m.senderId)} name={m.senderName} size={34} />}</div>}
       <div className="bubble-col">
-        <div className="bubble">
+        <div
+          className={`bubble ${m.photo && allowMedia ? 'has-media' : ''}`}
+          onDoubleClick={() => onReply?.(m)}
+          onContextMenu={(e) => {
+            if (!onReply) return;
+            e.preventDefault();
+            onReply(m);
+          }}
+        >
           {showSender && m.senderName && (
             <div className="sender" style={{ color: colorFor(num(m.senderId)) }}>
               {m.senderName}
             </div>
           )}
-          <div className={`text ${m.kind !== 'text' ? 'tele-media' : ''}`} dir="auto">
-            {m.text}
-          </div>
+          {m.replyTo && (
+            <button className="reply-quote" onClick={() => onJump?.(m.replyTo.tgMsgId)}>
+              <b>{m.replyTo.senderName || 'پیام'}</b>
+              <span>{m.replyTo.text || '…'}</span>
+            </button>
+          )}
+          {m.photo && allowMedia && <TelePhoto m={m} />}
+          {text && (
+            <div className={`text ${m.kind !== 'text' && !(m.photo && allowMedia) ? 'tele-media' : ''}`} dir="auto">
+              {text}
+            </div>
+          )}
           <div className="meta">
+            {m.kind === 'failed' && <span className="tele-warn">ارسال نشد</span>}
             <span>{withDate ? `${formatDay(m.createdAt)} ${formatTime(m.createdAt)}` : formatTime(m.createdAt)}</span>
           </div>
+          {onReply && (
+            <button className="msg-more" aria-label="پاسخ" title="پاسخ" onClick={() => onReply(m)}>
+              <Reply size={17} />
+            </button>
+          )}
         </div>
       </div>
     </div>
+  );
+}
+
+// The blurred preview Telegram sends with every photo; the full photo only when tapped (VPN traffic).
+function TelePhoto({ m }) {
+  const [src, setSrc] = useState(null);
+  const [state, setState] = useState('idle'); // idle | loading | error
+  const [error, setError] = useState('');
+  useEffect(() => () => src && URL.revokeObjectURL(src), [src]);
+  const ratio = m.photo.w && m.photo.h ? Math.min(Math.max(m.photo.h / m.photo.w, 0.4), 1.6) : 0.75;
+  const load = async () => {
+    if (state === 'loading' || src) return;
+    setState('loading');
+    try {
+      const res = await fetch(`/api/tele/messages/${m.id}/photo`, { credentials: 'same-origin', headers: { 'x-requested-with': 'amorechat' } });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'دانلود عکس ناموفق بود');
+      setSrc(URL.createObjectURL(await res.blob()));
+      setState('idle');
+    } catch (e) {
+      setError(e.message);
+      setState('error');
+    }
+  };
+  return (
+    <button className="tele-photo" style={{ aspectRatio: `1 / ${ratio}` }} onClick={src ? () => window.open(src, '_blank') : load} title={src ? 'باز کردن عکس' : 'دانلود عکس'}>
+      {src ? (
+        <img src={src} alt="" />
+      ) : (
+        <>
+          {m.photo.mini ? <img className="blur" src={`data:image/jpeg;base64,${m.photo.mini}`} alt="" /> : <span className="tele-photo-empty" />}
+          <span className="tele-photo-cta">{state === 'loading' ? 'در حال دانلود…' : state === 'error' ? error : '📷 دانلود عکس'}</span>
+        </>
+      )}
+    </button>
   );
 }
