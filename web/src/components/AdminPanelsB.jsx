@@ -4,7 +4,7 @@ import { useStore } from '../store';
 import { formatDateTime, messagePreview } from '../util';
 import { EmojiImg } from './Emoji';
 import { RtcSettings } from './AdminRtc';
-import { useLoad } from './AdminPanelsA';
+import { useLoad } from './AdminPanelsA1';
 
 export function Settings() {
   const showToast = useStore((s) => s.showToast);
