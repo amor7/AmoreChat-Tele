@@ -1084,6 +1084,11 @@ async function part3() {
   const postPhoto = async (buf, caption) => {
     const x = await owner.call('POST', `/api/tele/dialogs/${channelDialog.id}/photo?caption=${encodeURIComponent(caption)}`, null, { form: photoForm(buf) });
     assert.equal(x.http, 201, JSON.stringify(x));
+    // A photo gets its place in the channel once uploaded: wait, so the posts keep this order.
+    await until('photo posted', async () => {
+      const y = ok(await owner.call('GET', `/api/tele/dialogs/${channelDialog.id}/messages?local=1`), 'channel');
+      return y.messages.some((m) => m.photo && m.text.includes(caption) && m.tgMsgId % 1048576 === 0);
+    }, 60000);
   };
 
   log('Only the owner manages mirrors; bad requests are refused');
