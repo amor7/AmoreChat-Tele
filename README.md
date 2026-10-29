@@ -97,14 +97,8 @@ Node.js 24+ لازم است.
 ```bash
 cd amorechat-tele   # یا مسیر نصب شما
 sudo bash deploy/update.sh          # آخرین
-sudo bash deploy/update.sh v1.0.1    # نسخه مشخص
+sudo bash deploy/update.sh v1.0.7    # نسخه مشخص
 ```
-
-> **سرورهایی که v1.0.0 نصب دارند:** دستور `amorechat-update` آن نسخه به ریپوی اشتباه (`amor7/AmoreChat`) وصل است. یک بار با این دستور آپدیت کنید؛ از آن به بعد `sudo amorechat-update` درست کار می‌کند:
->
-> ```bash
-> cd /path/to/amorechat-tele && curl -fsSL https://raw.githubusercontent.com/amor7/AmoreChat-Tele/main/deploy/update.sh -o /tmp/tele-update.sh && sudo AMORECHAT_DIR="$PWD" AMORECHAT_REPO=amor7/AmoreChat-Tele bash /tmp/tele-update.sh v1.0.1
-> ```
 
 ---
 

@@ -4,6 +4,18 @@
 FROM node:24-alpine
 # ffmpeg is used for voice/video processing (bundled so offline installs already have it).
 RUN apk add --no-cache ffmpeg tini && mkdir /data && chown node:node /data
+# sing-box: the tunnel that carries only Telegram traffic through the admin's proxy. Bundled (and
+# checksum-verified) so offline servers have it; SING_BOX_PATH or data/bin/sing-box can override it.
+ARG SING_BOX_VERSION=1.14.4
+ARG TARGETARCH=amd64
+RUN set -e; case "$TARGETARCH" in \
+    amd64) sum=8f7c5f0651238850d96a0e488e5473cd77ec1a0098f63942e943f475a12057ca ;; \
+    arm64) sum=b95e25f921dc5e17a4cf13327243d1177642c7e35425bf5372862c477c359f56 ;; \
+    *) echo "no sing-box for $TARGETARCH"; exit 1 ;; esac; \
+  wget -qO /tmp/sb.tgz "https://github.com/SagerNet/sing-box/releases/download/v${SING_BOX_VERSION}/sing-box-${SING_BOX_VERSION}-linux-${TARGETARCH}-musl.tar.gz"; \
+  echo "$sum  /tmp/sb.tgz" | sha256sum -c -; \
+  tar xzf /tmp/sb.tgz -C /tmp; install -m 755 /tmp/sing-box-*/sing-box /usr/local/bin/sing-box; \
+  rm -rf /tmp/sb.tgz /tmp/sing-box-*; sing-box version
 WORKDIR /app
 COPY package.json package-lock.json ./
 COPY server/package.json server/

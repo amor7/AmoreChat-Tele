@@ -83,6 +83,17 @@ if [ "$IS_IP" = 0 ] && ! grep -q '^ALSO_IP=' .env; then
   echo "ALSO_IP=${ALSO_IP}" >> .env
 fi
 
+# Telegram (Tele) keys from my.telegram.org, if given on the command line:
+#   sudo TELEGRAM_API_ID=123456 TELEGRAM_API_HASH=abc… bash deploy/install.sh
+for k in TELEGRAM_API_ID TELEGRAM_API_HASH; do
+  v="${!k:-}"
+  if [ -n "$v" ]; then
+    sed -i "/^#\? *${k}=/d" .env
+    echo "${k}=${v}" >> .env
+  fi
+done
+chmod 600 .env # holds the voice server secret and the Telegram keys
+
 mkdir -p data certs
 # The app runs as uid 1000 (user "node") inside the container.
 chown -R 1000:1000 data

@@ -291,7 +291,7 @@ export async function sendTelePhoto(userId, dialogId, file, { caption = '', repl
   return sendContent(userId, dialogId, content, { replyTo, text: text ? `📷 عکس\n${text}` : '📷 عکس', kind: 'photo' });
 }
 export function newUploadPath() {
-  fs.mkdirSync(UPLOADS, { recursive: true });
+  fs.mkdirSync(UPLOADS, { recursive: true, mode: 0o700 });
   // TDLib uploads in the background after sendMessage returns: keep files a day, then clean up.
   for (const f of fs.readdirSync(UPLOADS)) {
     const p = path.join(UPLOADS, f);

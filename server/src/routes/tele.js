@@ -1,13 +1,16 @@
 import { hasSitePerm } from '../perms.js';
 import { fail, audit } from '../chats.js';
 import { listProxies, getProxy, createProxy, updateProxy, deleteProxy, getRoutePolicy, setRoutePolicy, publicProxy, PROTOCOL_HINTS, ROUTE_MODES } from '../tele/proxies.js';
-import { probeViaEgress, egressStatus, ensureEgress, stopEgress, refreshEgress } from '../tele/egress.js';
+import { probeViaEgress, probeAll, egressStatus, ensureEgress, stopEgress, refreshEgress, liveTunnelError } from '../tele/egress.js';
+import { splitConfigs } from '../tele/uri.js';
 import { beginLogin, submitCode, submitPassword, disconnectAccount, getAccountForUser, publicAccount, listDialogs, setDialogSelected, teleRuntimeInfo, clearStaleLogin, isLive, trafficOf } from '../tele/accounts.js';
 import fs from 'node:fs';
 import { pipeline } from 'node:stream/promises';
 import { all, run, now } from '../db.js';
 import { settingNumber, setSetting } from '../settings.js';
 import { syncDialogMessages, sendTeleMessage, sendTelePhoto, telePhotoFile, newUploadPath, mediaMaxBytes, refreshDialogsFromTelegram, listStoredMessages, publicMessages, searchDialogMessages } from '../tele/messages.js';
+
+const loginLimit = { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } };
 
 const needTeleAdmin = (req) => {
   if (!hasSitePerm(req.user, 'manage_settings') && req.user.role !== 'owner') fail(403, 'دسترسی ندارید');
@@ -27,26 +30,32 @@ export default async function teleRoutes(app) {
   });
   app.get('/api/admin/tele/proxies', async (req) => {
     needTeleAdmin(req);
-    return { proxies: listProxies(), policy: getRoutePolicy(), egress: egressStatus() };
+    return { proxies: listProxies(), policy: getRoutePolicy(), egress: { ...egressStatus(), tunnelError: liveTunnelError() } };
   });
   app.post('/api/admin/tele/proxies', async (req) => {
     needTeleAdmin(req);
     const b = req.body || {};
-    if (typeof b.links === 'string' && b.links.trim()) {
-      const created = [];
-      for (const line of b.links.split(/\r?\n/).map((l) => l.trim()).filter((l) => l && !l.startsWith('#')).slice(0, 50)) {
-        created.push(createProxy({ name: b.name, config: line, protocol: b.protocol, priority: b.priority, groupName: b.groupName, enabled: b.enabled !== false }));
+    // Several configs at once: share links one per line, WireGuard .conf / JSON kept whole.
+    const configs = typeof b.links === 'string' && b.links.trim() ? splitConfigs(b.links) : [b.config || b.link || b.url];
+    if (!configs.length || !configs[0]) fail(400, 'کانفیگی پیدا نشد');
+    const created = [];
+    const errors = [];
+    configs.slice(0, 50).forEach((config, i) => {
+      try {
+        const name = configs.length > 1 && b.name ? `${b.name} ${i + 1}` : b.name;
+        created.push(createProxy({ name, config, protocol: b.protocol, priority: b.priority, groupName: b.groupName, enabled: b.enabled !== false }));
+      } catch (e) {
+        errors.push(`${i + 1}: ${e.message}`);
       }
-      audit(req.user.id, 'tele.proxy.bulk_create', '', { count: created.length });
-      return { proxies: created };
-    }
-    const proxy = createProxy({ name: b.name, config: b.config || b.link || b.url, protocol: b.protocol, priority: b.priority, groupName: b.groupName, enabled: b.enabled !== false });
-    audit(req.user.id, 'tele.proxy.create', proxy.id);
-    return { proxy };
+    });
+    audit(req.user.id, 'tele.proxy.create', '', { count: created.length, failed: errors.length });
+    if (!created.length) fail(400, errors.join(' · ') || 'کانفیگ نامعتبر است');
+    return { proxies: created, proxy: created[0], errors };
   });
   app.patch('/api/admin/tele/proxies/:id', async (req) => {
     needTeleAdmin(req);
     const proxy = updateProxy(req.params.id, req.body || {});
+    audit(req.user.id, 'tele.proxy.update', req.params.id, { enabled: proxy.enabled, priority: proxy.priority, configChanged: req.body?.config != null });
     // The running tunnel uses this proxy's old settings: start it again with the new ones.
     if (egressStatus().proxyId === Number(req.params.id)) await stopEgress();
     return { proxy, egress: await refreshEgress() };
@@ -55,6 +64,7 @@ export default async function teleRoutes(app) {
     needTeleAdmin(req);
     if (egressStatus().proxyId === Number(req.params.id)) await stopEgress();
     deleteProxy(req.params.id);
+    audit(req.user.id, 'tele.proxy.delete', req.params.id);
     return { ok: true, egress: await refreshEgress() };
   });
   app.post('/api/admin/tele/proxies/:id/probe', async (req) => {
@@ -62,6 +72,12 @@ export default async function teleRoutes(app) {
     const proxy = await probeViaEgress(Number(req.params.id));
     // A proxy that just turned healthy may be the one the policy picks: start the tunnel now.
     return { proxy, egress: await refreshEgress() };
+  });
+  // Test every enabled proxy now (as the scheduled check does) and switch to the best one.
+  app.post('/api/admin/tele/proxies/probe-all', async (req) => {
+    needTeleAdmin(req);
+    const egress = await probeAll();
+    return { proxies: listProxies(), egress };
   });
   app.post('/api/admin/tele/egress/restart', async (req) => {
     needTeleAdmin(req);
@@ -71,12 +87,17 @@ export default async function teleRoutes(app) {
   });
   app.get('/api/tele/status', async (req) => {
     const account = clearStaleLogin(getAccountForUser(req.user.id));
+    // Users see whether the tunnel runs, not its proxy server or errors (those name the VPN server).
+    const runtime = teleRuntimeInfo();
+    const admin = hasSitePerm(req.user, 'manage_settings') || req.user.role === 'owner';
+    if (!admin) runtime.egress = { running: runtime.egress.running, lastError: runtime.egress.running ? null : 'تونل تلگرام در دسترس نیست؛ به مدیر خبر دهید' };
     // live: whether the TDLib connection is open right now (it closes when idle); traffic: what it moved since opening.
-    return { account: publicAccount(account), mediaMaxMb: settingNumber('tele_media_max_mb') || 5, runtime: teleRuntimeInfo(), live: account ? isLive(account.id) : false, traffic: account ? await trafficOf(account.id) : null, dialogs: account ? listDialogs(account.id) : [] };
+    return { account: publicAccount(account), mediaMaxMb: settingNumber('tele_media_max_mb') || 5, runtime, live: account ? isLive(account.id) : false, traffic: account ? await trafficOf(account.id) : null, dialogs: account ? listDialogs(account.id) : [] };
   });
-  app.post('/api/tele/login/phone', async (req) => beginLogin(req.user.id, req.body?.phone));
-  app.post('/api/tele/login/code', async (req) => submitCode(req.user.id, req.body?.code));
-  app.post('/api/tele/login/password', async (req) => submitPassword(req.user.id, req.body?.password));
+  // Telegram limits attempts itself; this keeps one user from hammering the login through the VPN.
+  app.post('/api/tele/login/phone', loginLimit, async (req) => beginLogin(req.user.id, req.body?.phone));
+  app.post('/api/tele/login/code', loginLimit, async (req) => submitCode(req.user.id, req.body?.code));
+  app.post('/api/tele/login/password', loginLimit, async (req) => submitPassword(req.user.id, req.body?.password));
   app.post('/api/tele/disconnect', async (req) => { await disconnectAccount(req.user.id); return { ok: true }; });
   app.patch('/api/tele/dialogs/:id', async (req) => {
     const account = getAccountForUser(req.user.id);

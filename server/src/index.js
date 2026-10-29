@@ -27,7 +27,7 @@ import backupRoutes from './routes/backup.js';
 import appRoutes from './routes/app.js';
 import folderRoutes from './routes/folders.js';
 import teleRoutes from './routes/tele.js';
-import { refreshEgress } from './tele/egress.js';
+import { refreshEgress, startHealthLoop } from './tele/egress.js';
 import { startVoiceSync } from './voice.js';
 import { startHealth } from './health.js';
 import { startCertCheck } from './certcheck.js';
@@ -110,6 +110,8 @@ await app.register(adminRoutes);
 await app.register(teleRoutes);
 // Bring the Telegram tunnel back after a restart or update (not only on the next login).
 refreshEgress();
+// Scheduled proxy checks (when the admin turned them on): test all, move to the best healthy one.
+startHealthLoop();
 await app.register(backupRoutes);
 await app.register(appRoutes);
 await app.register(folderRoutes);

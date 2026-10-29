@@ -10,6 +10,7 @@ export default function TeleAdmin() {
   const [links, setLinks] = useState('');
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
+  const [probing, setProbing] = useState(null); // proxy id, or 'all'
 
   const load = () =>
     api('GET', '/admin/tele/proxies')
@@ -41,11 +42,12 @@ export default function TeleAdmin() {
     if (!links.trim()) return;
     setBusy(true);
     try {
-      await api('POST', '/admin/tele/proxies', { links, name: name || undefined });
+      const r = await api('POST', '/admin/tele/proxies', { links, name: name || undefined });
       setLinks('');
       setName('');
       await load();
-      showToast('پروکسی اضافه شد');
+      const n = r.proxies?.length || 0;
+      showToast(r.errors?.length ? `${toFa(n)} پروکسی اضافه شد؛ ${toFa(r.errors.length)} مورد خطا داشت: ${r.errors.join(' · ')}` : `${toFa(n)} پروکسی اضافه شد؛ حالا تستش کنید`);
     } catch (err) {
       showToast(err.message);
     }
@@ -53,12 +55,15 @@ export default function TeleAdmin() {
   };
 
   const probe = async (id) => {
+    setProbing(id);
     try {
-      await api('POST', `/admin/tele/proxies/${id}/probe`);
+      const r = await api('POST', id === 'all' ? '/admin/tele/proxies/probe-all' : `/admin/tele/proxies/${id}/probe`, {}, { timeout: 180000 });
       await load();
+      if (id !== 'all') showToast(r.proxy?.lastStatus === 'healthy' ? `سالم · ${toFa(r.proxy.lastLatencyMs)} ms` : `ناموفق: ${r.proxy?.lastError || ''}`);
     } catch (e) {
       showToast(e.message);
     }
+    setProbing(null);
   };
 
   const remove = async (id) => {
@@ -70,8 +75,19 @@ export default function TeleAdmin() {
       showToast(e.message);
     }
   };
+  const patchProxy = async (id, patch) => {
+    try {
+      await api('PATCH', `/admin/tele/proxies/${id}`, patch);
+      await load();
+    } catch (e) {
+      showToast(e.message);
+    }
+  };
 
-  const statusColor = (s) => (s === 'healthy' ? 'ok' : s === 'unhealthy' ? 'danger' : 'muted');
+  const STATUS = { healthy: ['سالم', 'ok'], unhealthy: ['خراب', 'danger'], unknown: ['تست نشده', 'muted'] };
+  const minutes = Math.round((policy.healthIntervalSec || 600) / 60);
+  const active = proxies.find((p) => p.id === egress.proxyId);
+  const health = egress.health || {};
 
   return (
     <div className="tele-admin">
@@ -87,16 +103,13 @@ export default function TeleAdmin() {
         </label>
         <div className="inline-form" style={{ marginTop: 8 }}>
           <select value={policy.mode || 'priority'} onChange={(e) => savePolicy({ mode: e.target.value })}>
-            <option value="priority">اولویت (failover)</option>
+            <option value="priority">اولویت (اولین سالم)</option>
             <option value="best">بهترین تأخیر</option>
             <option value="random">تصادفی بین سالم‌ها</option>
             <option value="manual">دستی</option>
           </select>
           {policy.mode === 'manual' && (
-            <select
-              value={policy.activeProxyId || ''}
-              onChange={(e) => savePolicy({ activeProxyId: e.target.value ? Number(e.target.value) : null })}
-            >
+            <select value={policy.activeProxyId || ''} onChange={(e) => savePolicy({ activeProxyId: e.target.value ? Number(e.target.value) : null })}>
               <option value="">— انتخاب —</option>
               {proxies.map((p) => (
                 <option key={p.id} value={p.id}>
@@ -115,6 +128,7 @@ export default function TeleAdmin() {
                 showToast('تونل ری‌استارت شد');
               } catch (e) {
                 showToast(e.message);
+                await load();
               }
             }}
           >
@@ -122,21 +136,55 @@ export default function TeleAdmin() {
           </button>
         </div>
         <small className="muted">
-          تونل: {egress.running ? 'در حال اجرا' : 'خاموش'}
-          {egress.localSocks ? ` · ${egress.localSocks}` : ''}
+          تونل: {egress.running ? `در حال اجرا${active ? ` با «${active.name}»` : ''}` : 'خاموش'}
+          {egress.singBoxVersion ? ` · sing-box ${egress.singBoxVersion}` : ''}
           {egress.lastError ? ` · خطا: ${egress.lastError}` : ''}
+        </small>
+        {egress.running && egress.tunnelError && <small className="tele-warn">آخرین خطای تونل: {egress.tunnelError}</small>}
+
+        <div className="tele-health">
+          <label className="check">
+            <input type="checkbox" checked={!!policy.autoHealth} onChange={(e) => savePolicy({ autoHealth: e.target.checked })} />
+            تست خودکار همه پروکسی‌ها
+          </label>
+          <label className="inline-form">
+            هر
+            <input
+              type="number"
+              min={1}
+              max={1440}
+              dir="ltr"
+              style={{ width: 72 }}
+              defaultValue={minutes}
+              key={minutes}
+              onBlur={(e) => {
+                const m = Math.max(1, Math.min(1440, Math.round(Number(e.target.value)) || 10));
+                if (m !== minutes) savePolicy({ healthIntervalSec: m * 60 });
+              }}
+            />
+            دقیقه
+          </label>
+          <button type="button" className="btn sm" disabled={probing === 'all'} onClick={() => probe('all')}>
+            <Activity size={14} /> {probing === 'all' ? 'در حال تست…' : 'تست همه الان'}
+          </button>
+        </div>
+        <small className="muted">
+          هر پروکسی واقعاً تا سرور تلگرام تست می‌شود؛ بعد طبق سیاست بالا بهترین سالم انتخاب می‌شود و اگر پروکسی فعلی خراب شده باشد، تونل خودش عوض می‌شود.
+          {health.lastRunAt ? ` آخرین تست: ${formatDateTime(health.lastRunAt)}.` : ''}
+          {policy.autoHealth && health.nextRunAt ? ` تست بعدی: ${formatDateTime(health.nextRunAt)}.` : ''}
         </small>
       </div>
 
       <form className="inline-form boxed" onSubmit={addLinks}>
-        <input placeholder="نام (اختیاری)" value={name} onChange={(e) => setName(e.target.value)} />
+        <input placeholder="نام (اختیاری؛ وگرنه از خود کانفیگ)" value={name} onChange={(e) => setName(e.target.value)} />
         <textarea
-          rows={5}
+          rows={7}
           placeholder={
-            'هر خط یک کانفیگ:\n' +
-            'socks5:// · http:// · ss:// · vless:// · vmess:// · trojan://\n' +
-            'WireGuard: بلوک [Interface]/[Peer] یا JSON outbound\n' +
-            'یا JSON کامل sing-box برای Reality'
+            'لینک‌ها هر کدام در یک خط:\n' +
+            'socks5:// · http:// · ss:// · vless:// · vmess:// · trojan:// · hy2:// · tuic://\n' +
+            'یا لینک اشتراک (subscription) base64\n\n' +
+            'WireGuard: کل فایل .conf را همان‌طور بچسبانید ([Interface] … [Peer] …)؛ چند فایل هم با هم می‌شود\n' +
+            'یا JSON خروجی/کامل sing-box'
           }
           value={links}
           onChange={(e) => setLinks(e.target.value)}
@@ -149,35 +197,47 @@ export default function TeleAdmin() {
       </form>
 
       <ul className="user-list">
-        {proxies.map((p) => (
-          <li key={p.id} className="row-item">
-            <span className="grow">
-              <b>
-                {p.name} <span className="tag">{p.protocol}</span>{' '}
-                <span className={`tag ${statusColor(p.lastStatus)}`}>{p.lastStatus}</span>
-                {!p.enabled && <span className="tag danger">خاموش</span>}
-              </b>
-              <small>
-                اولویت {toFa(p.priority)}
-                {p.lastLatencyMs != null ? ` · ${toFa(p.lastLatencyMs)} ms` : ''}
-                {p.lastCheckedAt ? ` · ${formatDateTime(p.lastCheckedAt)}` : ''}
-                {p.lastError ? ` · ${p.lastError}` : ''}
-              </small>
-            </span>
-            <button className="btn sm" title="تست" onClick={() => probe(p.id)}>
-              <Activity size={14} />
-            </button>
-            <button
-              className="btn sm"
-              onClick={() => api('PATCH', `/admin/tele/proxies/${p.id}`, { enabled: !p.enabled }).then(load)}
-            >
-              {p.enabled ? 'خاموش' : 'روشن'}
-            </button>
-            <button className="btn sm danger" onClick={() => remove(p.id)}>
-              <Trash2 size={14} />
-            </button>
-          </li>
-        ))}
+        {proxies.map((p) => {
+          const [label, color] = STATUS[p.lastStatus] || STATUS.unknown;
+          return (
+            <li key={p.id} className="row-item">
+              <span className="grow">
+                <b>
+                  {p.name} <span className="tag">{p.protocol}</span> <span className={`tag ${color}`}>{label}</span>
+                  {p.id === egress.proxyId && egress.running && <span className="tag ok">در حال استفاده</span>}
+                  {!p.enabled && <span className="tag danger">خاموش</span>}
+                </b>
+                <small>
+                  {p.lastLatencyMs != null ? `${toFa(p.lastLatencyMs)} ms` : ''}
+                  {p.lastCheckedAt ? ` · ${formatDateTime(p.lastCheckedAt)}` : ''}
+                  {p.lastError ? ` · ${p.lastError}` : ''}
+                </small>
+              </span>
+              <label className="inline-form" title="عدد کمتر = اولویت بالاتر">
+                <small>اولویت</small>
+                <input
+                  type="number"
+                  min={0}
+                  max={9999}
+                  dir="ltr"
+                  style={{ width: 64 }}
+                  defaultValue={p.priority}
+                  key={p.priority}
+                  onBlur={(e) => Number(e.target.value) !== p.priority && patchProxy(p.id, { priority: Number(e.target.value) })}
+                />
+              </label>
+              <button className="btn sm" title="تست واقعی تا تلگرام" disabled={probing != null} onClick={() => probe(p.id)}>
+                <Activity size={14} /> {probing === p.id ? '…' : ''}
+              </button>
+              <button className="btn sm" onClick={() => patchProxy(p.id, { enabled: !p.enabled })}>
+                {p.enabled ? 'خاموش' : 'روشن'}
+              </button>
+              <button className="btn sm danger" onClick={() => remove(p.id)}>
+                <Trash2 size={14} />
+              </button>
+            </li>
+          );
+        })}
         {!proxies.length && <li className="muted">هنوز پروکسی‌ای اضافه نشده</li>}
       </ul>
 
