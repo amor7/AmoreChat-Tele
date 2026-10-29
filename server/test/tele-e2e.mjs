@@ -272,9 +272,10 @@ async function part1() {
   assert.ok(!r.account.phone.includes(alicePhone.slice(4, 8)), 'phone must be masked');
 
   log('The Telegram session on disk is encrypted');
-  const sess1 = path.join(DATA_DIR, 'tele-sessions', '1', 'db', 'db.sqlite');
-  await until('session database', () => fs.existsSync(sess1), 15000);
-  assert.notEqual(sqliteHeader(sess1), PLAIN_SQLITE, 'the Telegram session is stored unencrypted');
+  // Before login TDLib keeps only its binlog, which holds the phone number in plain text unless encrypted.
+  const binlog = path.join(DATA_DIR, 'tele-sessions', '1', 'db', 'td.binlog');
+  await until('session binlog', () => fs.existsSync(binlog) && fs.statSync(binlog).size > 0, 15000, () => fs.readdirSync(path.dirname(binlog)));
+  assert.ok(!fs.readFileSync(binlog).includes(Buffer.from(alicePhone)), 'the Telegram session is stored unencrypted (phone number readable)');
 
   log('Server restart: a login left at the code step starts over; the tunnel comes back');
   await stopServer();
