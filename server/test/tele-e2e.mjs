@@ -883,6 +883,10 @@ async function uiChecks({ owner, alice, bob, pd, gd, meta, photoMsg, voiceMsg, s
     await waitText('.modal .tele-users', 'Alice');
     await noBrokenText('admin panel, Tele / VPN');
     await shot('admin');
+    await page.evaluate(() => document.querySelector('.modal .tele-alerts').scrollIntoView());
+    await shot('admin-alerts');
+    await page.evaluate(() => document.querySelector('.modal .tele-users').scrollIntoView());
+    await shot('admin-users');
     // Turning voice off for Alice from the panel works.
     await page.evaluate(() => {
       const row = [...document.querySelectorAll('.tele-users li')].find((l) => l.textContent.includes('Alice'));
