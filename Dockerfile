@@ -4,7 +4,7 @@ COPY package.json package-lock.json ./
 COPY server/package.json server/
 COPY web/package.json web/
 RUN npm install --no-audit --no-fund \
-  && npm install -w server tdl prebuilt-tdlib --no-audit --no-fund
+  && npm install -w server tdl@^8.1.0 prebuilt-tdlib@^0.1008069.0 --no-audit --no-fund
 COPY . .
 RUN npm run build && npm prune --omit=dev && mkdir -p android-dist
 
