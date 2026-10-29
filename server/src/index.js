@@ -97,7 +97,8 @@ app.addHook('onSend', async (req, reply) => {
 app.setErrorHandler((err, req, reply) => {
   const code = err.statusCode || 500;
   if (code >= 500) req.log.error(err);
-  reply.code(code).send({ error: code >= 500 ? 'خطای داخلی سرور' : err.message });
+  // `expose`: a 5xx whose message is meant for the user (e.g. Telegram/TDLib refused the login).
+  reply.code(code).send({ error: code >= 500 && !err.expose ? 'خطای داخلی سرور' : err.message });
 });
 
 await app.register(authRoutes);
