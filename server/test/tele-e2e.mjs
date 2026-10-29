@@ -1,0 +1,487 @@
+// Tele end-to-end test. A local SOCKS5 proxy stands in for the admin's VPN server; the app runs
+// sing-box through it and TDLib reaches Telegram only that way.
+//  Part 1, Telegram's test servers: tunnel, proxy choice, fail-closed, login up to the code step
+//   (the test servers no longer accept logins with generated numbers, so it stops there).
+//  Part 2, real Telegram (only with TELE_SESSION_DIR, the spare account's saved session from the
+//   tele-login workflow, and TG_TEST_BOT_TOKEN): the bot plays the other side of a private chat
+//   and a group — sender names, replies, no double sends, search, removed chats, photos,
+//   restart, fail-closed. The spare account is never logged out.
+// Usage: TELEGRAM_API_ID=… TELEGRAM_API_HASH=… [TELE_SESSION_DIR=… TG_TEST_PHONE=… TG_TEST_BOT_TOKEN=…]
+//        node server/test/tele-e2e.mjs   (sing-box installed)
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import net from 'node:net';
+import os from 'node:os';
+import path from 'node:path';
+import zlib from 'node:zlib';
+import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+const PORT = Number(process.env.PORT || 3110);
+const BASE = `http://127.0.0.1:${PORT}`;
+const PASS = 'Str0ng-Pass-77';
+const LOG = path.resolve(process.env.TELE_LOG || 'tele-server.log');
+const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
+const API_ID = Number(process.env.TELEGRAM_API_ID);
+const API_HASH = process.env.TELEGRAM_API_HASH;
+assert.ok(API_ID && API_HASH, 'TELEGRAM_API_ID / TELEGRAM_API_HASH are not set');
+const SESSION_DIR = process.env.TELE_SESSION_DIR || '';
+const BOT_TOKEN = process.env.TG_TEST_BOT_TOKEN || '';
+const FULL = !!(SESSION_DIR && fs.existsSync(path.join(SESSION_DIR, 'meta.json')) && BOT_TOKEN && process.env.TG_TEST_PHONE);
+// Unique per run: the real account keeps the messages of earlier runs.
+const RUN = Date.now().toString(36);
+
+let step = '';
+const t0 = Date.now();
+function log(msg) {
+  step = msg;
+  console.log(`[${((Date.now() - t0) / 1000).toFixed(1)}s] ${msg}`);
+}
+async function until(what, fn, ms = 60000) {
+  const end = Date.now() + ms;
+  let last;
+  for (;;) {
+    try {
+      const v = await fn();
+      if (v) return v;
+    } catch (e) {
+      last = e;
+    }
+    if (Date.now() > end) throw new Error(`timed out: ${what}${last ? ` (${last.message})` : ''}`);
+    await sleep(1000);
+  }
+}
+// Nothing may hang the job: give up with the step it was on.
+setTimeout(() => {
+  console.error(`\nFAILED (stuck) at: ${step}`);
+  process.exit(1);
+}, Number(process.env.TELE_E2E_TIMEOUT_MS || 13 * 60000)).unref();
+
+// ---------- A SOCKS5 proxy (no auth) that counts what goes through it ----------
+const socksStats = { connections: 0 };
+const sockets = new Set();
+const socks = net.createServer((c) => {
+  sockets.add(c);
+  c.on('close', () => sockets.delete(c));
+  c.on('error', () => {});
+  c.once('data', (hello) => {
+    if (hello[0] !== 5) return c.destroy();
+    c.write(Buffer.from([5, 0]));
+    c.once('data', (req) => {
+      if (req[1] !== 1) return c.end(Buffer.from([5, 7, 0, 1, 0, 0, 0, 0, 0, 0]));
+      let host;
+      let i;
+      if (req[3] === 1) {
+        host = [...req.subarray(4, 8)].join('.');
+        i = 8;
+      } else if (req[3] === 3) {
+        host = req.subarray(5, 5 + req[4]).toString();
+        i = 5 + req[4];
+      } else if (req[3] === 4) {
+        host = req.subarray(4, 20).toString('hex').match(/.{4}/g).join(':');
+        i = 20;
+      } else return c.destroy();
+      const up = net.connect(req.readUInt16BE(i), host, () => {
+        socksStats.connections++;
+        c.write(Buffer.from([5, 0, 0, 1, 0, 0, 0, 0, 0, 0]));
+        up.pipe(c);
+        c.pipe(up);
+      });
+      sockets.add(up);
+      up.on('close', () => sockets.delete(up));
+      up.on('error', () => c.destroy());
+    });
+  });
+});
+await new Promise((ok) => socks.listen(0, '127.0.0.1', ok));
+const SOCKS_PORT = socks.address().port;
+
+// ---------- The app server (restartable, same data) ----------
+let server = null;
+let serverEnv = {};
+async function startServer(env = serverEnv) {
+  serverEnv = env;
+  const out = fs.openSync(LOG, 'a');
+  server = spawn(process.execPath, [path.join(ROOT, 'server/src/index.js')], { env: { ...process.env, PORT: String(PORT), ...env }, stdio: ['ignore', out, out] });
+  await until('server up', async () => (await fetch(`${BASE}/healthz`)).ok, 30000);
+}
+async function stopServer() {
+  const p = server;
+  server = null;
+  if (!p || p.exitCode != null) return;
+  p.kill('SIGTERM');
+  await Promise.race([new Promise((ok) => p.once('exit', ok)), sleep(10000).then(() => p.kill('SIGKILL'))]);
+}
+
+let ipN = 10;
+function client() {
+  let cookie = '';
+  const ip = `10.0.0.${ipN++}`;
+  async function call(method, url, body, { form } = {}) {
+    const h = { 'x-requested-with': 'amorechat', 'x-forwarded-for': ip };
+    if (cookie) h.cookie = cookie;
+    if (body && !form) h['content-type'] = 'application/json';
+    const res = await fetch(BASE + url, { method, headers: h, body: form || (body && JSON.stringify(body)) });
+    const set = res.headers.get('set-cookie');
+    if (set) cookie = set.split(';')[0];
+    if (/^image\//.test(res.headers.get('content-type') || '')) return { http: res.status, bytes: Buffer.from(await res.arrayBuffer()), type: res.headers.get('content-type') };
+    return { ...(await res.json().catch(() => ({}))), http: res.status };
+  }
+  return { call };
+}
+const ok = (r, what) => {
+  assert.ok(r.http >= 200 && r.http < 300, `${what}: ${r.http} ${r.error || JSON.stringify(r).slice(0, 300)}`);
+  return r;
+};
+
+/** Fresh app data: owner, Alice and Bob, and the two proxies (dead one first) tested. */
+async function setupApp(env) {
+  const before = (fs.readFileSync(LOG, 'utf8').match(/SETUP CODE: (\S+)/g) || []).length;
+  await startServer(env);
+  const setup = await until('setup code', () => {
+    const all = fs.readFileSync(LOG, 'utf8').match(/SETUP CODE: (\S+)/g) || [];
+    return all.length > before && all.at(-1).split(' ').at(-1);
+  }, 15000);
+  const owner = client();
+  ok(await owner.call('POST', '/api/auth/register', { username: 'owner', password: PASS, displayName: 'Owner', invite: setup }), 'owner register');
+  ok(await owner.call('PATCH', '/api/admin/settings', { registration_mode: 'open' }), 'open registration');
+  const alice = client();
+  ok(await alice.call('POST', '/api/auth/register', { username: 'alice', password: PASS, displayName: 'Alice' }), 'alice register');
+  const bob = client();
+  ok(await bob.call('POST', '/api/auth/register', { username: 'bob', password: PASS, displayName: 'Bob' }), 'bob register');
+  return { owner, alice, bob };
+}
+async function addProxies(owner) {
+  let r = ok(await owner.call('POST', '/api/admin/tele/proxies', { links: 'socks5://127.0.0.1:1', name: 'dead', priority: 1 }), 'add dead proxy');
+  const deadId = r.proxy.id;
+  r = ok(await owner.call('POST', '/api/admin/tele/proxies', { form: { type: 'socks5', server: '127.0.0.1', port: SOCKS_PORT }, name: 'local', priority: 5 }), 'add proxy by form');
+  const goodId = r.proxy.id;
+  assert.ok(!JSON.stringify(r).includes('"config"'), 'proxy config must not be returned');
+  ok(await owner.call('PATCH', '/api/admin/tele/policy', { enabled: true, mode: 'priority' }), 'enable');
+  r = ok(await owner.call('POST', '/api/admin/tele/proxies/probe-all', {}), 'probe all');
+  const byId = Object.fromEntries(r.proxies.map((p) => [p.id, p]));
+  assert.equal(byId[goodId].lastStatus, 'healthy', `working proxy: ${byId[goodId].lastError}`);
+  assert.equal(byId[deadId].lastStatus, 'unhealthy');
+  await until('tunnel on the working proxy', async () => {
+    const x = await owner.call('GET', '/api/admin/tele/proxies');
+    return x.egress?.running && x.egress.proxyId === goodId;
+  });
+  return goodId;
+}
+const tunnelRunning = async (owner) => (await owner.call('GET', '/api/admin/tele/proxies')).egress?.running;
+
+// ---------- A PNG photo, made here ----------
+function png(w, h, seed) {
+  const raw = Buffer.alloc((w * 3 + 1) * h);
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const o = y * (w * 3 + 1) + 1 + x * 3;
+      raw[o] = (x * 255) / w;
+      raw[o + 1] = (y * 255) / h;
+      raw[o + 2] = (seed + x * y) & 255;
+    }
+  }
+  const table = Array.from({ length: 256 }, (_, n) => {
+    let c = n;
+    for (let k = 0; k < 8; k++) c = c & 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
+    return c >>> 0;
+  });
+  const crc = (b) => {
+    let c = 0xffffffff;
+    for (const x of b) c = table[(c ^ x) & 255] ^ (c >>> 8);
+    return (c ^ 0xffffffff) >>> 0;
+  };
+  const chunk = (type, data) => {
+    const len = Buffer.alloc(4);
+    len.writeUInt32BE(data.length);
+    const td = Buffer.concat([Buffer.from(type), data]);
+    const c = Buffer.alloc(4);
+    c.writeUInt32BE(crc(td));
+    return Buffer.concat([len, td, c]);
+  };
+  const ihdr = Buffer.alloc(13);
+  ihdr.writeUInt32BE(w, 0);
+  ihdr.writeUInt32BE(h, 4);
+  ihdr[8] = 8;
+  ihdr[9] = 2;
+  return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', ihdr), chunk('IDAT', zlib.deflateSync(raw)), chunk('IEND', Buffer.alloc(0))]);
+}
+const photoForm = (buf, type = 'image/png') => {
+  const form = new FormData();
+  form.append('file', new Blob([buf], { type }), 'p.png');
+  return form;
+};
+
+// ===================== Part 1: Telegram's test servers =====================
+async function part1() {
+  const DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'tele-e2e-'));
+  // Test numbers: 99966 + DC digit + 4 digits. The login itself is refused now, but the steps
+  // before it (number accepted, wrong code refused) still run against real Telegram servers.
+  const alicePhone = `999662${Math.floor(1000 + Math.random() * 9000)}`;
+  log('Part 1 (test servers): server starts; owner, Alice and Bob register');
+  const { owner, alice } = await setupApp({ DATA_DIR, TELE_TEST_DC: '1' });
+
+  log('Fail closed: no proxy → no login (and nothing sent directly)');
+  let r = await alice.call('POST', '/api/tele/login/phone', { phone: alicePhone });
+  assert.equal(r.http, 503, JSON.stringify(r));
+  assert.match(r.error, /تونل/);
+  r = await alice.call('GET', '/api/tele/status');
+  assert.equal(r.account?.status ?? 'disconnected', 'disconnected', 'a failed login must not leave the code step');
+
+  log('A non-admin cannot manage proxies');
+  r = await alice.call('GET', '/api/admin/tele/proxies');
+  assert.equal(r.http, 403);
+  r = await alice.call('POST', '/api/admin/tele/proxies', { links: 'socks5://1.2.3.4:1080' });
+  assert.equal(r.http, 403);
+
+  log('Admin adds a dead proxy (priority 1) and a working one (priority 5): the working one is used');
+  const goodId = await addProxies(owner);
+
+  log('Users do not see the proxy server or its errors');
+  r = ok(await alice.call('GET', '/api/tele/status'), 'status');
+  assert.ok(r.runtime.egress.running);
+  assert.equal(Object.keys(r.runtime.egress).sort().join(), 'lastError,running');
+
+  log('Alice logs in through the tunnel; a wrong code is refused');
+  const before = socksStats.connections;
+  r = ok(await alice.call('POST', '/api/tele/login/phone', { phone: alicePhone }), 'alice phone');
+  assert.equal(r.status, 'code_required', JSON.stringify(r));
+  assert.ok(socksStats.connections > before, 'TDLib must reach Telegram through the proxy');
+  r = await alice.call('POST', '/api/tele/login/code', { code: '00000' });
+  assert.equal(r.http, 400, JSON.stringify(r));
+  r = ok(await alice.call('GET', '/api/tele/status'), 'alice status');
+  assert.equal(r.account.status, 'awaiting_code', 'a wrong code keeps the code step');
+  assert.ok(!r.account.phone.includes(alicePhone.slice(4, 8)), 'phone must be masked');
+
+  log('Server restart: a login left at the code step starts over; the tunnel comes back');
+  await stopServer();
+  await startServer();
+  r = ok(await alice.call('GET', '/api/tele/status'), 'status after restart');
+  assert.equal(r.account.status, 'disconnected');
+  r = await alice.call('POST', '/api/tele/login/code', { code: '11111' });
+  assert.equal(r.http, 409, JSON.stringify(r));
+  await until('tunnel back after restart', () => tunnelRunning(owner), 30000);
+
+  log('Proxy turned off: the tunnel stops and login is refused (nothing goes out directly)');
+  ok(await owner.call('PATCH', `/api/admin/tele/proxies/${goodId}`, { enabled: false }), 'disable proxy');
+  await until('tunnel stopped', async () => !(await tunnelRunning(owner)), 20000);
+  r = await alice.call('POST', '/api/tele/login/phone', { phone: alicePhone });
+  assert.equal(r.http, 503, JSON.stringify(r));
+  r = ok(await alice.call('GET', '/api/tele/status'), 'status');
+  assert.equal(r.account.status, 'disconnected');
+  assert.equal(r.runtime.egress.running, false);
+
+  log('Proxy back: the tunnel and login work again');
+  ok(await owner.call('PATCH', `/api/admin/tele/proxies/${goodId}`, { enabled: true }), 'enable proxy');
+  ok(await owner.call('POST', `/api/admin/tele/proxies/${goodId}/probe`, {}), 'probe');
+  await until('tunnel back', () => tunnelRunning(owner), 30000);
+  r = ok(await alice.call('POST', '/api/tele/login/phone', { phone: alicePhone }), 'alice phone again');
+  assert.equal(r.status, 'code_required');
+
+  log('Disconnect clears the half-done login');
+  ok(await alice.call('POST', '/api/tele/disconnect', {}), 'disconnect');
+  r = ok(await alice.call('GET', '/api/tele/status'), 'status');
+  assert.ok(!r.account || r.account.status === 'disconnected');
+  await stopServer();
+}
+
+// ===================== Part 2: real Telegram, spare account + bot =====================
+let bot = null;
+async function part2() {
+  const meta = JSON.parse(fs.readFileSync(path.join(SESSION_DIR, 'meta.json'), 'utf8'));
+  const DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'tele-e2e-real-'));
+  const textOf = (m) => m.content?.text?.text || m.content?.caption?.text || '';
+
+  log('Part 2 (real Telegram): the bot logs in');
+  const tdl = await import('tdl');
+  const { getTdjson } = await import('prebuilt-tdlib');
+  tdl.configure({ tdjson: getTdjson(), verbosityLevel: 1 });
+  const botDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tele-bot-'));
+  bot = tdl.createClient({ apiId: API_ID, apiHash: API_HASH, databaseDirectory: path.join(botDir, 'db'), filesDirectory: path.join(botDir, 'files') });
+  bot.on('error', (e) => console.warn('[bot]', e?.message || e));
+  const botMsgs = [];
+  bot.on('update', (u) => {
+    if (u._ === 'updateNewMessage') botMsgs.push(u.message);
+  });
+  await bot.loginAsBot(BOT_TOKEN);
+  const botMe = await bot.invoke({ _: 'getMe' });
+  const botName = [botMe.first_name, botMe.last_name].filter(Boolean).join(' ');
+  const botSend = (chatId, text) => bot.invoke({ _: 'sendMessage', chat_id: chatId, input_message_content: { _: 'inputMessageText', text: { _: 'formattedText', text } } });
+
+  log('App with fresh data; proxies');
+  const { owner, alice, bob } = await setupApp({ DATA_DIR });
+  const goodId = await addProxies(owner);
+
+  log('Alice connects the spare account (its saved session: no code needed)');
+  // Account 1's session directory is data/tele-sessions/1: put the saved session there first.
+  fs.cpSync(SESSION_DIR, path.join(DATA_DIR, 'tele-sessions', '1'), { recursive: true });
+  let r = ok(await alice.call('POST', '/api/tele/login/phone', { phone: process.env.TG_TEST_PHONE }), 'alice connect');
+  assert.equal(r.status, 'ready', JSON.stringify(r));
+  r = ok(await alice.call('GET', '/api/tele/status'), 'status');
+  assert.equal(r.account.status, 'connected');
+  assert.equal(Number(r.account.tgUserId), meta.userId, 'Telegram user id of the account');
+  assert.ok(r.live);
+
+  log('"Add a chat" lists the bot chat and the group; nothing is selected on its own');
+  const { pd, gd } = await until('bot chat and group in the list', async () => {
+    const x = ok(await alice.call('POST', '/api/tele/dialogs/refresh', { all: true }), 'refresh all');
+    const p = x.dialogs.find((d) => Number(d.tgChatId) === meta.botChatId);
+    const g = x.dialogs.find((d) => Number(d.tgChatId) === meta.groupChatId);
+    return p && g && { pd: p, gd: g };
+  });
+  assert.equal(pd.kind, 'private');
+  assert.equal(gd.kind, 'group');
+  assert.equal(pd.selected, false);
+  assert.equal(gd.selected, false);
+  ok(await alice.call('PATCH', `/api/tele/dialogs/${pd.id}`, { selected: true }), 'select bot chat');
+  ok(await alice.call('PATCH', `/api/tele/dialogs/${gd.id}`, { selected: true }), 'select group');
+
+  log('The bot writes to Alice and in the group; Alice sees the text and the sender');
+  await bot.invoke({ _: 'createPrivateChat', user_id: meta.userId, force: true });
+  await bot.invoke({ _: 'createBasicGroupChat', basic_group_id: -meta.groupChatId, force: true }).catch(() => {});
+  const helloText = `hello alice ${RUN}`;
+  await botSend(meta.userId, helloText);
+  await botSend(meta.groupChatId, `group hello ${RUN}`);
+  const findMsg = async (dialog, text, local = false) => {
+    const x = ok(await alice.call('GET', `/api/tele/dialogs/${dialog.id}/messages${local ? '?local=1' : ''}`), 'messages');
+    return x.messages.find((m) => m.text === text);
+  };
+  const hello = await until('bot message at Alice', () => findMsg(pd, helloText));
+  assert.equal(hello.direction, 'in');
+  assert.equal(hello.senderName, botName);
+  const ghello = await until('group message at Alice', () => findMsg(gd, `group hello ${RUN}`));
+  assert.equal(ghello.senderName, botName);
+  // The open chat's quick check (local=1) sees new messages without going to the network.
+  await botSend(meta.userId, `second ${RUN}`);
+  await until('new message via the local check', () => findMsg(pd, `second ${RUN}`, true), 30000);
+
+  log('Alice replies: sent once, stored once under its final id, with the quote');
+  const replyText = `reply from alice ${RUN}`;
+  r = ok(await alice.call('POST', `/api/tele/dialogs/${pd.id}/messages`, { text: replyText, replyTo: hello.tgMsgId }), 'send reply');
+  assert.equal(r.message.replyTo?.tgMsgId, hello.tgMsgId);
+  const got = await until('the bot receives the reply', () => botMsgs.find((m) => !m.is_outgoing && textOf(m) === replyText), 30000);
+  assert.ok(got.reply_to?._ === 'messageReplyToMessage', 'the bot sees it as a reply');
+  const mine = await until('final id stored', async () => {
+    const x = ok(await alice.call('GET', `/api/tele/dialogs/${pd.id}/messages?local=1`), 'local messages');
+    const m = x.messages.filter((y) => y.text === replyText);
+    return m.length === 1 && m[0].tgMsgId % 1048576 === 0 && m[0];
+  }, 30000);
+  assert.equal(mine.replyTo?.text, helloText);
+  r = ok(await alice.call('GET', `/api/tele/dialogs/${pd.id}/messages`), 'messages again');
+  assert.equal(r.messages.filter((m) => m.text === replyText).length, 1, 'message stored twice');
+  await sleep(2000);
+  assert.equal(botMsgs.filter((m) => textOf(m) === replyText).length, 1, 'message sent twice');
+  // Several quick sends: each arrives once, in order.
+  for (let i = 1; i <= 3; i++) ok(await alice.call('POST', `/api/tele/dialogs/${pd.id}/messages`, { text: `burst ${i} ${RUN}` }), `burst ${i}`);
+  await until('burst arrives', () => [1, 2, 3].every((i) => botMsgs.some((m) => textOf(m) === `burst ${i} ${RUN}`)), 30000);
+  r = await until('burst stored once each', async () => {
+    const x = ok(await alice.call('GET', `/api/tele/dialogs/${pd.id}/messages?local=1`), 'local');
+    const b = x.messages.filter((m) => m.text.startsWith('burst ') && m.text.endsWith(RUN));
+    return b.length === 3 && b.every((m) => m.tgMsgId % 1048576 === 0) && b;
+  }, 30000);
+  assert.deepEqual(r.map((m) => m.text), [1, 2, 3].map((i) => `burst ${i} ${RUN}`));
+  assert.equal(botMsgs.filter((m) => textOf(m).startsWith('burst ') && textOf(m).endsWith(RUN)).length, 3, 'a burst message was sent twice');
+  r = ok(await alice.call('GET', '/api/tele/status'), 'status');
+  assert.equal(r.dialogs.find((d) => d.id === pd.id).lastText, `burst 3 ${RUN}`);
+
+  log('Alice writes in the group');
+  ok(await alice.call('POST', `/api/tele/dialogs/${gd.id}/messages`, { text: `alice in group ${RUN}` }), 'group send');
+  await until('stored in group', () => findMsg(gd, `alice in group ${RUN}`, true), 30000);
+
+  log('Search the whole history');
+  r = ok(await alice.call('GET', `/api/tele/dialogs/${pd.id}/search?q=${encodeURIComponent(`hello alice ${RUN}`)}`), 'search');
+  assert.equal(r.messages.length, 1, JSON.stringify(r.messages.map((m) => m.text)));
+  r = await alice.call('GET', `/api/tele/dialogs/${pd.id}/search?q=z`);
+  assert.equal(r.http, 400);
+
+  log("Others can't reach Alice's chats");
+  r = await bob.call('GET', `/api/tele/dialogs/${pd.id}/messages`);
+  assert.ok([400, 404].includes(r.http), JSON.stringify(r));
+  r = await bob.call('POST', `/api/tele/dialogs/${pd.id}/messages`, { text: 'x' });
+  assert.ok([400, 404].includes(r.http));
+  r = await owner.call('GET', `/api/tele/dialogs/${pd.id}/messages`);
+  assert.ok([400, 404].includes(r.http), 'even the admin must not read a user\'s Telegram chats');
+
+  log('A removed chat stays removed');
+  ok(await alice.call('PATCH', `/api/tele/dialogs/${gd.id}`, { selected: false }), 'deselect group');
+  await botSend(meta.groupChatId, `in removed chat ${RUN}`);
+  await sleep(3000);
+  for (const all of [false, true]) {
+    r = ok(await alice.call('POST', '/api/tele/dialogs/refresh', { all }), 'refresh');
+    assert.equal(r.dialogs.find((d) => d.id === gd.id).selected, false, `group came back (all=${all})`);
+  }
+
+  log('Photos: off by default, then on for Alice only');
+  const pngFile = path.join(botDir, 'bot.png');
+  fs.writeFileSync(pngFile, png(320, 240, 90));
+  await bot.invoke({ _: 'sendMessage', chat_id: meta.userId, input_message_content: { _: 'inputMessagePhoto', photo: { _: 'inputPhoto', photo: { _: 'inputFileLocal', path: pngFile }, width: 320, height: 240 }, caption: { _: 'formattedText', text: `photo ${RUN}` } } });
+  const photoMsg = await until('photo at Alice', async () => {
+    const x = ok(await alice.call('GET', `/api/tele/dialogs/${pd.id}/messages`), 'messages');
+    return x.messages.find((m) => m.photo && m.text.includes(`photo ${RUN}`));
+  }, 60000);
+  assert.ok(photoMsg.photo.w > 0);
+  r = await alice.call('GET', `/api/tele/messages/${photoMsg.id}/photo`);
+  assert.equal(r.http, 403, 'photo loaded before the admin allowed it');
+  r = await alice.call('POST', `/api/tele/dialogs/${pd.id}/photo`, null, { form: photoForm(png(64, 64, 3)) });
+  assert.equal(r.http, 403, 'photo sent before the admin allowed it');
+  const accounts = ok(await owner.call('GET', '/api/admin/tele/accounts'), 'accounts').accounts;
+  ok(await owner.call('PATCH', `/api/admin/tele/accounts/${accounts.find((a) => a.username === 'alice').id}`, { allowMedia: true }), 'allow media');
+  r = await alice.call('GET', `/api/tele/messages/${photoMsg.id}/photo`);
+  assert.equal(r.http, 200, JSON.stringify(r).slice(0, 300));
+  assert.ok(r.bytes.length > 1000 && /^image\//.test(r.type), `photo: ${r.bytes?.length} bytes, ${r.type}`);
+  r = await bob.call('GET', `/api/tele/messages/${photoMsg.id}/photo`);
+  assert.ok([403, 404].includes(r.http));
+
+  log('Alice sends a photo; not-a-photo is refused');
+  r = await alice.call('POST', `/api/tele/dialogs/${pd.id}/photo?caption=${encodeURIComponent(`from alice ${RUN}`)}`, null, { form: photoForm(png(200, 200, 200)) });
+  assert.equal(r.http, 201, JSON.stringify(r));
+  await until('the bot receives the photo', () => botMsgs.find((m) => m.content?._ === 'messagePhoto' && textOf(m) === `from alice ${RUN}`), 60000);
+  r = await alice.call('POST', `/api/tele/dialogs/${pd.id}/photo`, null, { form: photoForm(Buffer.from('not an image'), 'text/plain') });
+  assert.equal(r.http, 400);
+
+  log('Server restart: the account reconnects from its saved session');
+  await stopServer();
+  await startServer();
+  await until('tunnel back after restart', () => tunnelRunning(owner), 30000);
+  r = ok(await alice.call('GET', '/api/tele/status'), 'status after restart');
+  assert.equal(r.account.status, 'connected');
+  r = ok(await alice.call('GET', `/api/tele/dialogs/${pd.id}/messages`), 'messages after restart');
+  assert.ok(!r.notice, `notice after restart: ${r.notice}`);
+  ok(await alice.call('POST', `/api/tele/dialogs/${pd.id}/messages`, { text: `after restart ${RUN}` }), 'send after restart');
+  await until('the bot receives it', () => botMsgs.find((m) => textOf(m) === `after restart ${RUN}`), 30000);
+
+  log('Proxy turned off: nothing goes out; stored messages still show');
+  ok(await owner.call('PATCH', `/api/admin/tele/proxies/${goodId}`, { enabled: false }), 'disable proxy');
+  await until('tunnel stopped', async () => !(await tunnelRunning(owner)), 20000);
+  r = await alice.call('POST', `/api/tele/dialogs/${pd.id}/messages`, { text: `must not be sent ${RUN}` });
+  assert.ok(r.http >= 400, `sent without a proxy: ${JSON.stringify(r)}`);
+  r = ok(await alice.call('GET', `/api/tele/dialogs/${pd.id}/messages`), 'stored messages');
+  assert.ok(r.messages.some((m) => m.text === helloText), 'stored messages are still shown');
+  ok(await owner.call('PATCH', `/api/admin/tele/proxies/${goodId}`, { enabled: true }), 'enable proxy');
+  ok(await owner.call('POST', `/api/admin/tele/proxies/${goodId}/probe`, {}), 'probe');
+  await until('tunnel back', () => tunnelRunning(owner), 30000);
+  ok(await alice.call('POST', `/api/tele/dialogs/${pd.id}/messages`, { text: `back online ${RUN}` }), 'send after proxy back');
+  await until('the bot receives it', () => botMsgs.find((m) => textOf(m) === `back online ${RUN}`), 60000);
+  assert.ok(!botMsgs.some((m) => textOf(m) === `must not be sent ${RUN}`), 'a message went out without the proxy');
+  // Never log out here: the spare account's session is shared with later runs.
+  await stopServer();
+}
+
+let fail = null;
+try {
+  fs.writeFileSync(LOG, '');
+  await part1();
+  if (FULL) await part2();
+  else console.log('\nPart 2 (real Telegram) skipped: no saved session yet (run the tele-login workflow), or TG_TEST_* secrets missing');
+  console.log(`\nTele e2e: passed${FULL ? ' (both parts)' : ' (part 1)'}`);
+} catch (e) {
+  fail = e;
+  console.error(`\nFAILED at: ${step}\n`, e);
+} finally {
+  await bot?.close().catch(() => {});
+  await stopServer();
+  await new Promise((done) => socks.close(done));
+  for (const s of sockets) s.destroy();
+}
+process.exit(fail ? 1 : 0);

@@ -13,6 +13,8 @@ const opening = new Map();
 // Nobody used Telegram for this long: close the TDLib connection. A connected client receives
 // updates for every chat of the account, so this is what saves the server's VPN traffic.
 const IDLE_MS = Math.max(1, Number(process.env.TELE_IDLE_MINUTES) || 10) * 60000;
+// Telegram's test servers (separate accounts, fixed login codes): only for the automated tests.
+const TEST_DC = process.env.TELE_TEST_DC === '1';
 
 /**
  * The account's TDLib client, opened again from its saved session when needed (after a server
@@ -162,6 +164,8 @@ export async function beginLogin(userId, phone) {
     if (!status) throw new Error(`وضعیت غیرمنتظره TDLib: ${state}`);
     live.set(row.id, { client, phase: status === 'connected' ? 'ready' : status, userId, lastUsed: Date.now() });
     run(`UPDATE tele_accounts SET status = ?, updated_at = ? WHERE id = ?`, status, now(), row.id);
+    // The saved session was still logged in: no code needed, but keep who the account is.
+    if (status === 'connected') return loggedIn(row, live.get(row.id));
     const result = { awaiting_code: 'code_required', awaiting_password: 'password_required', connected: 'ready' }[status];
     return { status: result, account: publicAccount(getAccountForUser(userId)) };
   } catch (e) {
@@ -200,11 +204,24 @@ export async function submitCode(userId, code) {
   } catch (e) {
     throw Object.assign(new Error(/CODE_INVALID/i.test(String(e.message)) ? 'کد نامعتبر' : e.message || 'کد نامعتبر'), { statusCode: 400 });
   }
+  let state = await authState(handle.client);
   // With two-step verification TDLib asks for the password next instead of failing.
-  if ((await authState(handle.client)) === 'authorizationStateWaitPassword') {
+  if (state === 'authorizationStateWaitPassword') {
     handle.phase = 'awaiting_password';
     run(`UPDATE tele_accounts SET status = 'awaiting_password', updated_at = ? WHERE id = ?`, now(), row.id);
     return { status: 'password_required', account: publicAccount(getAccountForUser(userId)) };
+  }
+  // A number with no Telegram account yet: not created from here (except on the test servers).
+  if (state === 'authorizationStateWaitRegistration' && TEST_DC) {
+    const name = get('SELECT display_name FROM users WHERE id = ?', userId)?.display_name || 'Test';
+    await handle.client.invoke({ _: 'registerUser', first_name: name.slice(0, 64), last_name: '', disable_notification: true });
+    state = await authState(handle.client);
+  }
+  if (state !== 'authorizationStateReady') {
+    await closeLive(row.id);
+    run(`UPDATE tele_accounts SET status = 'disconnected', updated_at = ? WHERE id = ?`, now(), row.id);
+    const msg = state === 'authorizationStateWaitRegistration' ? 'این شماره حساب تلگرام ندارد؛ اول در اپ تلگرام ثبت‌نام کنید' : `ورود کامل نشد (${state})`;
+    throw Object.assign(new Error(msg), { statusCode: 400, expose: true });
   }
   return loggedIn(row, handle);
 }
@@ -217,6 +234,12 @@ export async function submitPassword(userId, password) {
     await handle.client.invoke({ _: 'checkAuthenticationPassword', password: String(password) });
   } catch (e) {
     throw Object.assign(new Error(/PASSWORD_HASH_INVALID/i.test(String(e.message)) ? 'رمز دومرحله‌ای اشتباه است' : e.message || 'رمز نامعتبر'), { statusCode: 400 });
+  }
+  const state = await authState(handle.client);
+  if (state !== 'authorizationStateReady') {
+    await closeLive(row.id);
+    run(`UPDATE tele_accounts SET status = 'disconnected', updated_at = ? WHERE id = ?`, now(), row.id);
+    throw Object.assign(new Error(`ورود کامل نشد (${state})`), { statusCode: 400, expose: true });
   }
   return loggedIn(row, handle);
 }
@@ -261,7 +284,7 @@ async function createTdlibClient(row, cred) {
   try { const { getTdjson } = await import('prebuilt-tdlib'); tdl.configure({ tdjson: getTdjson() }); } catch {}
   const socks = await ensureEgress();
   // tdl 8 connects in createClient (there is no connect()) and answers setTdlibParameters itself.
-  const client = tdl.createClient({ apiId: cred.apiId, apiHash: cred.apiHash, databaseDirectory: path.join(row.session_dir || sessionDir(row.id), 'db'), filesDirectory: path.join(row.session_dir || sessionDir(row.id), 'files') });
+  const client = tdl.createClient({ apiId: cred.apiId, apiHash: cred.apiHash, databaseDirectory: path.join(row.session_dir || sessionDir(row.id), 'db'), filesDirectory: path.join(row.session_dir || sessionDir(row.id), 'files'), useTestDc: TEST_DC });
   client.on('error', (e) => console.warn('[tele] tdlib:', e?.message || e));
   client.on('update', (u) => {
     for (const fn of updateHandlers) {

@@ -27,7 +27,7 @@ import backupRoutes from './routes/backup.js';
 import appRoutes from './routes/app.js';
 import folderRoutes from './routes/folders.js';
 import teleRoutes from './routes/tele.js';
-import { refreshEgress, startHealthLoop } from './tele/egress.js';
+import { refreshEgress, startHealthLoop, stopEgress } from './tele/egress.js';
 import { startVoiceSync } from './voice.js';
 import { startHealth } from './health.js';
 import { startCertCheck } from './certcheck.js';
@@ -173,6 +173,7 @@ mediaReady.then((ok) => !ok && app.log.warn('ffmpeg not found: voice/video conve
 
 for (const sig of ['SIGINT', 'SIGTERM']) {
   process.on(sig, async () => {
+    await stopEgress().catch(() => {});
     await app.close();
     db.close();
     process.exit(0);
