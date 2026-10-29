@@ -16,7 +16,7 @@ services:
       # Tele (Telegram bridge)
       - TELEGRAM_API_ID=${TELEGRAM_API_ID:-}
       - TELEGRAM_API_HASH=${TELEGRAM_API_HASH:-}
-      - SING_BOX_PATH=${SING_BOX_PATH:-}
+      - SING_BOX_PATH=${SING_BOX_PATH:-/usr/local/bin/sing-box}
       - TELE_SOCKS_PORT=${TELE_SOCKS_PORT:-17890}
     volumes:
       - ./data:/data
@@ -24,8 +24,6 @@ services:
       - ${BACKUP_MIRROR_DIR:-./data/no-mirror}:/mirror
       # Whole-server network traffic for the health dashboard (read-only)
       - /proc/1/net/dev:/host/proc/1/net/dev:ro
-      # Optional: host sing-box binary for Tele egress
-      - ${SING_BOX_HOST_PATH:-/usr/local/bin/sing-box}:/usr/local/bin/sing-box:ro
     expose:
       - '3000'
 
