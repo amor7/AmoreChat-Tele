@@ -125,6 +125,34 @@ export default function TeleAdmin() {
         {egress.running && egress.tunnelError && <small className="tele-warn">آخرین خطای تونل: {egress.tunnelError}</small>}
 
         <div className="tele-health">
+          <label className="inline-form" title="برای پیدا کردن IP پروکسی‌هایی که با دامنه وارد شده‌اند">
+            DNS پروکسی‌ها
+            <input
+              dir="ltr"
+              list="tele-dns-presets"
+              style={{ width: 170 }}
+              placeholder="خالی = DNS خود سرور"
+              defaultValue={(policy.dns || '').replace(/:53$/, '')}
+              key={policy.dns || ''}
+              onBlur={(e) => {
+                const v = e.target.value.trim();
+                if (v !== (policy.dns || '').replace(/:53$/, '')) savePolicy({ dns: v });
+              }}
+            />
+            <datalist id="tele-dns-presets">
+              <option value="178.22.122.100">شکن</option>
+              <option value="185.51.200.2">شکن ۲</option>
+              <option value="10.202.10.202">۴۰۳</option>
+              <option value="78.157.42.100">الکترو</option>
+              <option value="10.202.10.10">رادار</option>
+            </datalist>
+          </label>
+        </div>
+        <small className="muted">
+          اگر پروکسی با دامنه وارد شده و تست خطای <code dir="ltr">lookup … deadline exceeded</code> می‌دهد، DNS خود سرور (معمولاً خارجی) در قطعی جواب نمی‌دهد؛ یک DNS داخلی بگذارید (مثلاً شکن). فقط آدرس خود پروکسی با آن پیدا می‌شود؛ ترافیک تلگرام از پروکسی می‌رود.
+        </small>
+
+        <div className="tele-health">
           <label className="check">
             <input type="checkbox" checked={!!policy.autoHealth} onChange={(e) => savePolicy({ autoHealth: e.target.checked })} />
             تست خودکار همه پروکسی‌ها

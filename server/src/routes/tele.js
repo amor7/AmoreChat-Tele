@@ -26,6 +26,8 @@ export default async function teleRoutes(app) {
   app.patch('/api/admin/tele/policy', async (req) => {
     needTeleAdmin(req);
     const policy = setRoutePolicy(req.body || {});
+    // A new DNS server is part of the tunnel's config: start it again with it.
+    if (req.body?.dns !== undefined) await stopEgress();
     const egress = await refreshEgress();
     audit(req.user.id, 'tele.policy', '', policy);
     return { policy, egress };

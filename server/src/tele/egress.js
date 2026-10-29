@@ -100,9 +100,16 @@ function buildConfig(row, port, bin) {
   } else {
     config.outbounds.unshift(out);
   }
+  // How a proxy given by domain is found: the admin's DNS server if set (the server's own DNS is
+  // often foreign and unreachable during a shutdown), else the system resolver. Only the proxy's
+  // own address is looked up this way; Telegram traffic itself goes through the proxy.
+  const dns = String(getRoutePolicy().dns || '').split(',').filter(Boolean)[0];
+  const [, dnsHost, dnsPort] = dns?.match(/^\[?([^\]]+?)\]?:(\d+)$/) || [];
   if (atLeast(version, '1.12.0')) {
-    config.dns = { servers: [{ type: 'local', tag: 'local' }] };
-    config.route.default_domain_resolver = 'local';
+    config.dns = { servers: [dnsHost ? { type: 'udp', tag: 'proxy-dns', server: dnsHost, server_port: Number(dnsPort) } : { type: 'local', tag: 'proxy-dns' }] };
+    config.route.default_domain_resolver = 'proxy-dns';
+  } else if (dnsHost) {
+    config.dns = { servers: [{ tag: 'proxy-dns', address: `udp://${dnsHost.includes(':') ? `[${dnsHost}]` : dnsHost}:${dnsPort}` }] };
   }
   return config;
 }
