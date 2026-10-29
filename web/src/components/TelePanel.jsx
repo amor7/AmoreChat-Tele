@@ -70,6 +70,7 @@ export default function TelePanel({ onClose }) {
       <small className="muted">
         API: {runtime.apiConfigured ? 'OK' : 'خیر'} · TDLib: {runtime.tdlAvailable ? 'OK' : 'خیر'} · تونل:{' '}
         {runtime.egress?.running ? 'روشن' : 'خاموش'}
+        {!runtime.egress?.running && runtime.egress?.lastError ? ` (${runtime.egress.lastError})` : ''}
       </small>
 
       {(!account || phase === 'disconnected') && (

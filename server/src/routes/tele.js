@@ -1,7 +1,7 @@
 import { hasSitePerm } from '../perms.js';
 import { fail, audit } from '../chats.js';
 import { listProxies, getProxy, createProxy, updateProxy, deleteProxy, getRoutePolicy, setRoutePolicy, publicProxy, PROTOCOL_HINTS, ROUTE_MODES } from '../tele/proxies.js';
-import { probeViaEgress, egressStatus, ensureEgress, stopEgress } from '../tele/egress.js';
+import { probeViaEgress, egressStatus, ensureEgress, stopEgress, refreshEgress } from '../tele/egress.js';
 import { beginLogin, submitCode, submitPassword, disconnectAccount, getAccountForUser, publicAccount, listDialogs, setDialogSelected, teleRuntimeInfo } from '../tele/accounts.js';
 import { syncDialogMessages, sendTeleMessage, refreshDialogsFromTelegram, listStoredMessages, publicMessage } from '../tele/messages.js';
 
@@ -17,9 +17,9 @@ export default async function teleRoutes(app) {
   app.patch('/api/admin/tele/policy', async (req) => {
     needTeleAdmin(req);
     const policy = setRoutePolicy(req.body || {});
-    if (policy.enabled) { try { await ensureEgress(); } catch {} } else await stopEgress();
+    const egress = await refreshEgress();
     audit(req.user.id, 'tele.policy', '', policy);
-    return { policy, egress: egressStatus() };
+    return { policy, egress };
   });
   app.get('/api/admin/tele/proxies', async (req) => {
     needTeleAdmin(req);
@@ -42,16 +42,22 @@ export default async function teleRoutes(app) {
   });
   app.patch('/api/admin/tele/proxies/:id', async (req) => {
     needTeleAdmin(req);
-    return { proxy: updateProxy(req.params.id, req.body || {}) };
+    const proxy = updateProxy(req.params.id, req.body || {});
+    // The running tunnel uses this proxy's old settings: start it again with the new ones.
+    if (egressStatus().proxyId === Number(req.params.id)) await stopEgress();
+    return { proxy, egress: await refreshEgress() };
   });
   app.delete('/api/admin/tele/proxies/:id', async (req) => {
     needTeleAdmin(req);
+    if (egressStatus().proxyId === Number(req.params.id)) await stopEgress();
     deleteProxy(req.params.id);
-    return { ok: true };
+    return { ok: true, egress: await refreshEgress() };
   });
   app.post('/api/admin/tele/proxies/:id/probe', async (req) => {
     needTeleAdmin(req);
-    return { proxy: await probeViaEgress(Number(req.params.id)), egress: egressStatus() };
+    const proxy = await probeViaEgress(Number(req.params.id));
+    // A proxy that just turned healthy may be the one the policy picks: start the tunnel now.
+    return { proxy, egress: await refreshEgress() };
   });
   app.post('/api/admin/tele/egress/restart', async (req) => {
     needTeleAdmin(req);

@@ -88,15 +88,31 @@ export function egressStatus() {
 }
 
 export async function stopEgress() {
-  if (child) {
+  const proc = child;
+  child = null;
+  currentProxyId = null;
+  if (!proc || proc.exitCode !== null || proc.signalCode !== null) return;
+  // Wait until it is really gone, so a restart can bind the same local port again.
+  await new Promise((resolve) => {
+    const force = setTimeout(() => {
+      try {
+        proc.kill('SIGKILL');
+      } catch {
+        /* ignore */
+      }
+    }, 2000);
+    const done = setTimeout(resolve, 3000);
+    proc.once('exit', () => {
+      clearTimeout(force);
+      clearTimeout(done);
+      resolve();
+    });
     try {
-      child.kill('SIGTERM');
+      proc.kill('SIGTERM');
     } catch {
       /* ignore */
     }
-    child = null;
-  }
-  currentProxyId = null;
+  });
 }
 
 /**
@@ -147,46 +163,62 @@ export async function ensureEgress() {
   }
 
   await new Promise((resolve, reject) => {
-    child = spawn(bin, ['run', '-c', CONFIG_PATH], {
+    const proc = spawn(bin, ['run', '-c', CONFIG_PATH], {
       stdio: ['ignore', 'pipe', 'pipe'],
       env: process.env,
     });
+    child = proc;
     currentProxyId = proxy.id;
-    let started = false;
+    let settled = false;
+    let stderr = '';
+    // Still alive after a moment = started. Exiting before that is a failed start.
     const timer = setTimeout(() => {
-      if (!started) {
-        started = true;
-        resolve();
-      }
+      settled = true;
+      resolve();
     }, 800);
-    child.stderr?.on('data', (buf) => {
+    proc.stdout?.resume();
+    proc.stderr?.on('data', (buf) => {
       const t = buf.toString();
-      if (/error|failed/i.test(t)) lastError = t.slice(0, 400);
+      stderr = (stderr + t).slice(-400);
+      if (/error|failed|fatal/i.test(t)) lastError = t.slice(0, 400);
     });
-    child.on('error', (err) => {
-      clearTimeout(timer);
-      child = null;
-      currentProxyId = null;
-      lastError = err.message;
-      reject(err);
-    });
-    child.on('exit', (code) => {
-      if (currentProxyId === proxy.id) {
+    // Only touch the state if this is still the current process: after a restart the old
+    // process exits later and must not mark the new one as stopped.
+    const gone = (msg) => {
+      if (child === proc) {
         child = null;
         currentProxyId = null;
-        lastError = `sing-box exited with code ${code}`;
       }
+      lastError = msg;
+      if (!settled) {
+        settled = true;
+        clearTimeout(timer);
+        reject(Object.assign(new Error(msg), { statusCode: 502 }));
+      }
+    };
+    proc.on('error', (err) => gone(err.message));
+    proc.on('exit', (code, signal) => {
+      if (child !== proc) return;
+      gone(`sing-box exited (${signal || code})${stderr ? ': ' + stderr.trim() : ''}`);
     });
-    setTimeout(() => {
-      if (!started) {
-        started = true;
-        resolve();
-      }
-    }, 500);
   });
 
   lastError = '';
   return { host: LOCAL_SOCKS_HOST, port: LOCAL_SOCKS_PORT, proxyId: proxy.id };
+}
+
+/**
+ * Bring the tunnel in line with the current policy and proxies: start it (or switch proxy)
+ * when enabled, stop it when disabled. Never throws; the reason ends up in lastError.
+ */
+export async function refreshEgress() {
+  try {
+    if (getRoutePolicy().enabled) await ensureEgress();
+    else await stopEgress();
+  } catch {
+    /* fail-closed: status shows lastError */
+  }
+  return egressStatus();
 }
 
 /**
