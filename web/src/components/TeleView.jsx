@@ -3,7 +3,7 @@ import { api } from '../api';
 import { useStore } from '../store';
 import { colorFor, formatDay, formatListTime, formatTime, sameDay, toFa, faDigits } from '../util';
 import Avatar from './Avatar';
-import { ArrowRight, Cable, Check, LogOut, Megaphone, Plus, RefreshCw, Search, SendHorizontal, Users, X, CircleMinus, Reply, ImagePlus, Mic, Play, Forward, Trash2 } from 'lucide-react';
+import { ArrowRight, Cable, Check, LogOut, Megaphone, Plus, RefreshCw, Search, SendHorizontal, Users, X, CircleMinus, Reply, ImagePlus, Mic, Play, Forward, Trash2, ShieldCheck, Paperclip, FileText, Film, Download } from 'lucide-react';
 
 // Telegram, in the same look as the app's own chats: chat list on the side, the open chat beside it.
 // Route: #/tele (list) and #/tele/<dialogId> (an open chat).
@@ -135,6 +135,9 @@ export default function TeleView({ dialogId }) {
               <button className={`icon-btn ${syncing ? 'spin' : ''}`} aria-label="به‌روزرسانی" title="به‌روزرسانی" onClick={() => syncList()} disabled={syncing}>
                 <RefreshCw size={19} />
               </button>
+              <button className="icon-btn" aria-label="نشست‌های فعال تلگرام" title="نشست‌های فعال تلگرام (دستگاه‌هایی که حساب شما رویشان باز است)" onClick={() => useStore.getState().openModal('teleSessions')}>
+                <ShieldCheck size={19} />
+              </button>
               <button className="icon-btn" aria-label="خروج از حساب تلگرام" title="خروج از حساب تلگرام" onClick={logout}>
                 <LogOut size={19} />
               </button>
@@ -205,7 +208,7 @@ export default function TeleView({ dialogId }) {
         {!status ? null : !connected ? (
           <TeleLogin status={status} reload={load} />
         ) : active ? (
-          <TeleChat key={active.id} dialog={active} onChanged={load} onRemove={() => remove(active)} allowMedia={!!account?.allowMedia} allowVoice={!!account?.allowVoice} mediaMaxMb={status?.mediaMaxMb || 5} />
+          <TeleChat key={active.id} dialog={active} onChanged={load} onRemove={() => remove(active)} allowMedia={!!account?.allowMedia} allowVoice={!!account?.allowVoice} allowFiles={!!account?.allowFiles} mediaMaxMb={status?.mediaMaxMb || 5} fileMaxMb={status?.fileMaxMb || 20} />
         ) : (
           <div className="empty-pane">
             <Cable size={64} className="muted" />
@@ -365,7 +368,7 @@ function TeleLogin({ status, reload }) {
 
 
 // ---------- An open chat ----------
-function TeleChat({ dialog, onChanged, onRemove, allowMedia, allowVoice, mediaMaxMb }) {
+function TeleChat({ dialog, onChanged, onRemove, allowMedia, allowVoice, allowFiles, mediaMaxMb, fileMaxMb }) {
   const [messages, setMessages] = useState(null);
   const [notice, setNotice] = useState('');
   const [hasMore, setHasMore] = useState(true);
@@ -380,20 +383,21 @@ function TeleChat({ dialog, onChanged, onRemove, allowMedia, allowVoice, mediaMa
   const listRef = useRef(null);
   const inputRef = useRef(null);
   const fileRef = useRef(null);
+  const anyFileRef = useRef(null);
   const stick = useRef(true); // keep the view at the newest message while the user is there
   const keepFrom = useRef(null); // scroll height before older messages were added on top
   const showToast = useStore((s) => s.showToast);
   const isGroup = dialog.kind === 'group';
   const isChannel = dialog.kind === 'channel';
 
-  const byTg = (a, b) => (a.tgMsgId ?? 0) - (b.tgMsgId ?? 0) || a.id - b.id;
+  const byTg = (a, b) => (a.tgMsgId ?? Infinity) - (b.tgMsgId ?? Infinity) || a.id - b.id;
   // The server's latest page replaces everything shown from its oldest message on: a message sent
   // from here moves from its temporary id to its final one, and must not stay twice on screen.
   const withLatest = (cur, page) => {
     if (!page.length) return cur || [];
     const from = Math.min(...page.map((m) => m.tgMsgId ?? Infinity));
     const ids = new Set(page.map((m) => m.id));
-    return [...(cur || []).filter((m) => (m.tgMsgId ?? 0) < from && !ids.has(m.id)), ...page].sort(byTg);
+    return [...(cur || []).filter((m) => (m.tgMsgId ?? Infinity) < from && !ids.has(m.id)), ...page].sort(byTg);
   };
   const withOlder = (cur, older) => {
     const ids = new Set((cur || []).map((m) => m.id));
@@ -457,6 +461,7 @@ function TeleChat({ dialog, onChanged, onRemove, allowMedia, allowVoice, mediaMa
   };
 
   const sent = (message) => {
+    if (message?.kind === 'queued') showToast('تلگرام الان وصل نیست؛ پیام در صف است و با وصل شدن خودش فرستاده می‌شود');
     setDraft('');
     setReplyTo(null);
     stick.current = true;
@@ -516,6 +521,32 @@ function TeleChat({ dialog, onChanged, onRemove, allowMedia, allowVoice, mediaMa
     }
   };
   const forward = (m) => useStore.getState().openModal('teleToChat', { message: m });
+  const sendFile = async (file) => {
+    if (!file) return;
+    if (file.size > fileMaxMb * 1048576) return showToast(`حداکثر حجم فایل ${toFa(fileMaxMb)} مگابایت است`);
+    setSending(true);
+    try {
+      const qs = new URLSearchParams({ caption: draft.trim(), ...(replyTo ? { replyTo: String(replyTo.tgMsgId) } : {}) });
+      const body = new FormData();
+      body.append('file', file);
+      const res = await fetch(`/api/tele/dialogs/${dialog.id}/file?${qs}`, { method: 'POST', body, credentials: 'same-origin', headers: { 'x-requested-with': 'amorechat' } });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || 'ارسال فایل ناموفق بود');
+      sent(data.message);
+    } catch (e) {
+      showToast(e.message);
+    } finally {
+      setSending(false);
+    }
+  };
+  const cancelQueued = async (m) => {
+    try {
+      await api('DELETE', `/tele/messages/${m.id}`);
+      setMessages((cur) => (cur || []).filter((x) => x.id !== m.id));
+    } catch (e) {
+      showToast(e.message);
+    }
+  };
 
   const startReply = (m) => {
     if (isChannel || !m.tgMsgId) return;
@@ -595,7 +626,7 @@ function TeleChat({ dialog, onChanged, onRemove, allowMedia, allowVoice, mediaMa
         <div className="messages">
           <div className="day-sep">{found.length ? `${toFa(found.length)} نتیجه برای «${q.trim()}»` : `نتیجه‌ای برای «${q.trim()}» نیست`}</div>
           {found.map((m) => (
-            <TeleMessage key={m.id} m={m} showSender={!isChannel} showAvatar={false} grouped={false} withDate allowMedia={allowMedia} allowVoice={allowVoice} onForward={forward} />
+            <TeleMessage key={m.id} m={m} showSender={!isChannel} showAvatar={false} grouped={false} withDate allowMedia={allowMedia} allowVoice={allowVoice} allowFiles={allowFiles} onForward={forward} />
           ))}
         </div>
       ) : (
@@ -618,7 +649,9 @@ function TeleChat({ dialog, onChanged, onRemove, allowMedia, allowVoice, mediaMa
                   showAvatar={isGroup && !mine}
                   allowMedia={allowMedia}
                   allowVoice={allowVoice}
+                  allowFiles={allowFiles}
                   onForward={forward}
+                  onCancel={cancelQueued}
                   onReply={isChannel ? null : startReply}
                   onJump={jumpTo}
                 />
@@ -656,6 +689,22 @@ function TeleChat({ dialog, onChanged, onRemove, allowMedia, allowVoice, mediaMa
               <button className="send-btn" aria-label="ارسال" disabled={!draft.trim() || sending} onMouseDown={(e) => e.preventDefault()} onClick={send}>
                 <SendHorizontal size={20} />
               </button>
+            )}
+            {allowFiles && (
+              <>
+                <button className="icon-btn" aria-label="ارسال فایل" title={`ارسال فایل یا ویدیو (تا ${toFa(fileMaxMb)} مگابایت؛ متن بالا توضیح فایل می‌شود)`} disabled={sending} onClick={() => anyFileRef.current.click()}>
+                  <Paperclip size={21} />
+                </button>
+                <input
+                  ref={anyFileRef}
+                  type="file"
+                  hidden
+                  onChange={(e) => {
+                    sendFile(e.target.files[0]);
+                    e.target.value = '';
+                  }}
+                />
+              </>
             )}
             {allowMedia && (
               <>
@@ -767,12 +816,19 @@ function TeleRecorder({ onSend, onCancel, maxSeconds }) {
   );
 }
 
-function TeleMessage({ m, grouped, showSender, showAvatar, withDate, allowMedia, allowVoice, onReply, onJump, onForward }) {
+function TeleMessage({ m, grouped, showSender, showAvatar, withDate, allowMedia, allowVoice, allowFiles, onReply, onJump, onForward, onCancel }) {
   const mine = m.direction === 'out';
   const [menu, setMenu] = useState(false);
+  const queued = m.kind === 'queued';
+  // Not sent yet: no reply or forward (it has no Telegram id).
+  if (queued) {
+    onReply = null;
+    onForward = null;
+  }
   const showVoice = m.voice && allowVoice;
+  const showFile = m.file && allowFiles;
   // Without a photo / player shown, the text keeps its "📷 عکس" / "🎤 پیام صوتی" label; with it, only the caption.
-  const text = m.photo && allowMedia ? m.text.replace(/^📷 عکس\n?/, '') : showVoice ? m.text.replace(/^🎤 پیام صوتی\n?/, '') : m.text;
+  const text = m.photo && allowMedia ? m.text.replace(/^📷 عکس\n?/, '') : showVoice ? m.text.replace(/^🎤 پیام صوتی\n?/, '') : showFile ? m.text.replace(/^(📎|🎬|🎵|GIF)[^\n]*\n?/, '') : m.text;
   return (
     <div className={`msg-row ${mine ? 'mine' : ''} ${grouped ? 'grouped' : ''}`} id={m.tgMsgId ? `tm-${m.tgMsgId}` : undefined}>
       {showAvatar && <div className="msg-avatar">{!grouped && <Avatar id={num(m.senderId)} name={m.senderName} size={34} />}</div>}
@@ -799,6 +855,7 @@ function TeleMessage({ m, grouped, showSender, showAvatar, withDate, allowMedia,
           )}
           {m.photo && allowMedia && <TelePhoto m={m} />}
           {showVoice && <TeleVoice m={m} />}
+          {showFile && <TeleFile m={m} />}
           {text && (
             <div className={`text ${m.kind !== 'text' && !(m.photo && allowMedia) ? 'tele-media' : ''}`} dir="auto">
               {text}
@@ -806,6 +863,16 @@ function TeleMessage({ m, grouped, showSender, showAvatar, withDate, allowMedia,
           )}
           <div className="meta">
             {m.kind === 'failed' && <span className="tele-warn">ارسال نشد</span>}
+            {queued && (
+              <span className="tele-queued" title="تلگرام الان وصل نیست؛ با وصل شدن خودش فرستاده می‌شود">
+                ⏳ در صف
+                {onCancel && (
+                  <button className="link-btn" onClick={() => onCancel(m)}>
+                    لغو
+                  </button>
+                )}
+              </span>
+            )}
             <span>{withDate ? `${formatDay(m.createdAt)} ${formatTime(m.createdAt)}` : formatTime(m.createdAt)}</span>
           </div>
           {onReply && (
@@ -912,6 +979,53 @@ function TeleVoice({ m }) {
         <Play size={18} />
       </span>
       <span className="grow">{state === 'loading' ? 'در حال دانلود…' : state === 'error' ? error : `پیام صوتی · ${faDigits(len)}`}</span>
+    </button>
+  );
+}
+
+function TeleFile({ m }) {
+  const [src, setSrc] = useState(null);
+  const [state, setState] = useState('idle'); // idle | loading | error
+  const [error, setError] = useState('');
+  useEffect(() => () => src && URL.revokeObjectURL(src), [src]);
+  const f = m.file;
+  const playable = f.video && /^video\/(mp4|webm)$/.test(f.mime || '');
+  const load = async () => {
+    if (state === 'loading') return;
+    setState('loading');
+    try {
+      const res = await fetch(`/api/tele/messages/${m.id}/file${playable ? '?inline=1' : ''}`, { credentials: 'same-origin', headers: { 'x-requested-with': 'amorechat' } });
+      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'دانلود فایل ناموفق بود');
+      const url = URL.createObjectURL(await res.blob());
+      if (playable) {
+        setSrc(url);
+      } else {
+        // Saved, never opened in the page.
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = f.name || 'file';
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
+      }
+      setState('done');
+    } catch (e) {
+      setError(e.message);
+      setState('error');
+    }
+  };
+  if (src) return <video className="tele-video" src={src} controls autoPlay={!!f.gif} loop={!!f.gif} muted={!!f.gif} playsInline />;
+  const Icon = f.video ? Film : FileText;
+  return (
+    <button className="tele-file" onClick={load} title={playable ? 'دانلود و پخش' : 'دانلود'}>
+      <span className="tele-file-icon">{state === 'loading' ? <Download size={18} /> : <Icon size={18} />}</span>
+      <span className="grow">
+        <span className="tele-file-name" dir="auto">
+          {f.name}
+        </span>
+        <small className="muted">
+          {state === 'loading' ? 'در حال دانلود…' : state === 'error' ? error : state === 'done' ? 'ذخیره شد' : `${mb(f.size || 0)}${f.duration ? ` · ${faDigits(`${Math.floor(f.duration / 60)}:${String(f.duration % 60).padStart(2, '0')}`)}` : ''}`}
+        </small>
+      </span>
     </button>
   );
 }

@@ -3,7 +3,7 @@ import { api } from '../api';
 import { useStore } from '../store';
 import { toFa, formatDateTime } from '../util';
 import TeleAddProxy from './TeleProxyForm';
-import { Cable, RefreshCw, Trash2, Activity, Power, BellRing, BarChart3 } from 'lucide-react';
+import { Cable, RefreshCw, Trash2, Activity, Power, BellRing, BarChart3, Newspaper } from 'lucide-react';
 
 export default function TeleAdmin() {
   const showToast = useStore((s) => s.showToast);
@@ -238,6 +238,7 @@ export default function TeleAdmin() {
 
       <TeleAlerts />
       <TeleUsers />
+      <TeleMirrors />
     </div>
   );
 }
@@ -345,12 +346,14 @@ function TeleUsers() {
   const showToast = useStore((s) => s.showToast);
   const [data, setData] = useState(null);
   const [maxMb, setMaxMb] = useState('');
+  const [fileMb, setFileMb] = useState('');
   const [quotaMb, setQuotaMb] = useState('');
   const load = () =>
     api('GET', '/admin/tele/accounts')
       .then((r) => {
         setData(r);
         setMaxMb(String(r.mediaMaxMb));
+        setFileMb(String(r.fileMaxMb));
         setQuotaMb(String(r.defaultQuotaMb));
       })
       .catch((e) => showToast(e.message));
@@ -370,7 +373,7 @@ function TeleUsers() {
   const saveMax = async (e) => {
     e.preventDefault();
     try {
-      await api('PATCH', '/admin/tele/media', { maxMb: Number(maxMb) });
+      await api('PATCH', '/admin/tele/media', { maxMb: Number(maxMb), fileMaxMb: Number(fileMb) });
       showToast('ذخیره شد');
       await load();
     } catch (err) {
@@ -394,7 +397,7 @@ function TeleUsers() {
       <h4 className="with-icon">
         <BarChart3 size={16} /> کاربران تلگرام
       </h4>
-      <p className="hint">مصرف اینترنت (VPN) هر کاربر در این ماه، از پرمصرف به کم‌مصرف. عکس و پیام صوتی پیش‌فرض برای همه خاموش است و فقط با زدن روی آن‌ها دانلود می‌شوند.</p>
+      <p className="hint">مصرف اینترنت (VPN) هر کاربر در این ماه، از پرمصرف به کم‌مصرف. عکس، پیام صوتی و فایل/ویدیو پیش‌فرض برای همه خاموش است و فقط با زدن روی آن‌ها دانلود می‌شوند.</p>
       <form className="inline-form" onSubmit={saveQuota}>
         <label className="grow">
           سقف مصرف ماهانه هر کاربر (مگابایت، ۰ = بدون سقف)
@@ -406,6 +409,10 @@ function TeleUsers() {
         <label className="grow">
           حداکثر حجم هر عکس یا پیام صوتی (مگابایت)
           <input type="number" min={1} max={50} dir="ltr" value={maxMb} onChange={(e) => setMaxMb(e.target.value)} />
+        </label>
+        <label className="grow">
+          حداکثر حجم هر فایل یا ویدیو (مگابایت)
+          <input type="number" min={1} max={2000} dir="ltr" value={fileMb} onChange={(e) => setFileMb(e.target.value)} />
         </label>
         <button className="btn sm">ذخیره</button>
       </form>
@@ -456,12 +463,139 @@ function TeleUsers() {
                 <label className="check">
                   <input type="checkbox" checked={a.allowVoice} onChange={() => patch(a, { allowVoice: !a.allowVoice })} /> صوت
                 </label>
+                <label className="check">
+                  <input type="checkbox" checked={a.allowFiles} onChange={() => patch(a, { allowFiles: !a.allowFiles })} /> فایل
+                </label>
               </span>
             </li>
           );
         })}
         {!data.accounts.length && <li className="muted">هنوز کسی حساب تلگرام وصل نکرده است.</li>}
       </ul>
+    </div>
+  );
+}
+
+// Owner: Telegram channels whose posts appear in channels of this app (read once, for everyone).
+function TeleMirrors() {
+  const me = useStore((st) => st.me);
+  const showToast = useStore((st) => st.showToast);
+  const [data, setData] = useState(null);
+  const [tgChatId, setTgChatId] = useState('');
+  const [target, setTarget] = useState('');
+  const [withPhotos, setWithPhotos] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const load = () =>
+    api('GET', '/admin/tele/mirrors')
+      .then(setData)
+      .catch((e) => showToast(e.message));
+  useEffect(() => {
+    if (me.role === 'owner') load();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  if (me.role !== 'owner' || !data) return null;
+  const act = async (fn, ok) => {
+    setBusy(true);
+    try {
+      await fn();
+      if (ok) showToast(ok);
+      await load();
+    } catch (e) {
+      showToast(e.message);
+    }
+    setBusy(false);
+  };
+  const used = new Set(data.mirrors.map((m) => m.tgChatId));
+  const free = data.channels.filter((c) => !used.has(c.tgChatId));
+  return (
+    <div className="boxed tele-mirrors" style={{ marginTop: 16 }}>
+      <h4 className="with-icon">
+        <Newspaper size={16} /> انتشار کانال‌های تلگرام در برنامه (فقط مالک)
+      </h4>
+      <p className="hint">پست‌های کانال تلگرامی که حساب تلگرام شما عضوش است، خودکار در یک کانال همین برنامه منتشر می‌شوند؛ همه کاربران بدون تلگرام می‌خوانند و ترافیک فقط یک بار مصرف می‌شود.</p>
+      {!data.connected ? (
+        <p className="muted">اول حساب تلگرام خودتان را از منو ← تلگرام وصل کنید.</p>
+      ) : (
+        <>
+          <form
+            className="inline-form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              act(() => api('POST', '/admin/tele/mirrors', { tgChatId, ...(target ? { chatId: Number(target) } : {}), withPhotos }, { timeout: 120000 }), 'اضافه شد').then(() => setTgChatId(''));
+            }}
+          >
+            <select value={tgChatId} onChange={(e) => setTgChatId(e.target.value)} className="grow">
+              <option value="">— کانال تلگرام —</option>
+              {free.map((c) => (
+                <option key={c.tgChatId} value={c.tgChatId}>
+                  {c.title}
+                </option>
+              ))}
+            </select>
+            <select value={target} onChange={(e) => setTarget(e.target.value)}>
+              <option value="">کانال تازه در برنامه</option>
+              {data.appChannels.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.title}
+                </option>
+              ))}
+            </select>
+            <label className="check">
+              <input type="checkbox" checked={withPhotos} onChange={(e) => setWithPhotos(e.target.checked)} /> با عکس
+            </label>
+            <button className="btn sm primary" disabled={!tgChatId || busy}>
+              افزودن
+            </button>
+          </form>
+          {!data.channels.length && <small className="muted">کانالی در فهرست نیست: در صفحه تلگرام با دکمه + فهرست کامل را یک بار باز کنید.</small>}
+          <ul className="user-list">
+            {data.mirrors.map((m) => (
+              <li key={m.id} className="row-item">
+                <span className="grow">
+                  <b>{m.title}</b> ← {m.chatTitle || '—'}
+                  {!m.enabled && <span className="tag">متوقف</span>}
+                  <br />
+                  <small className="muted">
+                    {m.lastRunAt ? `آخرین بررسی: ${formatDateTime(m.lastRunAt)}` : 'هنوز بررسی نشده'}
+                    {m.lastError ? ` · خطا: ${m.lastError}` : ''}
+                  </small>
+                </span>
+                <label className="check">
+                  <input type="checkbox" checked={m.withPhotos} onChange={() => act(() => api('PATCH', `/admin/tele/mirrors/${m.id}`, { withPhotos: !m.withPhotos }))} /> عکس
+                </label>
+                <button className="btn sm" disabled={busy} onClick={() => act(() => api('PATCH', `/admin/tele/mirrors/${m.id}`, { enabled: !m.enabled }))}>
+                  {m.enabled ? 'توقف' : 'ادامه'}
+                </button>
+                <button className="btn sm danger" disabled={busy} onClick={() => confirm('انتشار این کانال متوقف و حذف شود؟ (کانال برنامه و پست‌هایش می‌مانند)') && act(() => api('DELETE', `/admin/tele/mirrors/${m.id}`))}>
+                  <Trash2 size={14} />
+                </button>
+              </li>
+            ))}
+            {!data.mirrors.length && <li className="muted">هنوز کانالی منتشر نمی‌شود.</li>}
+          </ul>
+          <div className="inline-form">
+            <label className="inline-form">
+              بررسی هر
+              <input
+                type="number"
+                min={1}
+                max={1440}
+                dir="ltr"
+                style={{ width: 72 }}
+                defaultValue={data.minutes}
+                key={`m-${data.minutes}`}
+                onBlur={(e) => {
+                  const n = Math.max(1, Math.min(1440, Math.round(Number(e.target.value)) || 5));
+                  if (n !== data.minutes) act(() => api('PATCH', '/admin/tele/mirrors-settings', { minutes: n }), 'ذخیره شد');
+                }}
+              />
+              دقیقه
+            </label>
+            <button type="button" className="btn sm" disabled={busy || !data.mirrors.length} onClick={() => act(() => api('POST', '/admin/tele/mirrors/run', {}, { timeout: 180000 }), 'بررسی شد')}>
+              <RefreshCw size={14} /> بررسی الان
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }

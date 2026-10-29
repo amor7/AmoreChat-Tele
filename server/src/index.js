@@ -27,8 +27,11 @@ import backupRoutes from './routes/backup.js';
 import appRoutes from './routes/app.js';
 import folderRoutes from './routes/folders.js';
 import teleRoutes from './routes/tele.js';
+import securityRoutes from './routes/security.js';
 import { refreshEgress, startHealthLoop, stopEgress } from './tele/egress.js';
 import { startAlertLoop } from './tele/alerts.js';
+import { startMirrorLoop } from './tele/mirror.js';
+import { isBanned, pruneSecurity } from './secwatch.js';
 import { startVoiceSync } from './voice.js';
 import { startHealth } from './health.js';
 import { startCertCheck } from './certcheck.js';
@@ -58,6 +61,12 @@ await app.register(multipart);
 await app.register(fastifyStatic, { root: UPLOAD_DIR, serve: false });
 
 app.decorateRequest('user', null);
+
+// Banned IPs (admin panel → Security) get nothing but this.
+app.addHook('onRequest', async (req, reply) => {
+  if (!isBanned(req.ip)) return;
+  return reply.code(403).header('content-type', 'text/plain; charset=utf-8').send('دسترسی از این آی‌پی مسدود شده است.');
+});
 
 app.addHook('onRequest', async (req, reply) => {
   if (!req.url.startsWith('/api/')) return;
@@ -109,11 +118,15 @@ await app.register(messageRoutes);
 await app.register(fileRoutes);
 await app.register(adminRoutes);
 await app.register(teleRoutes);
+await app.register(securityRoutes);
 // Bring the Telegram tunnel back after a restart or update (not only on the next login).
 refreshEgress();
 // Scheduled proxy checks (when the admin turned them on): test all, move to the best healthy one.
 startHealthLoop();
 startAlertLoop();
+startMirrorLoop();
+pruneSecurity();
+setInterval(pruneSecurity, 3600 * 1000).unref();
 await app.register(backupRoutes);
 await app.register(appRoutes);
 await app.register(folderRoutes);

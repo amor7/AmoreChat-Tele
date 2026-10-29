@@ -355,7 +355,18 @@ export function ensureSavedChat(userId) {
   return id;
 }
 
+const auditHandlers = [];
+/** Called after every audit entry: (actorId, action, target, details). */
+export const onAudit = (fn) => auditHandlers.push(fn);
+
 export function audit(actorId, action, target = '', details = '') {
+  for (const fn of auditHandlers) {
+    try {
+      fn(actorId, action, target, details);
+    } catch {
+      /* an alert must never break the action */
+    }
+  }
   run(
     'INSERT INTO audit_log (actor_id, action, target, details, created_at) VALUES (?, ?, ?, ?, ?)',
     actorId,

@@ -2,6 +2,7 @@ import { Server } from 'socket.io';
 import { get, all, run, now } from './db.js';
 import { userFromToken, SESSION_COOKIE } from './auth.js';
 import { setIO, online } from './realtime.js';
+import { isBanned, handshakeIp } from './secwatch.js';
 
 export function setupSocket(app) {
   const io = new Server(app.server, {
@@ -24,6 +25,7 @@ export function setupSocket(app) {
         return next(new Error('bad origin'));
       }
     }
+    if (isBanned(handshakeIp(socket.handshake))) return next(new Error('banned'));
     const user = userFromToken(app.parseCookie(cookie || '')[SESSION_COOKIE]);
     if (!user) return next(new Error('unauthorized'));
     socket.data.user = { id: user.id, name: user.display_name, sessionId: user.session_id };

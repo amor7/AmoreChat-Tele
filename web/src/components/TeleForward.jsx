@@ -135,3 +135,65 @@ export function ChatToTele({ message, onClose }) {
     </Modal>
   );
 }
+
+/** The Telegram account's logins on other apps and devices; end the ones you don't know. */
+export function TeleSessions({ onClose }) {
+  const showToast = useStore((s) => s.showToast);
+  const [list, setList] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const run = async (fn) => {
+    setBusy(true);
+    try {
+      setList((await fn()).sessions);
+    } catch (e) {
+      showToast(e.message);
+      if (!list) setList([]);
+    }
+    setBusy(false);
+  };
+  useEffect(() => {
+    run(() => api('GET', '/tele/sessions'));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const when = (t) => (t ? new Date(t).toLocaleString('fa-IR', { dateStyle: 'medium', timeStyle: 'short' }) : '—');
+  const others = (list || []).filter((s) => !s.current);
+  return (
+    <Modal title="نشست‌های فعال تلگرام" onClose={onClose}>
+      <p className="hint">همه جاهایی که حساب تلگرام شما باز است. اگر دستگاهی را نمی‌شناسید، ببندیدش و رمز دومرحله‌ای تلگرام را فعال کنید.</p>
+      {!list && <p className="muted">…</p>}
+      <ul className="user-list tele-sessions">
+        {(list || []).map((s) => (
+          <li key={s.id} className="row-item">
+            <span className="grow">
+              <b>{s.app || 'نامشخص'}</b> {s.current && <span className="tag ok">همین برنامه</span>}
+              {!s.official && !s.current && <span className="tag danger">برنامه غیررسمی</span>}
+              <br />
+              <small className="muted">
+                {s.device || '—'} · <span dir="ltr">{s.ip || '—'}</span>
+                {s.location ? ` · ${s.location}` : ''}
+              </small>
+              <br />
+              <small className="muted">
+                ورود: {when(s.loggedInAt)} · آخرین فعالیت: {when(s.lastActiveAt)}
+              </small>
+            </span>
+            {!s.current && (
+              <button className="btn sm danger" disabled={busy} onClick={() => confirm('این نشست بسته شود؟') && run(() => api('DELETE', `/tele/sessions/${s.id}`))}>
+                بستن
+              </button>
+            )}
+          </li>
+        ))}
+      </ul>
+      <div className="actions sticky-actions">
+        <button className="btn" onClick={onClose}>
+          بستن پنجره
+        </button>
+        {others.length > 0 && (
+          <button className="btn danger" disabled={busy} onClick={() => confirm(`همه ${toFa(others.length)} نشست دیگر بسته شوند؟`) && run(() => api('POST', '/tele/sessions/end-others', {}))}>
+            بستن همه نشست‌های دیگر
+          </button>
+        )}
+      </div>
+    </Modal>
+  );
+}

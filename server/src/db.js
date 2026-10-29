@@ -357,6 +357,60 @@ const migrations = [
     PRIMARY KEY (account_id, month)
   );
   `,
+  // v13: security: banned IPs, failed logins per IP, and the IPs each user logged in from.
+  `
+  CREATE TABLE ip_bans (
+    ip TEXT PRIMARY KEY,
+    reason TEXT NOT NULL DEFAULT '',
+    created_by INTEGER,
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER
+  );
+  CREATE TABLE auth_failures (
+    id INTEGER PRIMARY KEY,
+    ip TEXT NOT NULL,
+    username TEXT NOT NULL DEFAULT '',
+    at INTEGER NOT NULL
+  );
+  CREATE INDEX auth_failures_ip ON auth_failures(ip, at);
+  CREATE TABLE auth_flags (ip TEXT PRIMARY KEY, at INTEGER NOT NULL);
+  CREATE TABLE login_ips (
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    ip TEXT NOT NULL,
+    first_at INTEGER NOT NULL,
+    last_at INTEGER NOT NULL,
+    PRIMARY KEY (user_id, ip)
+  );
+  `,
+  // v14: Tele: messages waiting for the tunnel, file/video permission, Telegram channels mirrored
+  // into the app's own channels.
+  `
+  CREATE TABLE tele_queue (
+    id INTEGER PRIMARY KEY,
+    account_id INTEGER NOT NULL REFERENCES tele_accounts(id) ON DELETE CASCADE,
+    dialog_id INTEGER NOT NULL REFERENCES tele_dialogs(id) ON DELETE CASCADE,
+    message_id INTEGER NOT NULL REFERENCES tele_messages(id) ON DELETE CASCADE,
+    content TEXT NOT NULL,
+    created_at INTEGER NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT NOT NULL DEFAULT ''
+  );
+  ALTER TABLE tele_accounts ADD COLUMN allow_files INTEGER NOT NULL DEFAULT 0;
+  CREATE TABLE tele_mirrors (
+    id INTEGER PRIMARY KEY,
+    account_id INTEGER NOT NULL REFERENCES tele_accounts(id) ON DELETE CASCADE,
+    tg_chat_id TEXT NOT NULL,
+    title TEXT NOT NULL DEFAULT '',
+    chat_id INTEGER NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    last_msg_id INTEGER NOT NULL DEFAULT 0,
+    with_photos INTEGER NOT NULL DEFAULT 0,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    last_error TEXT NOT NULL DEFAULT '',
+    last_run_at INTEGER,
+    created_at INTEGER NOT NULL,
+    UNIQUE (account_id, tg_chat_id)
+  );
+  `,
 ];
 
 const current = db.prepare('PRAGMA user_version').get().user_version;
