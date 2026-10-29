@@ -174,7 +174,9 @@ const { getTdjson } = await import('prebuilt-tdlib');
 tdl.configure({ tdjson: getTdjson(), verbosityLevel: 1 });
 const rand4 = () => String(Math.floor(1000 + Math.random() * 9000));
 const DC = 2;
-const CODE = String(DC).repeat(5);
+// The login code is the DC digit repeated as many times as the code is long (Telegram says how long).
+let codeLength = 5;
+const code = () => String(DC).repeat(codeLength);
 const phone = () => `99966${DC}${rand4()}`;
 const charliePhone = phone();
 const alicePhone = phone();
@@ -186,7 +188,11 @@ charlie.on('error', (e) => console.warn('[charlie]', e?.message || e));
 const charlieMsgs = [];
 charlie.on('update', (u) => {
   if (u._ === 'updateNewMessage') charlieMsgs.push(u.message);
-  if (u._ === 'updateAuthorizationState') console.log('  [charlie]', u.authorization_state._);
+  if (u._ === 'updateAuthorizationState') {
+    console.log('  [charlie]', u.authorization_state._);
+    const len = u.authorization_state.code_info?.type?.length;
+    if (len) codeLength = len;
+  }
   if (u._ === 'updateConnectionState') console.log('  [charlie]', u.state._);
 });
 // Nothing may hang the job: give up with the step it was on.
@@ -213,8 +219,8 @@ try {
         return charliePhone;
       },
       getAuthCode: async (retry) => {
-        if (retry) throw new Error('code refused');
-        return CODE;
+        if (retry) throw new Error(`code ${code()} refused`);
+        return code();
       },
       getName: async () => ({ firstName: 'Charlie', lastName: 'Helper' }),
       getEmailAddress: async () => {
@@ -277,9 +283,9 @@ try {
   r = ok(await alice.call('POST', '/api/tele/login/phone', { phone: alicePhone }), 'alice phone');
   assert.equal(r.status, 'code_required', JSON.stringify(r));
   assert.ok(socksStats.connections > viaProxyBefore, 'TDLib must reach Telegram through the proxy');
-  r = await alice.call('POST', '/api/tele/login/code', { code: '00000' });
+  r = await alice.call('POST', '/api/tele/login/code', { code: '0'.repeat(codeLength) });
   assert.equal(r.status, 400, JSON.stringify(r));
-  r = ok(await alice.call('POST', '/api/tele/login/code', { code: CODE }), 'alice code');
+  r = ok(await alice.call('POST', '/api/tele/login/code', { code: code() }), 'alice code');
   assert.equal(r.status, 'ready', JSON.stringify(r));
   r = ok(await alice.call('GET', '/api/tele/status'), 'alice status');
   assert.equal(r.account.status, 'connected');
@@ -288,7 +294,7 @@ try {
 
   log('Bob logs in');
   ok(await bob.call('POST', '/api/tele/login/phone', { phone: bobPhone }), 'bob phone');
-  r = ok(await bob.call('POST', '/api/tele/login/code', { code: CODE }), 'bob code');
+  r = ok(await bob.call('POST', '/api/tele/login/code', { code: code() }), 'bob code');
   assert.equal(r.status, 'ready');
   const bobTg = (await bob.call('GET', '/api/tele/status')).account.tgUserId;
 
@@ -435,7 +441,7 @@ try {
   await startServer();
   r = ok(await dave.call('GET', '/api/tele/status'), 'dave status');
   assert.equal(r.account.status, 'disconnected');
-  r = await dave.call('POST', '/api/tele/login/code', { code: CODE });
+  r = await dave.call('POST', '/api/tele/login/code', { code: code() });
   assert.equal(r.status, 409);
 
   log('Proxy turned off: Telegram waits; nothing goes out directly');
