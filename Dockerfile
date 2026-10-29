@@ -12,7 +12,9 @@ FROM node:24-bookworm-slim
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ffmpeg tini ca-certificates wget \
   && rm -rf /var/lib/apt/lists/* \
-  && mkdir /data && chown node:node /data
+  && mkdir /data && chown node:node /data \
+  # npm is not used at run time (and brings its own packages with known issues): out of the image.
+  && rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack
 # sing-box: the tunnel that carries only Telegram traffic through the admin's proxy. Bundled (and
 # checksum-verified) so offline servers have it; SING_BOX_PATH or data/bin/sing-box can override it.
 ARG SING_BOX_VERSION=1.14.4

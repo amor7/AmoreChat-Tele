@@ -20,4 +20,6 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 COPY server/package.json server/
 COPY web/package.json web/
-RUN npm ci --omit=dev --no-audit --no-fund && npm cache clean --force
+# npm is not used at run time (and brings its own packages with known issues): out of the image.
+RUN npm ci --omit=dev --no-audit --no-fund && npm cache clean --force \
+  && rm -rf /usr/local/lib/node_modules/npm /usr/local/lib/node_modules/corepack /usr/local/bin/npm /usr/local/bin/npx /usr/local/bin/corepack /root/.npm

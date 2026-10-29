@@ -69,7 +69,12 @@ try {
     }
     // A group of the account and the bot (made once; its id is kept).
     const metaFile = path.join(dir, 'meta.json');
-    const meta = fs.existsSync(metaFile) ? JSON.parse(fs.readFileSync(metaFile, 'utf8')) : {};
+    let meta = {};
+    try {
+      meta = JSON.parse(fs.readFileSync(metaFile, 'utf8'));
+    } catch {
+      /* first run */
+    }
     let groupChatId = meta.groupChatId;
     if (groupChatId) {
       try {
@@ -105,7 +110,13 @@ try {
       member_id: { _: 'messageSenderUser', user_id: bot.result.id },
       status: { _: 'chatMemberStatusAdministrator', can_be_edited: true, rights: { _: 'chatAdministratorRights', can_manage_chat: true, can_post_messages: true, can_edit_messages: true, can_delete_messages: true } },
     });
-    fs.writeFileSync(metaFile, JSON.stringify({ userId: me.id, botUserId: bot.result.id, botChatId: botChat.id, groupChatId, groupTitle: GROUP_TITLE, channelChatId, channelTitle: CHANNEL_TITLE }), { mode: 0o600 });
+    // Only numbers from the network go into the file.
+    const ids = { userId: me.id, botUserId: bot.result.id, botChatId: botChat.id, groupChatId, channelChatId };
+    for (const [k, v] of Object.entries(ids)) {
+      if (!Number.isSafeInteger(Number(v))) throw new Error(`unexpected ${k}`);
+      ids[k] = Number(v);
+    }
+    fs.writeFileSync(metaFile, JSON.stringify({ ...ids, groupTitle: GROUP_TITLE, channelTitle: CHANNEL_TITLE }), { mode: 0o600 });
     console.log('\nReady: the Tele e2e test can now use this account.');
   }
 } catch (e) {

@@ -94,7 +94,7 @@ jobs:
           set -x -o pipefail
           mkdir -p /tmp/rel
           git archive --format=tar.gz --prefix=amorechat/ -o /tmp/rel/amorechat-source.tar.gz HEAD
-          sudo FORCE=1 bash deploy/update.sh /tmp/rel 2>&1 | tee /tmp/update.log
+          sudo AMORECHAT_ALLOW_UNSIGNED=1 FORCE=1 bash deploy/update.sh /tmp/rel 2>&1 | tee /tmp/update.log
           grep -q 'is running' /tmp/update.log
           for i in $(seq 1 60); do curl -sf --cacert /tmp/ca.crt https://127.0.0.1/healthz && break; sleep 2; done
           curl -sf --cacert /tmp/ca.crt https://127.0.0.1/api/config | grep -q '"version"'
