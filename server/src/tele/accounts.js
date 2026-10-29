@@ -375,8 +375,11 @@ async function createTdlibClient(row, cred) {
   try { const { getTdjson } = await import('prebuilt-tdlib'); tdl.configure({ tdjson: getTdjson() }); } catch {}
   const socks = await ensureEgress();
   const dir = row.session_dir || sessionDir(row.id);
-  // Encrypted already, or a session from before encryption (opened without a key, then encrypted).
-  const encrypted = !!row.db_encrypted && fs.existsSync(path.join(dir, 'db', 'td.binlog'));
+  // A new session is encrypted from the start. One from before encryption opens without a key and
+  // is encrypted once logged in (TDLib changes the key only for a logged-in session).
+  const exists = fs.existsSync(path.join(dir, 'db', 'td.binlog'));
+  const encrypted = !exists || !!row.db_encrypted;
+  if (!exists) run('UPDATE tele_accounts SET db_encrypted = 1 WHERE id = ?', row.id);
   // tdl 8 connects in createClient (there is no connect()) and answers setTdlibParameters itself.
   const client = tdl.createClient({
     apiId: cred.apiId, apiHash: cred.apiHash, databaseDirectory: path.join(dir, 'db'), filesDirectory: path.join(dir, 'files'),
@@ -393,8 +396,8 @@ async function createTdlibClient(row, cred) {
     }
   });
   try {
-    await authState(client);
-    if (!encrypted) {
+    const state = await authState(client);
+    if (!encrypted && state === 'authorizationStateReady') {
       await client.invoke({ _: 'setDatabaseEncryptionKey', new_encryption_key: dbKey(row.id) });
       run('UPDATE tele_accounts SET db_encrypted = 1 WHERE id = ?', row.id);
     }
