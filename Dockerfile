@@ -3,7 +3,8 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 COPY server/package.json server/
 COPY web/package.json web/
-RUN npm ci --no-audit --no-fund
+# Prefer npm ci when lock is in sync; fall back to install if not
+RUN npm ci --no-audit --no-fund || npm install --no-audit --no-fund
 COPY . .
 # android-dist/amorechat.apk is added by the release workflow (served at /app); optional.
 RUN npm run build && npm prune --omit=dev && mkdir -p android-dist

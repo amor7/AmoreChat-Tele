@@ -1,7 +1,7 @@
 {
-  "name": "amorechat-tele-web",
+  "name": "amorechat-web",
   "private": true,
-  "version": "1.0.0",
+  "version": "0.9.14",
   "type": "module",
   "scripts": {
     "dev": "vite",
