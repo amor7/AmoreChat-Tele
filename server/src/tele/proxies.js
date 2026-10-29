@@ -133,6 +133,9 @@ const TELE_DEFAULTS = {
   tele_health_interval_sec: '600',
   // Scheduled check of all proxies (then the policy picks the best), off unless the admin turns it on.
   tele_health_auto: '0',
+  // DNS server sing-box asks for proxy addresses (empty: the server's own). During a shutdown the
+  // server's foreign DNS (8.8.8.8 …) does not answer, so a domestic one is needed for domain proxies.
+  tele_dns: '',
 };
 
 export function getTeleSetting(key) {
@@ -159,6 +162,7 @@ export function getRoutePolicy() {
     activeProxyId: activeId ? Number(activeId) : null,
     healthIntervalSec: Math.max(60, Math.min(86400, Number(getTeleSetting('tele_health_interval_sec')) || 600)),
     autoHealth: getTeleSetting('tele_health_auto') === '1',
+    dns: getTeleSetting('tele_dns'),
   };
 }
 
@@ -178,6 +182,7 @@ export function setRoutePolicy(patch) {
     }
   }
   if (patch.autoHealth != null) setTeleSetting('tele_health_auto', patch.autoHealth ? '1' : '0');
+  if (patch.dns !== undefined) setTeleSetting('tele_dns', parseDns(patch.dns).join(','));
   if (patch.healthIntervalSec != null) {
     const sec = Math.max(60, Math.min(86400, Math.floor(Number(patch.healthIntervalSec)) || 600));
     setTeleSetting('tele_health_interval_sec', String(sec));
@@ -244,3 +249,21 @@ export function recordHealth(id, { ok, latencyMs = null, error = '' }) {
   return publicProxy(getProxy(row.id));
 }
 
+
+/**
+ * "178.22.122.100", "178.22.122.100:53" or "[2001:db8::1]:53" → "host:port" (one server: sing-box has no
+ * fallback between DNS servers, so a second one would never be asked).
+ * Plain IPs only: a DNS server given by name would itself need DNS.
+ */
+export function parseDns(value) {
+  const out = [];
+  for (const raw of String(value || '').split(/[\s,]+/).filter(Boolean).slice(0, 1)) {
+    const m = raw.match(/^\[([0-9a-f:]+)\](?::(\d+))?$/i) || raw.match(/^(\d{1,3}(?:\.\d{1,3}){3})(?::(\d+))?$/) || raw.match(/^([0-9a-f]*:[0-9a-f:]+)$/i);
+    const ip = m?.[1];
+    const port = Number(m?.[2] || 53);
+    const v4ok = ip && (ip.includes(':') || ip.split('.').every((n) => Number(n) <= 255));
+    if (!ip || !v4ok || !(port >= 1 && port <= 65535)) throw Object.assign(new Error(`DNS «${raw}» نامعتبر است؛ فقط IP (مثلاً 178.22.122.100)`), { statusCode: 400 });
+    out.push(ip.includes(':') ? `[${ip}]:${port}` : `${ip}:${port}`);
+  }
+  return out;
+}
