@@ -128,7 +128,7 @@ function client() {
     if (/^image\//.test(res.headers.get('content-type') || '')) return { http: res.status, bytes: Buffer.from(await res.arrayBuffer()), type: res.headers.get('content-type') };
     return { ...(await res.json().catch(() => ({}))), http: res.status };
   }
-  return { call };
+  return { call, cookie: () => cookie };
 }
 const ok = (r, what) => {
   assert.ok(r.http >= 200 && r.http < 300, `${what}: ${r.http} ${r.error || JSON.stringify(r).slice(0, 300)}`);
@@ -301,13 +301,20 @@ async function part2() {
   bot = tdl.createClient({ apiId: API_ID, apiHash: API_HASH, databaseDirectory: path.join(botDir, 'db'), filesDirectory: path.join(botDir, 'files') });
   bot.on('error', (e) => console.warn('[bot]', e?.message || e));
   const botMsgs = [];
+  const sentIds = new Map();
   bot.on('update', (u) => {
     if (u._ === 'updateNewMessage') botMsgs.push(u.message);
+    if (u._ === 'updateMessageSendSucceeded') sentIds.set(u.old_message_id, u.message.id);
   });
   await bot.loginAsBot(BOT_TOKEN);
   const botMe = await bot.invoke({ _: 'getMe' });
   const botName = [botMe.first_name, botMe.last_name].filter(Boolean).join(' ');
   const botSend = (chatId, text) => bot.invoke({ _: 'sendMessage', chat_id: chatId, input_message_content: { _: 'inputMessageText', text: { _: 'formattedText', text } } });
+  // Sends and waits for the final id (the first one is temporary).
+  const botSendFinal = async (chatId, text) => {
+    const m = await botSend(chatId, text);
+    return until('bot message confirmed', () => sentIds.get(m.id), 30000);
+  };
 
   log('App with fresh data; proxies');
   const { owner, alice, bob } = await setupApp({ DATA_DIR });
@@ -445,6 +452,20 @@ async function part2() {
   r = await alice.call('POST', `/api/tele/dialogs/${pd.id}/photo`, null, { form: photoForm(Buffer.from('not an image'), 'text/plain') });
   assert.equal(r.http, 400);
 
+  log('Edited and deleted in Telegram: the same here');
+  const editId = await botSendFinal(meta.userId, `to edit ${RUN}`);
+  const delId = await botSendFinal(meta.userId, `to delete ${RUN}`);
+  await until('both arrive', async () => (await findMsg(pd, `to edit ${RUN}`, true)) && findMsg(pd, `to delete ${RUN}`, true), 30000);
+  await bot.invoke({ _: 'editMessageText', chat_id: meta.userId, message_id: editId, input_message_content: { _: 'inputMessageText', text: { _: 'formattedText', text: `edited ${RUN}` } } });
+  await bot.invoke({ _: 'deleteMessages', chat_id: meta.userId, message_ids: [delId], revoke: true });
+  await until('edit shows', () => findMsg(pd, `edited ${RUN}`, true), 30000);
+  await until('deleted message is gone', async () => {
+    const x = ok(await alice.call('GET', `/api/tele/dialogs/${pd.id}/messages?local=1`), 'local');
+    return !x.messages.some((m) => m.text === `to delete ${RUN}` || m.text === `to edit ${RUN}`);
+  }, 30000);
+
+  await uiChecks({ alice, bob, pd, gd, meta, photoMsg, helloText, botSend, botMsgs, textOf });
+
   log('Server restart: the account reconnects from its saved session');
   await stopServer();
   await startServer();
@@ -471,6 +492,123 @@ async function part2() {
   assert.ok(!botMsgs.some((m) => textOf(m) === `must not be sent ${RUN}`), 'a message went out without the proxy');
   // Never log out here: the spare account's session is shared with later runs.
   await stopServer();
+}
+
+// ---------- The Telegram page in a real browser (desktop, then phone) ----------
+async function uiChecks({ alice, bob, pd, gd, meta, photoMsg, helloText, botSend, botMsgs, textOf }) {
+  const { default: puppeteer } = await import('puppeteer');
+  const browser = await puppeteer.launch({ args: ['--no-sandbox'] });
+  const shots = [];
+  try {
+    const page = await browser.newPage();
+    page.on('pageerror', (e) => console.warn('  [page error]', e.message));
+    const open = async (who, hash, viewport) => {
+      await page.setViewport(viewport);
+      await page.deleteCookie(...(await page.cookies(BASE)));
+      const c = who.cookie();
+      const [name, value] = [c.slice(0, c.indexOf('=')), c.slice(c.indexOf('=') + 1)];
+      await page.setCookie({ name, value, url: BASE });
+      await page.goto(`${BASE}/${hash}`, { waitUntil: 'networkidle0' });
+    };
+    const texts = (sel) => page.$eval(sel, (els) => els.map((e) => e.textContent));
+    const waitText = (sel, text, ms = 20000) => page.waitForFunction((sel, text) => [...document.querySelectorAll(sel)].some((e) => e.textContent.includes(text)), { timeout: ms }, sel, text);
+    const countText = (text) => page.$eval('.tele-chat .msg-row .text', (els, t) => els.filter((e) => e.textContent.trim() === t).length, text);
+    const shot = async (name) => {
+      const file = `tele-ui-${name}.png`;
+      await page.screenshot({ path: file });
+      shots.push(file);
+    };
+
+    log('UI (desktop): the list shows only the chats Alice added');
+    ok(await alice.call('PATCH', `/api/tele/dialogs/${gd.id}`, { selected: true }), 'select group again');
+    await open(alice, '#/tele', { width: 1280, height: 800 });
+    await waitText('.tele-side .chat-item .title', pd.title);
+    await waitText('.tele-side .chat-item .title', gd.title);
+    await shot('list');
+
+    log('UI: open the bot chat; messages and sender show');
+    await page.click(`a.chat-item[href="#/tele/${pd.id}"]`);
+    await waitText('.tele-chat .msg-row .text', helloText);
+    assert.equal(await countText(helloText), 1, 'a message shows twice');
+
+    log('UI: send with Enter — arrives once, shows once');
+    await page.type('.tele-chat textarea', `ui text ${RUN}`);
+    await page.keyboard.press('Enter');
+    await until('the bot receives the UI message', () => botMsgs.find((m) => textOf(m) === `ui text ${RUN}`), 30000);
+    await sleep(7000); // two rounds of the open chat's check
+    assert.equal(await countText(`ui text ${RUN}`), 1, 'the sent message shows twice');
+    assert.equal(botMsgs.filter((m) => textOf(m) === `ui text ${RUN}`).length, 1, 'sent twice from the UI');
+    assert.equal(await page.$eval('.tele-chat textarea', (t) => t.value), '', 'the text box is not cleared');
+
+    log('UI: reply with the reply button');
+    await page.evaluate((t) => {
+      const row = [...document.querySelectorAll('.tele-chat .msg-row')].find((r) => r.querySelector('.text')?.textContent.trim() === t);
+      row.querySelector('.msg-more').click();
+    }, helloText);
+    await page.waitForSelector('.composer-bar');
+    await page.type('.tele-chat textarea', `ui reply ${RUN}`);
+    await page.keyboard.press('Enter');
+    const rep = await until('the bot receives the UI reply', () => botMsgs.find((m) => textOf(m) === `ui reply ${RUN}`), 30000);
+    assert.ok(rep.reply_to, 'the UI reply is not a reply');
+    await page.waitForFunction(() => !document.querySelector('.composer-bar'), { timeout: 5000 });
+    await waitText('.tele-chat .reply-quote', helloText);
+
+    log('UI: a new message from the bot shows in the open chat by itself');
+    await botSend(meta.userId, `live ${RUN}`);
+    await waitText('.tele-chat .msg-row .text', `live ${RUN}`, 30000);
+
+    log('UI: the photo loads on tap');
+    await page.waitForSelector(`.tele-chat .tele-photo`);
+    await page.evaluate((cap) => {
+      const row = [...document.querySelectorAll('.tele-chat .msg-row')].find((r) => r.textContent.includes(cap) && r.querySelector('.tele-photo'));
+      row.querySelector('.tele-photo').click();
+    }, `photo ${RUN}`);
+    await page.waitForFunction((cap) => {
+      const row = [...document.querySelectorAll('.tele-chat .msg-row')].find((r) => r.textContent.includes(cap) && r.querySelector('.tele-photo'));
+      const img = row?.querySelector('.tele-photo img:not(.blur)');
+      return img && img.complete && img.naturalWidth > 0;
+    }, { timeout: 60000 }, `photo ${RUN}`);
+    await shot('chat');
+
+    log('UI: search in the chat');
+    await page.click('button[aria-label="جستجو در این گفتگو"]');
+    await page.type('.tele-search input', `hello alice ${RUN}`);
+    await page.keyboard.press('Enter');
+    await waitText('.tele-chat .msg-row .text', helloText);
+    assert.equal((await texts('.tele-chat .msg-row .text')).length, 1);
+    await page.click('button[aria-label="بستن جستجو"]');
+    await page.waitForSelector('.tele-chat textarea');
+
+    log('UI (phone): list, open chat, back');
+    await open(alice, '#/tele', { width: 390, height: 844, isMobile: true, hasTouch: true });
+    await waitText('.tele-side .chat-item .title', pd.title);
+    await page.click(`a.chat-item[href="#/tele/${pd.id}"]`);
+    await waitText('.tele-chat .msg-row .text', helloText);
+    const vis = await page.$eval('.tele-chat textarea', (t) => {
+      const r = t.getBoundingClientRect();
+      return r.width > 0 && r.height > 0 && r.bottom <= window.innerHeight + 1 && r.left >= -1 && r.right <= window.innerWidth + 1;
+    });
+    assert.ok(vis, 'the text box is not on screen on a phone');
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
+    assert.ok(overflow <= 1, `the page scrolls sideways on a phone (${overflow}px)`);
+    await shot('phone-chat');
+    await page.click('.tele-chat a.back');
+    await page.waitForFunction(() => location.hash === '#/tele');
+    await waitText('.tele-side .chat-item .title', gd.title);
+
+    log('UI (phone): someone without Telegram sees the login form');
+    await open(bob, '#/tele', { width: 390, height: 844, isMobile: true, hasTouch: true });
+    await page.waitForSelector('input[inputmode="tel"]', { visible: true, timeout: 15000 });
+    await shot('phone-login');
+  } catch (e) {
+    try {
+      const pages = await browser.pages();
+      await pages.at(-1)?.screenshot({ path: 'tele-ui-fail.png' });
+    } catch {}
+    throw e;
+  } finally {
+    await browser.close();
+  }
 }
 
 let fail = null;

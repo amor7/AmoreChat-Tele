@@ -59,12 +59,23 @@ jobs:
             mkdir -p /tmp/sess && openssl enc -d -aes-256-cbc -pbkdf2 -pass env:SESSION_KEY -in tele-session.enc | tar xz -C /tmp/sess
             echo "TELE_SESSION_DIR=/tmp/sess/tele-session" >> "$GITHUB_ENV"
           fi
+      - name: Web app and headless Chrome (for the browser part on real Telegram)
+        if: steps.keys.outputs.ok && env.TELE_SESSION_DIR != ''
+        run: |
+          npm run build
+          npm install --no-save puppeteer@25.11.0
       - name: Tele end-to-end test (through a local SOCKS proxy)
         if: steps.keys.outputs.ok
         run: node server/test/tele-e2e.mjs
       - name: Server log
         if: always() && steps.keys.outputs.ok
         run: cat tele-server.log || true
+      - uses: actions/upload-artifact@v4
+        if: always() && steps.keys.outputs.ok
+        with:
+          name: tele-screenshots
+          path: tele-ui-*.png
+          if-no-files-found: ignore
       - name: Re-save the session (refreshes its place in the cache)
         if: always() && env.TELE_SESSION_DIR != ''
         run: tar cz -C /tmp/sess tele-session | openssl enc -aes-256-cbc -pbkdf2 -salt -pass env:SESSION_KEY -out tele-session.enc
