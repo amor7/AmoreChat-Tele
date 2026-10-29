@@ -9,13 +9,47 @@ const ALLOWED_TYPES = new Set(['socks', 'http', 'shadowsocks', 'vless', 'vmess',
 
 const bad = (msg) => Object.assign(new Error(msg), { statusCode: 400 });
 
+/**
+ * SOCKS/HTTP links as sellers often write them, rewritten to the standard user:pass@host:port:
+ *   socks5://203.0.113.1:1080@user:pass      (address first)
+ *   socks5://203.0.113.1:1080:user:pass      (all colon-separated)
+ *   203.0.113.1:1080:user:pass               (no scheme: SOCKS5)
+ */
+export function normalizeProxyLink(raw) {
+  let s = String(raw || '').trim();
+  const hashAt = s.indexOf('#');
+  const remark = hashAt >= 0 ? s.slice(hashAt) : '';
+  if (hashAt >= 0) s = s.slice(0, hashAt);
+  let scheme = 'socks5';
+  const m = s.match(/^([a-z0-9]+):\/\/(.*)$/i);
+  if (m) [, scheme, s] = m;
+  const enc = encodeURIComponent;
+  const isHost = (h) => /^(\d{1,3}(\.\d{1,3}){3}|\[[0-9a-f:]+\]|[a-z0-9-]+(\.[a-z0-9-]+)+)$/i.test(h);
+  const portOk = (p) => /^\d{1,5}$/.test(p) && Number(p) >= 1 && Number(p) <= 65535;
+  // host:port@user:pass — the part after @ has no valid port, the part before it is host:port.
+  let r = s.match(/^([^@\s]+):(\d+)@([^:@\s]*):?(.*)$/);
+  if (r && isHost(r[1]) && !portOk((s.split('@')[1] || '').split(':').pop())) {
+    if (!portOk(r[2])) throw bad(`پورت «${r[2]}» نامعتبر است (باید بین ۱ و ۶۵۵۳۵ باشد)`);
+    return `${scheme}://${enc(decodeURIComponent(r[3]))}${r[4] ? ':' + enc(decodeURIComponent(r[4])) : ''}@${r[1]}:${r[2]}${remark}`;
+  }
+  // host:port:user:pass
+  r = !s.includes('@') && s.match(/^([^:\s]+):(\d+):([^:\s]+):(.+)$/);
+  if (r && isHost(r[1])) {
+    if (!portOk(r[2])) throw bad(`پورت «${r[2]}» نامعتبر است (باید بین ۱ و ۶۵۵۳۵ باشد)`);
+    return `${scheme}://${enc(r[3])}:${enc(r[4])}@${r[1]}:${r[2]}${remark}`;
+  }
+  return `${scheme}://${s}${remark}`;
+}
+
 export function parseUri(raw) {
   const s = String(raw || '').trim();
+  const port = s.match(/^[a-z0-9]+:\/\/(?:[^@/]*@)?(?:\[[^\]]+\]|[^:/?#]+):(\d+)/i)?.[1];
+  if (port && !(Number(port) >= 1 && Number(port) <= 65535)) throw bad(`پورت «${port}» نامعتبر است (باید بین ۱ و ۶۵۵۳۵ باشد)`);
   let url;
   try {
     url = new URL(s.includes('://') ? s : `socks5://${s}`);
   } catch {
-    throw bad('آدرس پروکسی نامعتبر است');
+    throw bad('آدرس پروکسی نامعتبر است؛ قالب درست: socks5://USER:PASS@IP:PORT');
   }
   return {
     host: url.hostname.replace(/^\[|\]$/g, ''),
@@ -281,11 +315,14 @@ export function outboundFromConfig(cfg, protocol, tag) {
   } else {
     const p = protocol && protocol !== 'other' ? protocol : detectProtocol(s);
     if (p === 'wireguard' || /\[Interface\]/i.test(s)) o = parseWireGuard(s);
-    else if (/^socks/i.test(s) || p === 'socks5') {
-      const u = parseUri(s.replace(/^socks:\/\//i, 'socks5://'));
-      o = { type: 'socks', server: u.host, server_port: u.port || 1080, version: '5', username: u.user, password: u.pass };
+    else if (/^socks/i.test(s) || p === 'socks5' || p === 'socks4' || /^[a-z0-9.-]+:\d+[:@]/i.test(s)) {
+      const link = normalizeProxyLink(s);
+      const u = parseUri(link.replace(/^socks:\/\//i, 'socks5://'));
+      // socks4 / socks4a links talk SOCKS4 (they used to be sent as SOCKS5 and always failed).
+      const version = /^socks4a:/i.test(link) ? '4a' : /^socks4:/i.test(link) ? '4' : '5';
+      o = { type: 'socks', server: u.host, server_port: u.port || 1080, version, username: u.user, ...(version === '5' ? { password: u.pass } : {}) };
     } else if (/^https?:\/\//i.test(s) || p === 'http') {
-      const u = parseUri(s);
+      const u = parseUri(normalizeProxyLink(s));
       o = { type: 'http', server: u.host, server_port: u.port || (u.protocol === 'https' ? 443 : 80), username: u.user, password: u.pass, ...(u.protocol === 'https' ? { tls: { enabled: true, server_name: u.host } } : {}) };
     } else if (/^ss:\/\//i.test(s)) o = parseShadowsocks(s);
     else if (/^vless:\/\//i.test(s)) o = parseVless(s);
@@ -317,6 +354,8 @@ export function detectProtocol(cfg) {
   if (s.startsWith('vmess://')) return 'vmess';
   if (s.startsWith('trojan://')) return 'trojan';
   if (s.startsWith('ss://')) return 'ss';
+  if (s.startsWith('socks4')) return 'socks4';
+  if (/^[a-z0-9.-]+:\d+[:@]/.test(s)) return 'socks5'; // host:port:user:pass without a scheme
   if (s.startsWith('socks')) return 'socks5';
   if (s.startsWith('http')) return 'http';
   if (s.includes('[interface]') && s.includes('privatekey')) return 'wireguard';
@@ -395,4 +434,104 @@ export function splitConfigs(text) {
     if (decoded.includes('://')) return splitConfigs(decoded);
   }
   return lines;
+}
+
+// ---------- The manual form in the admin panel (like the outbound form of x-ui panels) ----------
+const SS_METHODS = new Set([
+  '2022-blake3-aes-128-gcm', '2022-blake3-aes-256-gcm', '2022-blake3-chacha20-poly1305',
+  'aes-128-gcm', 'aes-192-gcm', 'aes-256-gcm', 'chacha20-ietf-poly1305', 'xchacha20-ietf-poly1305', 'none',
+]);
+const FINGERPRINTS = new Set(['chrome', 'firefox', 'safari', 'edge', 'ios', 'android', 'random', 'randomized', '360', 'qq']);
+
+/**
+ * Form fields → sing-box outbound/endpoint. Every value is checked here; nothing from the form is
+ * passed through as raw JSON.
+ */
+export function outboundFromForm(f = {}) {
+  const str = (k, max = 512) => String(f[k] ?? '').trim().slice(0, max);
+  const need = (k, label) => {
+    const v = str(k);
+    if (!v) throw bad(`«${label}» لازم است`);
+    return v;
+  };
+  const server = need('server', 'آدرس سرور');
+  if (!/^(\d{1,3}(\.\d{1,3}){3}|[0-9a-f:]+|[a-z0-9-]+(\.[a-z0-9-]+)+)$/i.test(server)) throw bad('آدرس سرور فقط IP یا دامنه است (بدون http:// و پورت)');
+  const port = Number(f.port);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw bad('پورت باید عددی بین ۱ و ۶۵۵۳۵ باشد');
+  const base = { server, server_port: port };
+  const tls = () => {
+    if (!f.tls && f.security !== 'tls' && f.security !== 'reality') return undefined;
+    const fp = str('fingerprint', 20);
+    if (fp && !FINGERPRINTS.has(fp)) throw bad('fingerprint نامعتبر است');
+    const t = { enabled: true, server_name: str('sni', 253) || server, insecure: !!f.insecure || undefined, alpn: list(str('alpn', 100)) };
+    if (fp || f.security === 'reality') t.utls = { enabled: true, fingerprint: fp || 'chrome' };
+    if (f.security === 'reality') t.reality = { enabled: true, public_key: need('publicKey', 'Public key (pbk)'), short_id: str('shortId', 32) };
+    return t;
+  };
+  const transport = () => {
+    const type = str('transport', 20);
+    if (!type || type === 'tcp') return undefined;
+    if (!['ws', 'grpc', 'http', 'httpupgrade'].includes(type)) throw bad('transport نامعتبر است');
+    return transportFrom(type, { path: str('path', 256), host: str('host', 253), serviceName: str('serviceName', 128) });
+  };
+  let o;
+  switch (f.type) {
+    case 'socks5':
+    case 'socks4':
+    case 'socks4a': {
+      const version = f.type === 'socks5' ? '5' : f.type === 'socks4' ? '4' : '4a';
+      o = { type: 'socks', ...base, version, username: str('username', 255) || undefined };
+      if (version === '5') o.password = str('password', 255) || undefined;
+      break;
+    }
+    case 'http':
+      o = { type: 'http', ...base, username: str('username', 255) || undefined, password: str('password', 255) || undefined, tls: f.tls ? tls() : undefined };
+      break;
+    case 'shadowsocks': {
+      const method = need('method', 'روش رمزنگاری');
+      if (!SS_METHODS.has(method)) throw bad('روش رمزنگاری Shadowsocks نامعتبر است');
+      o = { type: 'shadowsocks', ...base, method, password: need('password', 'رمز'), plugin: str('plugin', 40) || undefined, plugin_opts: str('pluginOpts', 512) || undefined };
+      break;
+    }
+    case 'vless':
+      o = { type: 'vless', ...base, uuid: need('uuid', 'UUID'), flow: str('flow', 40) || undefined, packet_encoding: 'xudp', tls: tls(), transport: transport() };
+      break;
+    case 'vmess':
+      o = { type: 'vmess', ...base, uuid: need('uuid', 'UUID'), security: str('cipher', 30) || 'auto', alter_id: Number(f.alterId) || 0, tls: tls(), transport: transport() };
+      break;
+    case 'trojan':
+      o = { type: 'trojan', ...base, password: need('password', 'رمز'), tls: tls() || { enabled: true, server_name: str('sni', 253) || server }, transport: transport() };
+      break;
+    case 'hysteria2':
+      o = {
+        type: 'hysteria2', ...base, password: need('password', 'رمز'),
+        ...(str('obfsPassword') ? { obfs: { type: 'salamander', password: str('obfsPassword') } } : {}),
+        up_mbps: Number(f.upMbps) || undefined, down_mbps: Number(f.downMbps) || undefined,
+        tls: { enabled: true, server_name: str('sni', 253) || server, insecure: !!f.insecure || undefined, alpn: ['h3'] },
+      };
+      break;
+    case 'tuic':
+      o = {
+        type: 'tuic', ...base, uuid: need('uuid', 'UUID'), password: str('password', 255), congestion_control: str('congestion', 20) || 'bbr',
+        tls: { enabled: true, server_name: str('sni', 253) || server, insecure: !!f.insecure || undefined, alpn: list(str('alpn', 100)) || ['h3'] },
+      };
+      break;
+    case 'wireguard': {
+      const key = (k, label) => {
+        const v = need(k, label);
+        if (!/^[A-Za-z0-9+/]{42,43}=?$/.test(v)) throw bad(`«${label}» کلید WireGuard معتبر نیست`);
+        return v;
+      };
+      const psk = str('presharedKey', 64);
+      if (psk && !/^[A-Za-z0-9+/]{42,43}=?$/.test(psk)) throw bad('«Preshared key» معتبر نیست');
+      o = {
+        type: 'wireguard', address: list(str('address', 200)) || ['10.0.0.2/32'], private_key: key('privateKey', 'Private key'), mtu: Number(f.mtu) || 1408,
+        peers: [{ address: server, port, public_key: key('publicKey', 'Public key سرور'), ...(psk ? { pre_shared_key: psk } : {}), allowed_ips: ['0.0.0.0/0', '::/0'], persistent_keepalive_interval: 25 }],
+      };
+      break;
+    }
+    default:
+      throw bad('نوع پروکسی را انتخاب کنید');
+  }
+  return clean(o);
 }

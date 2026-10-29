@@ -2,14 +2,12 @@ import { useEffect, useState } from 'react';
 import { api } from '../api';
 import { useStore } from '../store';
 import { toFa, formatDateTime } from '../util';
-import { Cable, RefreshCw, Plus, Trash2, Activity, Power, Image as ImageIcon } from 'lucide-react';
+import TeleAddProxy from './TeleProxyForm';
+import { Cable, RefreshCw, Trash2, Activity, Power, Image as ImageIcon } from 'lucide-react';
 
 export default function TeleAdmin() {
   const showToast = useStore((s) => s.showToast);
   const [data, setData] = useState(null);
-  const [links, setLinks] = useState('');
-  const [name, setName] = useState('');
-  const [busy, setBusy] = useState(false);
   const [probing, setProbing] = useState(null); // proxy id, or 'all'
 
   const load = () =>
@@ -37,22 +35,6 @@ export default function TeleAdmin() {
     }
   };
 
-  const addLinks = async (e) => {
-    e.preventDefault();
-    if (!links.trim()) return;
-    setBusy(true);
-    try {
-      const r = await api('POST', '/admin/tele/proxies', { links, name: name || undefined });
-      setLinks('');
-      setName('');
-      await load();
-      const n = r.proxies?.length || 0;
-      showToast(r.errors?.length ? `${toFa(n)} پروکسی اضافه شد؛ ${toFa(r.errors.length)} مورد خطا داشت: ${r.errors.join(' · ')}` : `${toFa(n)} پروکسی اضافه شد؛ حالا تستش کنید`);
-    } catch (err) {
-      showToast(err.message);
-    }
-    setBusy(false);
-  };
 
   const probe = async (id) => {
     setProbing(id);
@@ -175,26 +157,7 @@ export default function TeleAdmin() {
         </small>
       </div>
 
-      <form className="inline-form boxed" onSubmit={addLinks}>
-        <input placeholder="نام (اختیاری؛ وگرنه از خود کانفیگ)" value={name} onChange={(e) => setName(e.target.value)} />
-        <textarea
-          rows={7}
-          placeholder={
-            'لینک‌ها هر کدام در یک خط:\n' +
-            'socks5:// · http:// · ss:// · vless:// · vmess:// · trojan:// · hy2:// · tuic://\n' +
-            'یا لینک اشتراک (subscription) base64\n\n' +
-            'WireGuard: کل فایل .conf را همان‌طور بچسبانید ([Interface] … [Peer] …)؛ چند فایل هم با هم می‌شود\n' +
-            'یا JSON خروجی/کامل sing-box'
-          }
-          value={links}
-          onChange={(e) => setLinks(e.target.value)}
-          dir="ltr"
-          style={{ width: '100%', fontFamily: 'monospace', fontSize: 13 }}
-        />
-        <button className="btn primary sm" disabled={busy}>
-          <Plus size={14} /> افزودن
-        </button>
-      </form>
+      <TeleAddProxy onAdded={load} />
 
       <ul className="user-list">
         {proxies.map((p) => {

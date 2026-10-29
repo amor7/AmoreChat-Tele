@@ -318,9 +318,15 @@ sudo docker compose up -d
 ```
 
 ### قدم ۲: افزودن پروکسی
-پنل مدیریت ← **Tele / VPN** ← کادر بزرگ:
+پنل مدیریت ← **Tele / VPN** ← کادر «افزودن». دو راه دارد:
+
+**الف) فرم دستی** (مثل بخش outbound پنل x-ui): نوع را انتخاب کنید (SOCKS5، SOCKS4/4a، HTTP/HTTPS، VLESS، VMess، Trojan، Shadowsocks، Hysteria2، TUIC، WireGuard) و خانه‌ها را پر کنید. برای SOCKS و HTTP یوزر و پسورد **اختیاری** است. اینجا کد کردن کاراکترهای خاص لازم نیست.
+
+**ب) چسباندن کانفیگ / لینک** (زیر همان تب «راهنمای قالب‌ها» با نمونه همه قالب‌ها هست):
+
 
 - **WireGuard:** کل فایل `.conf` را **همان‌طور که هست** بچسبانید (از `[Interface]` تا آخر `[Peer]`) و «افزودن» بزنید. یک کانفیگ کامل حساب می‌شود؛ `PresharedKey`، `MTU` و چند `[Peer]` هم پشتیبانی می‌شود. چند فایل WireGuard را هم می‌شود پشت سر هم چسباند؛ هر `[Interface]` یک پروکسی جدا می‌شود.
+- **SOCKS / HTTP:** `socks5://USER:PASS@IP:PORT` (بدون رمز: `socks5://IP:PORT`)، `socks4://IP:PORT`، `http://USER:PASS@IP:PORT`. قالب فروشنده‌ها هم خودکار مرتب می‌شود: `IP:PORT:USER:PASS` و `socks5://IP:PORT@USER:PASS`. در لینک، کاراکترهای خاص یوزر/پسورد را کد کنید (`@`←`%40`، `:`←`%3A`، `#`←`%23`).
 - **لینک‌ها:** هر لینک در **یک خط**: `vless://` (از جمله Reality، ws، grpc)، `vmess://`، `trojan://`، `ss://`، `hy2://`، `tuic://`، `socks5://`، `http://`
 - **لینک اشتراک (subscription):** متن base64 آن را بچسبانید؛ همه لینک‌هایش اضافه می‌شوند.
 - **JSON sing-box:** یک outbound، یا کل فایل کانفیگ sing-box (outboundهای قابل‌استفاده‌اش برداشته می‌شوند).
