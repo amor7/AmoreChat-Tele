@@ -411,6 +411,26 @@ const migrations = [
     UNIQUE (account_id, tg_chat_id)
   );
   `,
+  // v15: Tele: who may use Telegram (the list's meaning follows the setting tele_access), messaging
+  // anyone / joining chats as a permission, channels every user joins by themselves, and mirrored
+  // photos fetched from Telegram only when someone first opens them.
+  `
+  ALTER TABLE tele_accounts ADD COLUMN allow_explore INTEGER NOT NULL DEFAULT 0;
+  CREATE TABLE tele_access (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    by INTEGER,
+    at INTEGER NOT NULL
+  );
+  ALTER TABLE chats ADD COLUMN auto_join INTEGER NOT NULL DEFAULT 0;
+  CREATE TABLE tele_mirror_photos (
+    message_id INTEGER PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
+    account_id INTEGER NOT NULL REFERENCES tele_accounts(id) ON DELETE CASCADE,
+    remote_id TEXT NOT NULL,
+    w INTEGER,
+    h INTEGER,
+    size INTEGER
+  );
+  `,
 ];
 
 const current = db.prepare('PRAGMA user_version').get().user_version;

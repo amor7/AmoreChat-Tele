@@ -239,7 +239,7 @@ async function part1() {
   // before it (number accepted, wrong code refused) still run against real Telegram servers.
   const alicePhone = `999662${Math.floor(1000 + Math.random() * 9000)}`;
   log('Part 1 (test servers): server starts; owner, Alice and Bob register');
-  const { owner, alice } = await setupApp({ DATA_DIR, TELE_TEST_DC: '1' });
+  const { owner, alice, bob } = await setupApp({ DATA_DIR, TELE_TEST_DC: '1' });
 
   log('Fail closed: no proxy → no login (and nothing sent directly)');
   let r = await alice.call('POST', '/api/tele/login/phone', { phone: alicePhone });
@@ -272,6 +272,19 @@ async function part1() {
   r = ok(await alice.call('GET', '/api/tele/status'), 'alice status');
   assert.equal(r.account.status, 'awaiting_code', 'a wrong code keeps the code step');
   assert.ok(!r.account.phone.includes(alicePhone.slice(4, 8)), 'phone must be masked');
+
+  log('The page says how the code was sent; asking for it another way gives a clear answer');
+  assert.ok(r.codeInfo?.via, `no code info: ${JSON.stringify(r.codeInfo)}`);
+  console.log(`  (code sent: ${r.codeInfo.via}, next: ${r.codeInfo.next}, timeout: ${r.codeInfo.timeout}s)`);
+  r = await alice.call('POST', '/api/tele/login/resend', {});
+  assert.ok(r.http === 200 || r.http === 400, `resend → ${r.http} ${JSON.stringify(r)}`);
+  if (r.http === 200) assert.ok(r.codeInfo?.via, JSON.stringify(r));
+  else assert.ok(r.error && !/Internal/i.test(r.error), JSON.stringify(r));
+  console.log(`  (resend: ${r.http} ${r.codeInfo?.via || r.error})`);
+  r = ok(await alice.call('GET', '/api/tele/status'), 'alice status');
+  assert.equal(r.account.status, 'awaiting_code', 'resend left the code step');
+  r = await bob.call('POST', '/api/tele/login/resend', {});
+  assert.equal(r.http, 400, 'Bob (no login started) asked for a code');
 
   log('The Telegram session on disk is encrypted');
   // Before login TDLib keeps only its binlog, which holds the phone number in plain text unless encrypted.
@@ -816,6 +829,70 @@ async function part2() {
     const q = x.messages.filter((m) => m.text.startsWith('queued ') && m.text.endsWith(RUN));
     return q.length === 2 && q.every((m) => m.kind === 'text' && m.tgMsgId % 1048576 === 0);
   }, 30000);
+
+  log('Messaging anyone and joining chats needs the admin permission');
+  const findQ = (q) => alice.call('GET', `/api/tele/find?q=${encodeURIComponent(q)}`);
+  r = await findQ(`@${botUser}`);
+  assert.equal(r.http, 403, JSON.stringify(r));
+  r = await bob.call('PATCH', `/api/admin/tele/accounts/${aliceAcc.id}`, { allowExplore: true });
+  assert.equal(r.http, 403, 'a non-admin gave the permission');
+  ok(await owner.call('PATCH', `/api/admin/tele/accounts/${aliceAcc.id}`, { allowExplore: true }), 'allow explore');
+  r = ok(await alice.call('GET', '/api/tele/status'), 'status');
+  assert.equal(r.account.allowExplore, true);
+
+  log('The bot by @username: found, and opening it gives the chat Alice already has');
+  r = ok(await findQ(`@${botUser}`), 'find bot');
+  const foundBot = r.results.find((c) => Number(c.tgChatId) === meta.botChatId);
+  assert.ok(foundBot && foundBot.bot && foundBot.kind === 'private', JSON.stringify(r.results));
+  r = ok(await alice.call('POST', '/api/tele/open', { tgChatId: foundBot.tgChatId }), 'open bot');
+  assert.equal(r.dialogId, pd.id);
+
+  log('A public channel by t.me link: join it, then leave it (in Telegram too)');
+  r = ok(await findQ('https://t.me/telegram'), 'find channel');
+  const pub = r.results.find((c) => c.username.toLowerCase() === 'telegram');
+  assert.ok(pub && pub.kind === 'channel' && pub.memberCount > 1000, JSON.stringify(r.results));
+  const wasMember = pub.joined;
+  r = ok(await alice.call('POST', '/api/tele/join', { tgChatId: pub.tgChatId }), 'join');
+  const pubDialog = r.dialogs.find((d) => d.id === r.dialogId);
+  assert.ok(pubDialog?.selected && pubDialog.kind === 'channel', JSON.stringify(pubDialog));
+  r = ok(await findQ('@telegram'), 'find again');
+  assert.ok(r.results.find((c) => c.tgChatId === pub.tgChatId)?.joined, 'not a member after joining');
+  r = ok(await alice.call('GET', `/api/tele/dialogs/${pubDialog.id}/messages`), 'read the channel');
+  assert.ok(r.messages.length > 0, 'no posts in the joined channel');
+  if (!wasMember) {
+    r = ok(await alice.call('POST', `/api/tele/dialogs/${pubDialog.id}/leave`, {}), 'leave');
+    assert.ok(!r.dialogs.find((d) => d.id === pubDialog.id)?.selected, 'still in the list after leaving');
+    r = ok(await findQ('@telegram'), 'find after leaving');
+    assert.equal(r.results.find((c) => c.tgChatId === pub.tgChatId)?.joined, false, 'still a member after leaving');
+  } else console.log('  (the spare account already follows @telegram: it is not left)');
+
+  log('Search and join refuse bad input with clear errors');
+  for (const [q, code] of [['x', 400], ['https://t.me/+AAAAAAAAAAAAAAAAAAAA', 404]]) {
+    r = await findQ(q);
+    assert.equal(r.http, code, `${q}: ${JSON.stringify(r)}`);
+  }
+  for (const body of [{ tgChatId: 'abc' }, { tgChatId: '1' }, { invite: 'nope' }]) {
+    r = await alice.call('POST', body.invite ? '/api/tele/join' : '/api/tele/open', body);
+    assert.ok(r.http >= 400 && r.http < 500, `${JSON.stringify(body)} → ${r.http}`);
+  }
+  r = await alice.call('POST', `/api/tele/dialogs/${pd.id}/leave`, {});
+  assert.equal(r.http, 400, 'left a private chat');
+  r = await bob.call('GET', '/api/tele/find?q=@telegram');
+  assert.equal(r.http, 400, 'Bob (no Telegram) searched');
+
+  log('The admin closes Telegram for Alice: her connection closes; reopened, it works with no new login');
+  ok(await owner.call('PATCH', '/api/admin/tele/access', { mode: 'deny', add: [aliceAcc.userId] }), 'close for alice');
+  r = ok(await alice.call('GET', '/api/tele/status'), 'status');
+  assert.equal(r.access, false);
+  r = await alice.call('GET', `/api/tele/dialogs/${pd.id}/messages`);
+  assert.equal(r.http, 403);
+  r = ok(await owner.call('GET', '/api/admin/tele/accounts'), 'accounts');
+  assert.equal(r.accounts.find((a) => a.username === 'alice').live, false, 'still connected to Telegram');
+  ok(await owner.call('PATCH', '/api/admin/tele/access', { mode: 'all', remove: [aliceAcc.userId] }), 'open again');
+  r = ok(await alice.call('GET', `/api/tele/dialogs/${pd.id}/messages`), 'messages after reopening');
+  assert.ok(r.messages.some((m) => m.text === helloText) && !r.notice, JSON.stringify(r.notice));
+  assert.equal(ok(await alice.call('GET', '/api/tele/status'), 'status').account.status, 'connected');
+
   // Never log out here: the spare account's session is shared with later runs.
   await stopServer();
 }
@@ -1077,7 +1154,7 @@ async function part3() {
   const DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'tele-e2e-mirror-'));
   const textOf = (m) => m.content?.text?.text || m.content?.caption?.text || '';
   log('Part 3: the owner connects the spare account; the bot posts in its channel');
-  const { owner, alice } = await setupApp({ DATA_DIR });
+  const { owner, alice, bob } = await setupApp({ DATA_DIR });
   await addProxies(owner);
   fs.cpSync(SESSION_DIR, path.join(DATA_DIR, 'tele-sessions', '1'), { recursive: true });
   let r = ok(await owner.call('POST', '/api/tele/login/phone', { phone: process.env.TG_TEST_PHONE }), 'owner connect');
@@ -1109,15 +1186,28 @@ async function part3() {
   r = await alice.call('POST', '/api/admin/tele/mirrors', { tgChatId: String(meta.channelChatId) });
   assert.equal(r.http, 403);
   r = ok(await owner.call('GET', '/api/admin/tele/mirrors'), 'mirrors');
-  assert.ok(r.connected && r.channels.some((c) => Number(c.tgChatId) === meta.channelChatId), 'channel not offered');
-  for (const bad of [{ tgChatId: 'abc' }, { tgChatId: String(meta.botChatId) }, { tgChatId: String(meta.channelChatId), importLast: 99 }]) {
+  assert.ok(r.connected, 'not connected');
+  r = await alice.call('GET', '/api/admin/tele/mirrors/channels');
+  assert.equal(r.http, 403);
+  log('The channel list comes live from Telegram (not only chats added in the Telegram page) and can be searched');
+  r = ok(await owner.call('GET', '/api/admin/tele/mirrors/channels'), 'channels');
+  assert.ok(r.channels.some((c) => Number(c.tgChatId) === meta.channelChatId && c.joined), 'channel not offered');
+  r = ok(await owner.call('GET', `/api/admin/tele/mirrors/channels?q=${encodeURIComponent(meta.channelTitle.slice(-6))}`), 'search channels');
+  assert.ok(r.channels.some((c) => Number(c.tgChatId) === meta.channelChatId), 'search missed the channel');
+  r = ok(await owner.call('GET', '/api/admin/tele/mirrors/channels?q=zzzz-nothing-like-this'), 'search nothing');
+  assert.equal(r.channels.length, 0);
+  r = ok(await owner.call('GET', '/api/admin/tele/mirrors/channels?q=@telegram'), 'public channel by @name');
+  assert.ok(r.channels.some((c) => c.username.toLowerCase() === 'telegram'), JSON.stringify(r.channels.slice(0, 3)));
+  for (const bad of [{ tgChatId: 'abc' }, { tgChatId: String(meta.botChatId) }, { tgChatId: String(meta.channelChatId), importLast: 99 }, { tgChatId: String(meta.channelChatId), visibility: 'everyone' }]) {
     r = await owner.call('POST', '/api/admin/tele/mirrors', bad);
     assert.ok(r.http >= 400 && r.http < 500, `mirror ${JSON.stringify(bad)} → ${r.http}`);
   }
 
-  log('The channel is mirrored: new posts (text and photo) appear in an app channel, once each');
-  r = ok(await owner.call('POST', '/api/admin/tele/mirrors', { tgChatId: String(meta.channelChatId), importLast: 0, withPhotos: true }), 'add mirror');
+  log('The channel is mirrored into a private app channel (invite link only); new posts appear once each');
+  r = ok(await owner.call('POST', '/api/admin/tele/mirrors', { tgChatId: String(meta.channelChatId), importLast: 0, withPhotos: true, visibility: 'link' }), 'add mirror');
   const mirror = r.mirror;
+  assert.equal(mirror.visibility, 'link');
+  assert.match(mirror.inviteCode || '', /^\S{6,}$/, 'no invite link');
   r = await owner.call('POST', '/api/admin/tele/mirrors', { tgChatId: String(meta.channelChatId) });
   assert.equal(r.http, 400, 'the same channel added twice');
   await postText(`news one ${RUN}`);
@@ -1131,17 +1221,78 @@ async function part3() {
   }, 90000);
   let m = (await appMsgs()).filter((x) => x.type !== 'system');
   assert.deepEqual(m.map((x) => x.text), [`news one ${RUN}`, `news photo ${RUN}`, `news two ${RUN}`], 'posts missing, twice or out of order');
-  assert.equal(m[1].type, 'image', 'the photo did not come along');
   assert.ok(m.every((x) => x.forwardedFrom === `تلگرام · ${meta.channelTitle}`), 'source not shown');
   ok(await owner.call('POST', '/api/admin/tele/mirrors/run', {}), 'run again');
   assert.equal((await appMsgs()).filter((x) => x.type !== 'system').length, 3, 'posts copied twice');
 
-  log('Everyone can follow the app channel (no Telegram needed)');
-  ok(await alice.call('POST', `/api/chats/${mirror.chatId}/join`, {}), 'alice joins');
+  log('The photo is not fetched until someone opens it');
+  assert.equal(m[1].type, 'text');
+  assert.ok(m[1].pendingPhoto && !m[1].file, `photo fetched already: ${JSON.stringify(m[1])}`);
+  const usageNow = async () => ok(await owner.call('GET', '/api/admin/tele/accounts'), 'accounts').accounts.find((a) => a.username === 'owner').used;
+
+  log('Link only: not found in "explore", no joining without the link; with the link, anyone joins');
+  const discover = async (who) => ok(await who.call('GET', `/api/chats/discover?q=${encodeURIComponent(mirror.chatTitle.slice(-8))}`), 'discover').chats.map((c) => c.id);
+  assert.ok(!(await discover(alice)).includes(mirror.chatId), 'a link-only channel is listed');
+  r = await alice.call('POST', `/api/chats/${mirror.chatId}/join`, {});
+  assert.ok(r.http >= 400, 'joined a link-only channel without the link');
+  r = await alice.call('GET', `/api/chats/${mirror.chatId}/messages`);
+  assert.equal(r.http, 403, 'read a link-only channel without joining');
+  r = await alice.call('POST', `/api/mirror-photos/${m[1].id}`, {});
+  assert.equal(r.http, 403, 'a non-member fetched the photo');
+  ok(await alice.call('POST', `/api/join/${mirror.inviteCode}`, {}), 'alice joins with the link');
   r = ok(await alice.call('GET', `/api/chats/${mirror.chatId}/messages`), 'alice reads');
   assert.ok(r.messages.some((x) => x.text === `news one ${RUN}`));
   r = await alice.call('POST', `/api/chats/${mirror.chatId}/messages`, { text: 'not allowed' });
   assert.ok(r.http >= 400, 'a member posted in the news channel');
+
+  log('Alice opens the photo: fetched once from Telegram, then an ordinary photo for everyone');
+  const [p1, p2] = await Promise.all([alice.call('POST', `/api/mirror-photos/${m[1].id}`, {}), owner.call('POST', `/api/mirror-photos/${m[1].id}`, {})]);
+  assert.equal(p1.http, 200, JSON.stringify(p1));
+  assert.equal(p2.http, 200, JSON.stringify(p2));
+  assert.equal(p1.message.type, 'image');
+  assert.equal(p1.message.file.id, p2.message.file.id, 'fetched twice');
+  m = (await appMsgs()).filter((x) => x.type !== 'system');
+  assert.equal(m[1].type, 'image');
+  assert.equal(m[1].text, `news photo ${RUN}`);
+  assert.ok(!m[1].pendingPhoto);
+  const img = await download(alice, `/api/files/${m[1].file.id}`);
+  assert.ok(img.http === 200 && /^image\//.test(img.type) && img.bytes.length > 100, `the photo file: ${img.http} ${img.type} ${img.bytes.length}`);
+  r = await alice.call('POST', `/api/mirror-photos/${m[1].id}`, {});
+  assert.equal(r.http, 404, 'fetched again');
+  console.log(`  (owner's Telegram traffic so far this month: ${await usageNow()} bytes)`);
+
+  log('A new invite link: the old one stops working; members stay');
+  ok(await owner.call('POST', `/api/admin/tele/mirrors/${mirror.id}/invite`, {}), 'new link');
+  r = ok(await owner.call('GET', '/api/admin/tele/mirrors'), 'mirrors');
+  const fresh = r.mirrors[0];
+  assert.ok(fresh.inviteCode && fresh.inviteCode !== mirror.inviteCode, 'same link');
+  r = await bob.call('POST', `/api/join/${mirror.inviteCode}`, {});
+  assert.equal(r.http, 404, 'the old link still works');
+  assert.equal(fresh.members, 2, 'owner and alice');
+
+  log('"Everyone": every user is a member, and so is a user who registers later');
+  r = await alice.call('PATCH', `/api/admin/tele/mirrors/${mirror.id}`, { visibility: 'all' });
+  assert.equal(r.http, 403);
+  r = await owner.call('PATCH', `/api/admin/tele/mirrors/${mirror.id}`, { visibility: 'nobody' });
+  assert.equal(r.http, 400);
+  r = ok(await owner.call('PATCH', `/api/admin/tele/mirrors/${mirror.id}`, { visibility: 'all' }), 'everyone');
+  assert.equal(r.mirrors[0].visibility, 'all');
+  r = ok(await bob.call('GET', '/api/chats'), 'bob chats');
+  assert.ok(r.chats.some((c) => c.id === mirror.chatId), 'bob was not added');
+  const carol = client();
+  ok(await carol.call('POST', '/api/auth/register', { username: 'carol', password: PASS, displayName: 'Carol' }), 'carol register');
+  r = ok(await carol.call('GET', '/api/chats'), 'carol chats');
+  assert.ok(r.chats.some((c) => c.id === mirror.chatId), 'a new user was not added');
+  r = ok(await carol.call('GET', `/api/chats/${mirror.chatId}/messages`), 'carol reads');
+  assert.ok(r.messages.some((x) => x.type === 'image' && x.text === `news photo ${RUN}`), 'carol does not see the photo');
+
+  log('"Public": listed in explore; no longer added to new users');
+  ok(await owner.call('PATCH', `/api/admin/tele/mirrors/${mirror.id}`, { visibility: 'public' }), 'public');
+  const dave = client();
+  ok(await dave.call('POST', '/api/auth/register', { username: 'dave', password: PASS, displayName: 'Dave' }), 'dave register');
+  assert.ok(!ok(await dave.call('GET', '/api/chats'), 'dave chats').chats.some((c) => c.id === mirror.chatId), 'added while public');
+  assert.ok((await discover(dave)).includes(mirror.chatId), 'not listed while public');
+  ok(await dave.call('POST', `/api/chats/${mirror.chatId}/join`, {}), 'dave joins from explore');
 
   log('Paused: nothing is copied; resumed: it catches up');
   ok(await owner.call('PATCH', `/api/admin/tele/mirrors/${mirror.id}`, { enabled: false }), 'pause');

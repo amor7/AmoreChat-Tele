@@ -14,7 +14,7 @@ import {
   revokeSessions,
   randomCode,
 } from '../auth.js';
-import { fail, addMember, ensureEmergencyChannel, ensureSavedChat, systemMessage, audit } from '../chats.js';
+import { fail, addMember, ensureEmergencyChannel, ensureSavedChat, systemMessage, audit, joinAutoChats } from '../chats.js';
 import { noteLoginFailure, noteLogin } from '../secwatch.js';
 import { checkTotp, useRecoveryCode, passwordProblem, deviceName } from '../security.js';
 import { isOnline } from '../realtime.js';
@@ -118,6 +118,7 @@ export default async function authRoutes(app) {
 
     ensureSavedChat(userId);
     addMember(ensureEmergencyChannel(), userId, firstUser ? 'owner' : 'member', { silent: true });
+    joinAutoChats(userId);
     audit(userId, 'user.register', userId, inv ? { invite: inv.code } : '');
 
     // Where the account was made counts as a known place (a later login from elsewhere is "new").

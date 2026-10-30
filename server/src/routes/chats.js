@@ -199,7 +199,8 @@ export default async function chatRoutes(app) {
       run('UPDATE chats SET title = ? WHERE id = ?', t, chat.id);
     }
     if (b.description !== undefined) run('UPDATE chats SET description = ? WHERE id = ?', String(b.description).slice(0, 500), chat.id);
-    if (b.isPublic !== undefined && !chat.is_emergency) run('UPDATE chats SET is_public = ? WHERE id = ?', b.isPublic ? 1 : 0, chat.id);
+    // A private chat is no longer one every new user joins by themselves.
+    if (b.isPublic !== undefined && !chat.is_emergency) run('UPDATE chats SET is_public = ?, auto_join = auto_join * ? WHERE id = ?', b.isPublic ? 1 : 0, b.isPublic ? 1 : 0, chat.id);
     if (b.slowMode !== undefined) run('UPDATE chats SET slow_mode = ? WHERE id = ?', Math.max(0, Math.min(3600, Number(b.slowMode) || 0)), chat.id);
     if (b.locked !== undefined) run('UPDATE chats SET locked = ? WHERE id = ?', b.locked ? 1 : 0, chat.id);
     if (b.voiceStage !== undefined && chat.type === 'group') run('UPDATE chats SET voice_stage = ? WHERE id = ?', b.voiceStage ? 1 : 0, chat.id);
