@@ -3,7 +3,7 @@ import { api } from '../api';
 import { useStore } from '../store';
 import { toFa, formatDateTime } from '../util';
 import TeleAddProxy from './TeleProxyForm';
-import { Cable, RefreshCw, Trash2, Activity, Power, BellRing, BarChart3, Newspaper } from 'lucide-react';
+import { Cable, RefreshCw, Trash2, Activity, Power, BellRing, BarChart3, Newspaper, Copy, UserCheck } from 'lucide-react';
 
 export default function TeleAdmin() {
   const showToast = useStore((s) => s.showToast);
@@ -237,6 +237,7 @@ export default function TeleAdmin() {
       </button>
 
       <TeleAlerts />
+      <TeleAccess />
       <TeleUsers />
       <TeleMirrors />
     </div>
@@ -397,7 +398,7 @@ function TeleUsers() {
       <h4 className="with-icon">
         <BarChart3 size={16} /> کاربران تلگرام
       </h4>
-      <p className="hint">مصرف اینترنت (VPN) هر کاربر در این ماه، از پرمصرف به کم‌مصرف. عکس، پیام صوتی و فایل/ویدیو پیش‌فرض برای همه خاموش است و فقط با زدن روی آن‌ها دانلود می‌شوند.</p>
+      <p className="hint">مصرف اینترنت (VPN) هر کاربر در این ماه، از پرمصرف به کم‌مصرف. عکس، پیام صوتی و فایل/ویدیو پیش‌فرض برای همه خاموش است و فقط با زدن روی آن‌ها دانلود می‌شوند. «پیام/عضویت جدید» یعنی پیام دادن به هر کسی با ‎@نام‌کاربری یا شماره، و جستجو و عضویت در گروه‌ها و کانال‌ها؛ این هم پیش‌فرض خاموش است.</p>
       <form className="inline-form" onSubmit={saveQuota}>
         <label className="grow">
           سقف مصرف ماهانه هر کاربر (مگابایت، ۰ = بدون سقف)
@@ -466,6 +467,9 @@ function TeleUsers() {
                 <label className="check">
                   <input type="checkbox" checked={a.allowFiles} onChange={() => patch(a, { allowFiles: !a.allowFiles })} /> فایل
                 </label>
+                <label className="check" title="پیام به هر کس با ‎@نام‌کاربری یا شماره، جستجو و عضویت در گروه‌ها و کانال‌ها">
+                  <input type="checkbox" checked={a.allowExplore} onChange={() => patch(a, { allowExplore: !a.allowExplore })} /> پیام/عضویت جدید
+                </label>
               </span>
             </li>
           );
@@ -476,22 +480,122 @@ function TeleUsers() {
   );
 }
 
+
+// Who may use Telegram: everyone, nobody, only chosen users, or everyone but chosen users.
+const ACCESS_LABELS = {
+  all: 'برای همه باز',
+  none: 'برای همه بسته (جز مالک)',
+  allow: 'فقط برای کاربرانی که انتخاب می‌کنید',
+  deny: 'برای همه، جز کاربرانی که انتخاب می‌کنید',
+};
+function TeleAccess() {
+  const showToast = useStore((s) => s.showToast);
+  const [data, setData] = useState(null);
+  const [q, setQ] = useState('');
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    api('GET', '/admin/tele/access')
+      .then(setData)
+      .catch((e) => showToast(e.message));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  if (!data) return null;
+  const save = async (body) => {
+    setBusy(true);
+    try {
+      setData(await api('PATCH', '/admin/tele/access', body));
+    } catch (e) {
+      showToast(e.message);
+    }
+    setBusy(false);
+  };
+  const listMode = data.mode === 'allow' || data.mode === 'deny';
+  const term = q.trim().toLowerCase();
+  const shown = data.users.filter((u) => !u.owner && (!term || `${u.name} ${u.username}`.toLowerCase().includes(term)));
+  const listed = data.users.filter((u) => u.listed).length;
+  return (
+    <div className="boxed" style={{ marginTop: 16 }}>
+      <h4 className="with-icon">
+        <UserCheck size={16} /> دسترسی به تلگرام
+      </h4>
+      <p className="hint">چه کسانی بخش تلگرام را داشته باشند. بستن برای کسی که وارد شده، اتصالش را همان لحظه می‌بندد؛ حسابش می‌ماند و با باز شدن دوباره، بدون ورود دوباره کار می‌کند. مالک همیشه دسترسی دارد.</p>
+      <label>
+        حالت
+        <select value={data.mode} disabled={busy} onChange={(e) => save({ mode: e.target.value })}>
+          {data.modes.map((m) => (
+            <option key={m} value={m}>
+              {ACCESS_LABELS[m] || m}
+            </option>
+          ))}
+        </select>
+      </label>
+      {listMode && (
+        <>
+          <p className="hint">
+            {data.mode === 'allow' ? 'تیک‌خورده‌ها تلگرام دارند؛ بقیه نه.' : 'تیک‌خورده‌ها تلگرام ندارند؛ بقیه دارند.'} ({toFa(listed)} نفر انتخاب شده)
+          </p>
+          <input className="search" placeholder="جستجوی کاربر…" value={q} onChange={(e) => setQ(e.target.value)} />
+          <ul className="user-list tele-access-list">
+            {shown.slice(0, 300).map((u) => (
+              <li key={u.id} className="row-item">
+                <label className="check grow">
+                  <input type="checkbox" checked={u.listed} disabled={busy} onChange={() => save(u.listed ? { remove: [u.id] } : { add: [u.id] })} />
+                  <span>
+                    <b>{u.name}</b> <small className="muted">@{u.username}</small>
+                  </span>
+                </label>
+                {u.teleStatus === 'connected' && <small className="muted">حساب تلگرام وصل</small>}
+                <span className={`tag ${u.allowed ? '' : 'danger'}`}>{u.allowed ? 'دسترسی دارد' : 'بسته'}</span>
+              </li>
+            ))}
+            {!shown.length && <li className="muted">کاربری پیدا نشد.</li>}
+          </ul>
+        </>
+      )}
+    </div>
+  );
+}
+
 // Owner: Telegram channels whose posts appear in channels of this app (read once, for everyone).
+const VIS_LABELS = {
+  public: 'عمومی (در «کاوش» دیده می‌شود)',
+  all: 'همه کاربران خودکار عضو شوند',
+  link: 'خصوصی (فقط با لینک دعوت)',
+};
+const inviteLink = (code) => `${location.origin}/#/join/${code}`;
 function TeleMirrors() {
   const me = useStore((st) => st.me);
   const showToast = useStore((st) => st.showToast);
   const [data, setData] = useState(null);
+  const [channels, setChannels] = useState(null);
+  const [q, setQ] = useState('');
+  const [searching, setSearching] = useState(false);
   const [tgChatId, setTgChatId] = useState('');
   const [target, setTarget] = useState('');
-  const [withPhotos, setWithPhotos] = useState(false);
+  const [withPhotos, setWithPhotos] = useState(true);
+  const [visibility, setVisibility] = useState('public');
   const [busy, setBusy] = useState(false);
   const load = () =>
     api('GET', '/admin/tele/mirrors')
       .then(setData)
       .catch((e) => showToast(e.message));
+  // Live from Telegram: every channel the owner's account follows (and a public one by @name).
+  const findChannels = async (term = q) => {
+    setSearching(true);
+    try {
+      const r = await api('GET', `/admin/tele/mirrors/channels${term.trim() ? `?q=${encodeURIComponent(term.trim())}` : ''}`, undefined, { timeout: 90000 });
+      setChannels(r.channels);
+      if (r.channels.length === 1) setTgChatId(r.channels[0].tgChatId);
+    } catch (e) {
+      showToast(e.message);
+    }
+    setSearching(false);
+  };
   useEffect(() => {
     if (me.role === 'owner') load();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (data?.connected && !channels) findChannels('');
+  }, [data?.connected]); // eslint-disable-line react-hooks/exhaustive-deps
   if (me.role !== 'owner' || !data) return null;
   const act = async (fn, ok) => {
     setBusy(true);
@@ -504,14 +608,19 @@ function TeleMirrors() {
     }
     setBusy(false);
   };
+  const copy = (text) =>
+    navigator.clipboard?.writeText(text).then(
+      () => showToast('لینک کپی شد'),
+      () => prompt('لینک دعوت:', text),
+    ) ?? prompt('لینک دعوت:', text);
   const used = new Set(data.mirrors.map((m) => m.tgChatId));
-  const free = data.channels.filter((c) => !used.has(c.tgChatId));
+  const free = (channels || []).filter((c) => !used.has(c.tgChatId));
   return (
     <div className="boxed tele-mirrors" style={{ marginTop: 16 }}>
       <h4 className="with-icon">
         <Newspaper size={16} /> انتشار کانال‌های تلگرام در برنامه (فقط مالک)
       </h4>
-      <p className="hint">پست‌های کانال تلگرامی که حساب تلگرام شما عضوش است، خودکار در یک کانال همین برنامه منتشر می‌شوند؛ همه کاربران بدون تلگرام می‌خوانند و ترافیک فقط یک بار مصرف می‌شود.</p>
+      <p className="hint">پست‌های یک کانال تلگرام خودکار در یک کانال همین برنامه منتشر می‌شوند؛ کاربران بدون تلگرام می‌خوانند و ترافیک فقط یک بار مصرف می‌شود. عکس‌ها فقط وقتی کسی رویشان بزند از تلگرام گرفته می‌شوند و بعد برای همه آماده‌اند.</p>
       {!data.connected ? (
         <p className="muted">اول حساب تلگرام خودتان را از منو ← تلگرام وصل کنید.</p>
       ) : (
@@ -520,14 +629,28 @@ function TeleMirrors() {
             className="inline-form"
             onSubmit={(e) => {
               e.preventDefault();
-              act(() => api('POST', '/admin/tele/mirrors', { tgChatId, ...(target ? { chatId: Number(target) } : {}), withPhotos }, { timeout: 120000 }), 'اضافه شد').then(() => setTgChatId(''));
+              findChannels();
             }}
           >
-            <select value={tgChatId} onChange={(e) => setTgChatId(e.target.value)} className="grow">
-              <option value="">— کانال تلگرام —</option>
+            <input className="grow" value={q} onChange={(e) => setQ(e.target.value)} placeholder="جستجو در کانال‌های شما، یا ‎@نام‌کاربری / لینک t.me یک کانال عمومی" />
+            <button className={`btn sm ${searching ? 'spin' : ''}`} disabled={searching}>
+              <RefreshCw size={14} /> {searching ? 'در حال دریافت…' : 'جستجو'}
+            </button>
+          </form>
+          <form
+            className="tele-mirror-form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              act(() => api('POST', '/admin/tele/mirrors', { tgChatId, ...(target ? { chatId: Number(target) } : {}), withPhotos, visibility }, { timeout: 120000 }), 'اضافه شد').then(() => setTgChatId(''));
+            }}
+          >
+            <select value={tgChatId} onChange={(e) => setTgChatId(e.target.value)}>
+              <option value="">{channels ? `— کانال تلگرام (${toFa(free.length)}) —` : '— در حال دریافت کانال‌ها… —'}</option>
               {free.map((c) => (
                 <option key={c.tgChatId} value={c.tgChatId}>
                   {c.title}
+                  {c.username ? ` (@${c.username})` : ''}
+                  {c.joined ? '' : ' · عضو نیستید'}
                 </option>
               ))}
             </select>
@@ -539,35 +662,62 @@ function TeleMirrors() {
                 </option>
               ))}
             </select>
+            <select value={visibility} onChange={(e) => setVisibility(e.target.value)} aria-label="چه کسانی ببینند">
+              {Object.entries(VIS_LABELS).map(([k, label]) => (
+                <option key={k} value={k}>
+                  {label}
+                </option>
+              ))}
+            </select>
             <label className="check">
-              <input type="checkbox" checked={withPhotos} onChange={(e) => setWithPhotos(e.target.checked)} /> با عکس
+              <input type="checkbox" checked={withPhotos} onChange={(e) => setWithPhotos(e.target.checked)} /> عکس‌ها (با اولین کلیک)
             </label>
             <button className="btn sm primary" disabled={!tgChatId || busy}>
               افزودن
             </button>
           </form>
-          {!data.channels.length && <small className="muted">کانالی در فهرست نیست: در صفحه تلگرام با دکمه + فهرست کامل را یک بار باز کنید.</small>}
+          {channels && !channels.length && <small className="muted">کانالی پیدا نشد. برای کانال عمومی‌ای که عضوش نیستید، ‎@نام‌کاربری آن را جستجو کنید.</small>}
           <ul className="user-list">
             {data.mirrors.map((m) => (
-              <li key={m.id} className="row-item">
+              <li key={m.id} className="row-item tele-mirror">
                 <span className="grow">
                   <b>{m.title}</b> ← {m.chatTitle || '—'}
                   {!m.enabled && <span className="tag">متوقف</span>}
                   <br />
                   <small className="muted">
-                    {m.lastRunAt ? `آخرین بررسی: ${formatDateTime(m.lastRunAt)}` : 'هنوز بررسی نشده'}
+                    {toFa(m.members)} عضو · {m.lastRunAt ? `آخرین بررسی: ${formatDateTime(m.lastRunAt)}` : 'هنوز بررسی نشده'}
                     {m.lastError ? ` · خطا: ${m.lastError}` : ''}
                   </small>
+                  {m.visibility === 'link' && m.inviteCode && (
+                    <span className="inline-form tele-invite">
+                      <input readOnly dir="ltr" value={inviteLink(m.inviteCode)} onFocus={(e) => e.target.select()} />
+                      <button type="button" className="btn sm" onClick={() => copy(inviteLink(m.inviteCode))}>
+                        <Copy size={14} /> کپی
+                      </button>
+                      <button type="button" className="btn sm" disabled={busy} onClick={() => confirm('لینک تازه ساخته شود؟ لینک قبلی دیگر کار نمی‌کند (کسانی که عضو شده‌اند می‌مانند).') && act(() => api('POST', `/admin/tele/mirrors/${m.id}/invite`), 'لینک تازه ساخته شد')}>
+                        لینک تازه
+                      </button>
+                    </span>
+                  )}
                 </span>
-                <label className="check">
-                  <input type="checkbox" checked={m.withPhotos} onChange={() => act(() => api('PATCH', `/admin/tele/mirrors/${m.id}`, { withPhotos: !m.withPhotos }))} /> عکس
-                </label>
-                <button className="btn sm" disabled={busy} onClick={() => act(() => api('PATCH', `/admin/tele/mirrors/${m.id}`, { enabled: !m.enabled }))}>
-                  {m.enabled ? 'توقف' : 'ادامه'}
-                </button>
-                <button className="btn sm danger" disabled={busy} onClick={() => confirm('انتشار این کانال متوقف و حذف شود؟ (کانال برنامه و پست‌هایش می‌مانند)') && act(() => api('DELETE', `/admin/tele/mirrors/${m.id}`))}>
-                  <Trash2 size={14} />
-                </button>
+                <span className="tele-user-ctl">
+                  <select value={m.visibility} disabled={busy} onChange={(e) => act(() => api('PATCH', `/admin/tele/mirrors/${m.id}`, { visibility: e.target.value }), 'ذخیره شد')} aria-label="چه کسانی ببینند">
+                    {Object.entries(VIS_LABELS).map(([k, label]) => (
+                      <option key={k} value={k}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                  <label className="check">
+                    <input type="checkbox" checked={m.withPhotos} onChange={() => act(() => api('PATCH', `/admin/tele/mirrors/${m.id}`, { withPhotos: !m.withPhotos }))} /> عکس
+                  </label>
+                  <button className="btn sm" disabled={busy} onClick={() => act(() => api('PATCH', `/admin/tele/mirrors/${m.id}`, { enabled: !m.enabled }))}>
+                    {m.enabled ? 'توقف' : 'ادامه'}
+                  </button>
+                  <button className="btn sm danger" disabled={busy} onClick={() => confirm('انتشار این کانال متوقف و حذف شود؟ (کانال برنامه و پست‌هایش می‌مانند)') && act(() => api('DELETE', `/admin/tele/mirrors/${m.id}`))}>
+                    <Trash2 size={14} />
+                  </button>
+                </span>
               </li>
             ))}
             {!data.mirrors.length && <li className="muted">هنوز کانالی منتشر نمی‌شود.</li>}

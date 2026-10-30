@@ -18,6 +18,9 @@ export const DEFAULTS = {
   tele_file_max_mb: '20',
   // Tele: minutes between checks of mirrored Telegram channels.
   tele_mirror_minutes: '5',
+  // Tele: who may use Telegram: all | none | allow (only the listed users) | deny (all but them).
+  // The owner always may.
+  tele_access: 'all',
   // Security alerts to the owner (Saved Messages); wrong passwords from one IP in 15 minutes that
   // count as an attack; ban such an IP by itself, and for how many minutes (0 = until unbanned).
   sec_alerts: '1',

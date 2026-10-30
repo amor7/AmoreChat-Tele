@@ -154,7 +154,8 @@ export default async function adminRoutes(app) {
     need(req, 'manage_settings');
     const b = req.body || {};
     for (const key of Object.keys(b)) {
-      if (!(key in DEFAULTS)) continue;
+      // Telegram and security settings have their own checked routes (security ones: owner only).
+      if (!(key in DEFAULTS) || /^(tele|sec)_/.test(key)) continue;
       if (b[key] !== null && typeof b[key] === 'object') fail(400, 'مقدار نامعتبر');
       let v = String(b[key]);
       if (key === 'registration_mode' && !['open', 'invite', 'closed'].includes(v)) fail(400, 'حالت ثبت‌نام نامعتبر');

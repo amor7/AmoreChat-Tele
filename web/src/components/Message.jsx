@@ -1,11 +1,11 @@
-import { memo, useRef } from 'react';
+import { memo, useRef, useState } from 'react';
 import { api } from '../api';
 import { useStore } from '../store';
 import { formatTime, messagePreview, toFa, callSummary } from '../util';
 import { startCall } from '../rtc';
 import { EmojiImg, RichText, isBigEmoji } from './Emoji';
 import PreviewIcon from './PreviewIcon';
-import { Clock, AlertCircle, Hourglass, Forward, Timer, Pin, Check, CheckCheck, EllipsisVertical, PhoneMissed, PhoneOutgoing, PhoneIncoming, Phone, Video } from 'lucide-react';
+import { Clock, AlertCircle, Hourglass, Forward, Timer, Pin, Check, CheckCheck, EllipsisVertical, PhoneMissed, PhoneOutgoing, PhoneIncoming, Phone, Video, ImageDown } from 'lucide-react';
 import Avatar from './Avatar';
 import { VoicePlayer, ImageMessage, VideoMessage, FileCard } from './Media';
 
@@ -39,8 +39,33 @@ function Mentions({ text, big }) {
   );
 }
 
+// A photo of a mirrored Telegram channel not fetched yet: the first tap fetches it (through the
+// server's VPN, once) and the post becomes an ordinary photo for everyone.
+function PendingPhoto({ m }) {
+  const [busy, setBusy] = useState(false);
+  const p = m.pendingPhoto;
+  const ratio = p.width && p.height ? Math.min(1.6, Math.max(0.5, p.height / p.width)) : 0.66;
+  const load = async () => {
+    setBusy(true);
+    try {
+      const r = await api('POST', `/mirror-photos/${m.id}`, {}, { timeout: 120000 });
+      useStore.getState().updateMessage(r.message);
+    } catch (e) {
+      useStore.getState().showToast(e.message);
+      setBusy(false);
+    }
+  };
+  return (
+    <button className="pending-photo" style={{ aspectRatio: `1 / ${ratio}` }} onClick={load} disabled={busy} aria-label="نمایش عکس">
+      <ImageDown size={28} />
+      <span>{busy ? 'در حال دریافت از تلگرام…' : `نمایش عکس${p.size ? ` (${toFa(Math.max(1, Math.round(p.size / 1024)))} KB)` : ''}`}</span>
+    </button>
+  );
+}
+
 function Content({ m, mine }) {
   const f = m.file;
+  if (!f && m.pendingPhoto && m.type !== 'deleted') return <PendingPhoto m={m} />;
   if (!f) return null;
   if (f.purged)
     return (
@@ -92,7 +117,7 @@ function Message({ m, chat, mine, grouped, onJump, onMenu }) {
   const showSender = !mine && chat.type === 'group' && !grouped;
   const showAvatar = !mine && chat.type === 'group';
   const ticks = mine && chat.type !== 'saved' && chat.type !== 'channel' ? (chat.othersRead >= m.id ? 'read' : 'sent') : '';
-  const visual = (m.type === 'image' || m.type === 'video') && !m.file?.purged;
+  const visual = ((m.type === 'image' || m.type === 'video') && !m.file?.purged) || !!m.pendingPhoto;
   const bigEmoji = m.type === 'text' && !m.replyTo && !m.forwardedFrom && isBigEmoji(m.text);
 
   const openMenu = (e) => {

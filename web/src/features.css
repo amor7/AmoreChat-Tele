@@ -1359,3 +1359,76 @@ body:has(.room-view, .call-view) .toast {
   border-radius: 10px;
   background: #000;
 }
+
+/* Tele: find anyone / a channel, from the chat list */
+.tele-find {
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+}
+.tele-find-list {
+  max-height: 50vh;
+  overflow-y: auto;
+  margin-top: 6px;
+}
+.tele-find-list .chat-item {
+  cursor: default;
+}
+.tele-find-list .btn {
+  flex-shrink: 0;
+}
+/* Tele login: asking for the code by SMS / call */
+.tele-resend {
+  margin-top: 8px;
+  width: 100%;
+}
+/* Owner: mirrored channels */
+.tele-mirror-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 8px;
+  align-items: center;
+  margin: 8px 0;
+}
+.tele-mirror-form select {
+  min-width: 0;
+}
+.tele-invite {
+  display: flex;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+.tele-invite input {
+  flex: 1 1 200px;
+  min-width: 0;
+  font-size: 12px;
+}
+.tele-mirror .tele-user-ctl select {
+  max-width: 220px;
+}
+.tele-access-list {
+  max-height: 360px;
+  overflow-y: auto;
+  margin-top: 6px;
+}
+/* A mirrored Telegram photo not fetched yet */
+.pending-photo {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: min(320px, 70vw);
+  max-height: 360px;
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--panel-2);
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+}
+.pending-photo:hover:not(:disabled) {
+  color: var(--accent);
+}
+.pending-photo:disabled {
+  cursor: progress;
+}

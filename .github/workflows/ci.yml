@@ -47,9 +47,16 @@ jobs:
           CODE=$(grep -oP 'SETUP CODE: \K\S+' server-pen.log)
           node server/test/pentest.mjs http://127.0.0.1:3105 "$CODE"
           ! grep "\"level\":50" server-pen.log | grep -v "تماس و ویس‌چت روی این سرور فعال نیست"
+      - name: Tele access test (who may use Telegram, checks without Telegram)
+        run: |
+          DATA_DIR=/tmp/hs-tl PORT=3106 node server/src/index.js > server-tl.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf http://localhost:3106/healthz && break; sleep 1; done
+          CODE=$(grep -oP 'SETUP CODE: \K\S+' server-tl.log)
+          node server/test/tele-local.mjs http://127.0.0.1:3106 "$CODE"
+          ! grep "\"level\":50" server-tl.log
       - name: Server logs
         if: always()
-        run: cat server.log server-rtc.log server-acc.log server-pen.log
+        run: cat server.log server-rtc.log server-acc.log server-pen.log server-tl.log
 
   compose:
     runs-on: ubuntu-latest

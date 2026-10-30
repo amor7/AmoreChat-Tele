@@ -20,13 +20,15 @@ const MSG_SELECT = `
     f.mime AS f_mime, f.size AS f_size, f.name AS f_name, f.kind AS f_kind,
     f.width AS f_w, f.height AS f_h, f.duration AS f_dur, f.status AS f_status,
     f.variants AS f_variants, f.thumb AS f_thumb, f.waveform AS f_wave, f.purged AS f_purged,
-    ch.type AS chat_type, ch.title AS chat_title, ch.avatar_file_id AS chat_avatar, r.text AS r_text, r.type AS r_type, r.deleted AS r_deleted, ru.display_name AS r_sender
+    ch.type AS chat_type, ch.title AS chat_title, ch.avatar_file_id AS chat_avatar, r.text AS r_text, r.type AS r_type, r.deleted AS r_deleted, ru.display_name AS r_sender,
+    tp.message_id AS tp_id, tp.w AS tp_w, tp.h AS tp_h, tp.size AS tp_size
   FROM messages m
   LEFT JOIN users u ON u.id = m.sender_id
   LEFT JOIN files f ON f.id = m.file_id
   LEFT JOIN messages r ON r.id = m.reply_to
   LEFT JOIN users ru ON ru.id = r.sender_id
-  LEFT JOIN chats ch ON ch.id = m.chat_id`;
+  LEFT JOIN chats ch ON ch.id = m.chat_id
+  LEFT JOIN tele_mirror_photos tp ON tp.message_id = m.id`;
 
 // Reactions grouped per emoji: [{ emoji, users: [userId, ...] }]
 function reactionsFor(ids) {
@@ -100,6 +102,8 @@ export function serializeMessage(m, reactions = []) {
           sender: m.chat_type === 'channel' ? m.chat_title : m.r_sender,
         }
       : null,
+    // A mirrored Telegram photo not fetched yet: the first member to open it fetches it for everyone.
+    pendingPhoto: !deleted && m.tp_id ? { width: m.tp_w, height: m.tp_h, size: m.tp_size } : null,
     editedAt: m.edited_at,
     pinned: !!m.pinned,
     mentions: deleted || !m.mentions ? [] : parseJSON(m.mentions, []),
@@ -273,6 +277,11 @@ export function postMessage({ chatId, senderId = null, type = 'text', text = '',
 }
 
 export const systemMessage = (chatId, text) => postMessage({ chatId, type: 'system', text });
+
+/** A new user joins the channels every user should be in (mirrored channels set to "all"). */
+export function joinAutoChats(userId) {
+  for (const c of all('SELECT id FROM chats WHERE auto_join = 1')) addMember(c.id, userId, 'member', { silent: true });
+}
 
 export function addMember(chatId, userId, role = 'member', { silent = false } = {}) {
   const r = run(

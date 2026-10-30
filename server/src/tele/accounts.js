@@ -2,7 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { get, all, run, now, DATA_DIR } from '../db.js';
-import { settingNumber } from '../settings.js';
+import { settingNumber, getSetting } from '../settings.js';
 import { ensureEgress, egressStatus } from './egress.js';
 import { teleAlert } from './alerts.js';
 
@@ -23,7 +23,8 @@ const TEST_DC = process.env.TELE_TEST_DC === '1';
  * The account's TDLib client, opened again from its saved session when needed (after a server
  * restart, or after it was closed for being idle). No new login is needed for that.
  */
-export async function liveClient(account, { ignoreQuota = false } = {}) {
+export async function liveClient(account, { ignoreQuota = false, ignoreAccess = false } = {}) {
+  if (!ignoreAccess) assertTeleAllowed(account.user_id);
   if (!ignoreQuota) assertQuota(account);
   const handle = live.get(account.id);
   if (handle?.client) {
@@ -70,6 +71,31 @@ setInterval(async () => {
     if (Date.now() - (h.lastUsed || 0) > limit) closeLive(id);
   }
 }, Number(process.env.TELE_SWEEP_MS) || 60000).unref();
+
+// ---------- Who may use Telegram ----------
+// The setting tele_access: everyone, nobody, only the listed users, or everyone but them. The owner
+// always may. Closing it for someone keeps their Telegram session: it works again once reopened.
+export const ACCESS_MODES = ['all', 'none', 'allow', 'deny'];
+export function teleAccessMode() {
+  const m = getSetting('tele_access');
+  return ACCESS_MODES.includes(m) ? m : 'all';
+}
+export function teleAllowed(userOrId) {
+  const user = typeof userOrId === 'object' && userOrId ? userOrId : get('SELECT id, role FROM users WHERE id = ?', Number(userOrId));
+  if (!user) return false;
+  if (user.role === 'owner') return true;
+  const mode = teleAccessMode();
+  if (mode === 'all' || mode === 'none') return mode === 'all';
+  const listed = !!get('SELECT 1 FROM tele_access WHERE user_id = ?', user.id);
+  return mode === 'allow' ? listed : !listed;
+}
+export function assertTeleAllowed(userOrId) {
+  if (!teleAllowed(userOrId)) throw Object.assign(new Error('دسترسی شما به تلگرام را مدیر بسته است'), { statusCode: 403, expose: true, access: true });
+}
+/** After the rules changed: close the open connections of users who may no longer use Telegram. */
+export async function enforceTeleAccess() {
+  for (const [id, h] of [...live]) if (!teleAllowed(h.userId)) await closeLive(id);
+}
 
 // ---------- Traffic per account and month, and the monthly cap ----------
 const thisMonth = () => new Date().toISOString().slice(0, 7);
@@ -201,7 +227,7 @@ export function publicAccount(row) {
   if (!row) return null;
   const s = String(row.phone || '');
   const phone = s.length < 6 ? '***' : s.slice(0, 4) + '***' + s.slice(-2);
-  return { id: row.id, phone, tgUserId: row.tg_user_id, displayName: row.display_name, username: row.username, status: row.status, allowShared: !!row.allow_shared, allowMedia: !!row.allow_media, allowVoice: !!row.allow_voice, allowFiles: !!row.allow_files, createdAt: row.created_at, updatedAt: row.updated_at };
+  return { id: row.id, phone, tgUserId: row.tg_user_id, displayName: row.display_name, username: row.username, status: row.status, allowShared: !!row.allow_shared, allowMedia: !!row.allow_media, allowVoice: !!row.allow_voice, allowFiles: !!row.allow_files, allowExplore: !!row.allow_explore, createdAt: row.created_at, updatedAt: row.updated_at };
 }
 export function listDialogs(accountId) {
   return all('SELECT * FROM tele_dialogs WHERE account_id = ? ORDER BY last_at DESC, title', accountId).map((d) => ({
@@ -218,8 +244,9 @@ export function setDialogSelected(accountId, dialogId, selected) {
 export async function beginLogin(userId, phone) {
   const phoneClean = String(phone || '').replace(/\s+/g, '');
   if (!/^\+?\d{8,15}$/.test(phoneClean)) throw Object.assign(new Error('شماره نامعتبر'), { statusCode: 400 });
+  assertTeleAllowed(userId);
   const cred = apiCredentials();
-  if (!cred.ok) throw Object.assign(new Error('TELEGRAM_API_ID و HASH تنظیم نشده'), { statusCode: 503 });
+  if (!cred.ok) throw Object.assign(new Error('کلیدهای تلگرام (TELEGRAM_API_ID و TELEGRAM_API_HASH) روی سرور تنظیم نشده'), { statusCode: 503, expose: true });
   try { await ensureEgress(); } catch (e) { throw Object.assign(new Error('تونل آماده نیست: ' + e.message), { statusCode: 503, expose: true }); }
   let row = getAccountForUser(userId);
   const t = now();
@@ -250,12 +277,13 @@ export async function beginLogin(userId, phone) {
     }
     const status = { authorizationStateWaitCode: 'awaiting_code', authorizationStateWaitPassword: 'awaiting_password', authorizationStateReady: 'connected' }[state];
     if (!status) throw new Error(`وضعیت غیرمنتظره TDLib: ${state}`);
-    live.set(row.id, { client, phase: status === 'connected' ? 'ready' : status, userId, lastUsed: Date.now() });
+    const codeInfo = status === 'awaiting_code' ? await readCodeInfo(client) : null;
+    live.set(row.id, { client, phase: status === 'connected' ? 'ready' : status, userId, lastUsed: Date.now(), codeInfo });
     run(`UPDATE tele_accounts SET status = ?, updated_at = ? WHERE id = ?`, status, now(), row.id);
     // The saved session was still logged in: no code needed, but keep who the account is.
     if (status === 'connected') return loggedIn(row, live.get(row.id));
     const result = { awaiting_code: 'code_required', awaiting_password: 'password_required', connected: 'ready' }[status];
-    return { status: result, account: publicAccount(getAccountForUser(userId)) };
+    return { status: result, codeInfo, account: publicAccount(getAccountForUser(userId)) };
   } catch (e) {
     if (client) await client.close().catch(() => {});
     live.delete(row.id);
@@ -285,6 +313,44 @@ async function authState(client, timeoutMs = 20000) {
     await new Promise((r) => setTimeout(r, 200));
   }
 }
+// How Telegram sent the login code, and the other way it offers (SMS, a call…) once `timeout` has passed.
+const CODE_VIA = {
+  authenticationCodeTypeTelegramMessage: 'app', authenticationCodeTypeSms: 'sms', authenticationCodeTypeSmsWord: 'sms', authenticationCodeTypeSmsPhrase: 'sms',
+  authenticationCodeTypeCall: 'call', authenticationCodeTypeFlashCall: 'flash', authenticationCodeTypeMissedCall: 'missed', authenticationCodeTypeFragment: 'fragment',
+  authenticationCodeTypeFirebaseAndroid: 'sms', authenticationCodeTypeFirebaseIos: 'sms',
+};
+async function readCodeInfo(client) {
+  const s = await client.invoke({ _: 'getAuthorizationState' }).catch(() => null);
+  const ci = s?.code_info;
+  if (!ci) return null;
+  return { via: CODE_VIA[ci.type?._] || 'other', next: ci.next_type ? CODE_VIA[ci.next_type._] || 'other' : null, timeout: ci.timeout || 0, at: Date.now(), length: ci.type?.length || 0 };
+}
+export const loginCodeInfo = (accountId) => live.get(Number(accountId))?.codeInfo || null;
+
+/** Asks Telegram to send the code the other way it offers (SMS when it came in the app, then a call…). */
+export async function resendCode(userId) {
+  const row = getAccountForUser(userId);
+  if (!row) throw Object.assign(new Error('ابتدا شماره را وارد کنید'), { statusCode: 400 });
+  const handle = live.get(row.id);
+  if (!handle?.client || handle.phase !== 'awaiting_code') return loginExpired(row);
+  handle.lastUsed = Date.now();
+  try {
+    await handle.client.invoke({ _: 'resendAuthenticationCode', reason: { _: 'resendCodeReasonUserRequest' } });
+  } catch (e) {
+    const m = String(e?.message || e);
+    // e.g. "Too Many Requests: retry after 94" or FLOOD_WAIT_94
+    const secs = Number(m.match(/retry after (\d+)|FLOOD_WAIT_(\d+)/i)?.slice(1).find(Boolean)) || 0;
+    const msg = /FLOOD|TOO_MANY|Too Many Requests/i.test(m)
+      ? `تلگرام فعلاً اجازه نمی‌دهد؛ ${secs ? `${Math.ceil(secs / 60)} دقیقه` : 'کمی'} بعد دوباره «ارسال کد» را بزنید`
+      : /SEND_CODE_UNAVAILABLE|not available|PHONE_CODE_EXPIRED|unavailable/i.test(m)
+        ? 'تلگرام راه دیگری برای فرستادن کد پیشنهاد نمی‌کند؛ «شماره دیگر» را بزنید و دوباره شماره را بفرستید'
+        : `تلگرام: ${m}`;
+    throw Object.assign(new Error(msg), { statusCode: 400, expose: true });
+  }
+  handle.codeInfo = await readCodeInfo(handle.client);
+  return { status: 'code_required', codeInfo: handle.codeInfo, account: publicAccount(getAccountForUser(userId)) };
+}
+
 export async function submitCode(userId, code) {
   const row = getAccountForUser(userId);
   if (!row) throw Object.assign(new Error('ابتدا شماره را وارد کنید'), { statusCode: 400 });
@@ -362,7 +428,7 @@ export async function disconnectAccount(userId) {
   const row = getAccountForUser(userId);
   if (!row) return { ok: true };
   // Closed for being idle: open it once more, so the session is also ended on Telegram's side.
-  const client = live.get(row.id)?.client || (row.status === 'connected' ? await liveClient(row, { ignoreQuota: true }).catch(() => null) : null);
+  const client = live.get(row.id)?.client || (row.status === 'connected' ? await liveClient(row, { ignoreQuota: true, ignoreAccess: true }).catch(() => null) : null);
   if (client) { try { await client.invoke({ _: 'logOut' }); } catch {} }
   await closeLive(row.id);
   run(`UPDATE tele_accounts SET status = 'disconnected', session_dir = '', tg_user_id = NULL, display_name = '', username = '', db_encrypted = 0 WHERE id = ?`, row.id);
