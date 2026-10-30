@@ -338,8 +338,10 @@ export async function resendCode(userId) {
     await handle.client.invoke({ _: 'resendAuthenticationCode', reason: { _: 'resendCodeReasonUserRequest' } });
   } catch (e) {
     const m = String(e?.message || e);
-    const msg = /FLOOD|TOO_MANY/i.test(m)
-      ? 'درخواست زیاد بود؛ تلگرام چند دقیقه اجازه نمی‌دهد. کمی بعد دوباره امتحان کنید'
+    // e.g. "Too Many Requests: retry after 94" or FLOOD_WAIT_94
+    const secs = Number(m.match(/retry after (\d+)|FLOOD_WAIT_(\d+)/i)?.slice(1).find(Boolean)) || 0;
+    const msg = /FLOOD|TOO_MANY|Too Many Requests/i.test(m)
+      ? `تلگرام فعلاً اجازه نمی‌دهد؛ ${secs ? `${Math.ceil(secs / 60)} دقیقه` : 'کمی'} بعد دوباره «ارسال کد» را بزنید`
       : /SEND_CODE_UNAVAILABLE|not available|PHONE_CODE_EXPIRED|unavailable/i.test(m)
         ? 'تلگرام راه دیگری برای فرستادن کد پیشنهاد نمی‌کند؛ «شماره دیگر» را بزنید و دوباره شماره را بفرستید'
         : `تلگرام: ${m}`;
