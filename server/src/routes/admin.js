@@ -155,6 +155,7 @@ export default async function adminRoutes(app) {
     const b = req.body || {};
     for (const key of Object.keys(b)) {
       if (!(key in DEFAULTS)) continue;
+      if (b[key] !== null && typeof b[key] === 'object') fail(400, 'مقدار نامعتبر');
       let v = String(b[key]);
       if (key === 'registration_mode' && !['open', 'invite', 'closed'].includes(v)) fail(400, 'حالت ثبت‌نام نامعتبر');
       if (key === 'allow_user_groups' || key === 'discover_list') v = v === '1' || v === 'true' ? '1' : '0';
@@ -162,7 +163,9 @@ export default async function adminRoutes(app) {
       if (key === 'max_stream_quality' && !['480', '720', '1080'].includes(v)) fail(400, 'کیفیت نامعتبر');
       if (key === 'max_stream_fps' && !['30', '60'].includes(v)) fail(400, 'نرخ فریم نامعتبر');
       if (['max_upload_mb', 'user_quota_mb', 'media_retention_days', 'max_streams_per_room'].includes(key)) {
-        v = String(Math.max(0, Math.min(100000, Math.floor(Number(v)) || 0)));
+        const n = Number(b[key]);
+        if (typeof b[key] === 'object' || !Number.isFinite(n)) fail(400, 'عدد نامعتبر');
+        v = String(Math.max(key === 'max_upload_mb' ? 1 : 0, Math.min(100000, Math.floor(n))));
       }
       if (key === 'site_name') v = v.trim().slice(0, 50) || DEFAULTS.site_name;
       setSetting(key, v);

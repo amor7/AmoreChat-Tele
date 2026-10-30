@@ -125,7 +125,7 @@ export const overQuota = (account) => {
   const q = quotaOf(account);
   return q > 0 && usageOf(account.id).used >= q * 1048576;
 };
-function assertQuota(account) {
+export function assertQuota(account) {
   if (!overQuota(account)) return;
   throw Object.assign(new Error(`سقف مصرف ماهانه تلگرام شما (${quotaOf(account)} مگابایت) تمام شده است؛ پیام‌های ذخیره‌شده دیده می‌شوند. برای افزایش سقف به مدیر خبر دهید.`), { statusCode: 429, expose: true, quota: true });
 }
@@ -201,7 +201,7 @@ export function publicAccount(row) {
   if (!row) return null;
   const s = String(row.phone || '');
   const phone = s.length < 6 ? '***' : s.slice(0, 4) + '***' + s.slice(-2);
-  return { id: row.id, phone, tgUserId: row.tg_user_id, displayName: row.display_name, username: row.username, status: row.status, allowShared: !!row.allow_shared, allowMedia: !!row.allow_media, allowVoice: !!row.allow_voice, createdAt: row.created_at, updatedAt: row.updated_at };
+  return { id: row.id, phone, tgUserId: row.tg_user_id, displayName: row.display_name, username: row.username, status: row.status, allowShared: !!row.allow_shared, allowMedia: !!row.allow_media, allowVoice: !!row.allow_voice, allowFiles: !!row.allow_files, createdAt: row.created_at, updatedAt: row.updated_at };
 }
 export function listDialogs(accountId) {
   return all('SELECT * FROM tele_dialogs WHERE account_id = ? ORDER BY last_at DESC, title', accountId).map((d) => ({
@@ -451,4 +451,58 @@ async function useProxy(client, socks) {
       throw new Error('تنظیم پروکسی در TDLib ناموفق بود: ' + (e?.message || e));
     }
   }
+}
+
+// ---------- The account's sessions on Telegram (every app and device logged in to it) ----------
+const sessionError = (e) => {
+  const m = String(e?.message || e);
+  // Telegram lets a session end others only after it has existed for a while (24 hours).
+  if (/FRESH_RESET_AUTHORISATION_FORBIDDEN/i.test(m)) return Object.assign(new Error('تلگرام اجازه می‌دهد نشست‌های دیگر را فقط از نشستی ببندید که حداقل ۲۴ ساعت از ورودش گذشته باشد؛ از اپ تلگرام روی گوشی ببندید.'), { statusCode: 400, expose: true });
+  return Object.assign(new Error(`تلگرام: ${m}`), { statusCode: 502, expose: true });
+};
+async function connectedClient(userId) {
+  const account = getAccountForUser(userId);
+  if (!account || account.status !== 'connected') throw Object.assign(new Error('حساب تلگرام وصل نیست'), { statusCode: 400 });
+  await ensureEgress();
+  const client = await liveClient(account);
+  if (!client) throw Object.assign(new Error('اتصال به تلگرام برقرار نیست'), { statusCode: 503, expose: true });
+  return client;
+}
+export async function listTeleSessions(userId) {
+  const client = await connectedClient(userId);
+  const r = await client.invoke({ _: 'getActiveSessions' }).catch((e) => {
+    throw sessionError(e);
+  });
+  return (r.sessions || []).map((s) => ({
+    id: String(s.id),
+    current: !!s.is_current,
+    app: [s.application_name, s.application_version].filter(Boolean).join(' '),
+    device: [s.device_model, s.platform, s.system_version].filter(Boolean).join(' · '),
+    official: !!s.is_official_application,
+    ip: s.ip_address || '',
+    location: s.location || '',
+    loggedInAt: (s.log_in_date || 0) * 1000,
+    lastActiveAt: (s.last_active_date || 0) * 1000,
+    unconfirmed: !!s.is_unconfirmed,
+  }));
+}
+export async function endTeleSession(userId, sessionId) {
+  const id = String(sessionId || '');
+  if (!/^-?\d{1,20}$/.test(id)) throw Object.assign(new Error('نشست نامعتبر'), { statusCode: 400 });
+  const client = await connectedClient(userId);
+  const list = await listTeleSessions(userId);
+  const s = list.find((x) => x.id === id);
+  if (!s) throw Object.assign(new Error('نشست پیدا نشد'), { statusCode: 404 });
+  if (s.current) throw Object.assign(new Error('این نشست همین برنامه است؛ برای خروج از «خروج از حساب تلگرام» استفاده کنید'), { statusCode: 400 });
+  await client.invoke({ _: 'terminateSession', session_id: id }).catch((e) => {
+    throw sessionError(e);
+  });
+  return listTeleSessions(userId);
+}
+export async function endOtherTeleSessions(userId) {
+  const client = await connectedClient(userId);
+  await client.invoke({ _: 'terminateAllOtherSessions' }).catch((e) => {
+    throw sessionError(e);
+  });
+  return listTeleSessions(userId);
 }

@@ -40,9 +40,16 @@ jobs:
           for i in $(seq 1 30); do curl -sf http://localhost:3104/healthz && break; sleep 1; done
           CODE=$(grep -oP 'SETUP CODE: \K\S+' server-acc.log)
           node server/test/account.mjs http://127.0.0.1:3104 "$CODE"
+      - name: Penetration test (access control, CSRF, IDOR, injection, traversal, XSS, sessions, brute force, IP bans)
+        run: |
+          DATA_DIR=/tmp/hs-pen PORT=3105 node server/src/index.js > server-pen.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf http://localhost:3105/healthz && break; sleep 1; done
+          CODE=$(grep -oP 'SETUP CODE: \K\S+' server-pen.log)
+          node server/test/pentest.mjs http://127.0.0.1:3105 "$CODE"
+          ! grep "\"level\":50" server-pen.log | grep -v "تماس و ویس‌چت روی این سرور فعال نیست"
       - name: Server logs
         if: always()
-        run: cat server.log server-rtc.log server-acc.log
+        run: cat server.log server-rtc.log server-acc.log server-pen.log
 
   compose:
     runs-on: ubuntu-latest
@@ -87,7 +94,7 @@ jobs:
           set -x -o pipefail
           mkdir -p /tmp/rel
           git archive --format=tar.gz --prefix=amorechat/ -o /tmp/rel/amorechat-source.tar.gz HEAD
-          sudo FORCE=1 bash deploy/update.sh /tmp/rel 2>&1 | tee /tmp/update.log
+          sudo AMORECHAT_ALLOW_UNSIGNED=1 FORCE=1 bash deploy/update.sh /tmp/rel 2>&1 | tee /tmp/update.log
           grep -q 'is running' /tmp/update.log
           for i in $(seq 1 60); do curl -sf --cacert /tmp/ca.crt https://127.0.0.1/healthz && break; sleep 2; done
           curl -sf --cacert /tmp/ca.crt https://127.0.0.1/api/config | grep -q '"version"'

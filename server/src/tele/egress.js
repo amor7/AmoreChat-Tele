@@ -315,6 +315,10 @@ export const ensureEgress = () =>
     lastError = '';
     writePrivate(PID_PATH, String(child.pid));
     return { host: LOCAL_SOCKS_HOST, port: LOCAL_SOCKS_PORT, proxyId: proxy.id };
+  }).catch((e) => {
+    // The tunnel is not there (no healthy proxy, Tele off, sing-box failed).
+    e.egress = true;
+    throw e;
   });
 
 /**

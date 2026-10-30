@@ -101,7 +101,7 @@ jobs:
           printf 'DOMAIN=127.0.0.1\nTLS_MODE=internal\nBACKUP_KEEP=14\nLOG_LEVEL=info\n' > .env
           mkdir -p data certs && sudo chown -R 1000:1000 data
           sudo bash deploy/ensure-env.sh
-          sudo FORCE=1 bash deploy/update.sh /tmp/relA 2>&1 | tee /tmp/updA.log
+          sudo AMORECHAT_ALLOW_UNSIGNED=1 FORCE=1 bash deploy/update.sh /tmp/relA 2>&1 | tee /tmp/updA.log
           grep -q 'is running' /tmp/updA.log
           for i in $(seq 1 60); do curl -skf https://127.0.0.1/healthz && break; sleep 2; done
           curl -skf https://127.0.0.1/api/config | grep -q '"version"'
@@ -119,7 +119,25 @@ jobs:
           mkdir /tmp/relB-small
           cp /tmp/relB/manifest.json /tmp/relB/amorechat-app.tar.gz /tmp/relB/amorechat-source.tar.gz /tmp/relB-small/
           docker tag caddy:2.11.7-alpine caddy:2-alpine && docker rmi caddy:2.11.7-alpine
+          # Release signature: a test key stands in for the project's (its public key replaces the installed one).
+          openssl genpkey -algorithm ed25519 -out /tmp/ci-release.key
+          openssl pkey -in /tmp/ci-release.key -pubout -out /tmp/ci-release.pub
+          sudo cp /tmp/ci-release.pub deploy/release-signing.pub
+          OLD_VERSION=$(curl -skf https://127.0.0.1/api/config | grep -o '"version":"[^"]*"')
+          ! sudo FORCE=1 bash deploy/update.sh /tmp/relB-small 2>&1 | tee /tmp/updUnsigned.log
+          grep -q 'no release signature' /tmp/updUnsigned.log
+          (cd /tmp/relB-small && sha256sum * > SHA256SUMS && openssl pkeyutl -sign -inkey /tmp/ci-release.key -rawin -in SHA256SUMS -out SHA256SUMS.sig)
+          cp -r /tmp/relB-small /tmp/relB-bad && printf x >> /tmp/relB-bad/amorechat-app.tar.gz
+          ! sudo FORCE=1 bash deploy/update.sh /tmp/relB-bad 2>&1 | tee /tmp/updBad.log
+          grep -q 'does not match the signed release' /tmp/updBad.log
+          # Refused before anything was unpacked: still the old version.
+          [ "$(curl -skf https://127.0.0.1/api/config | grep -o '"version":"[^"]*"')" = "$OLD_VERSION" ]
+          openssl genpkey -algorithm ed25519 -out /tmp/other.key
+          cp -r /tmp/relB-small /tmp/relB-forged && (cd /tmp/relB-forged && openssl pkeyutl -sign -inkey /tmp/other.key -rawin -in SHA256SUMS -out SHA256SUMS.sig)
+          ! sudo FORCE=1 bash deploy/update.sh /tmp/relB-forged 2>&1 | tee /tmp/updForged.log
+          grep -q 'signature is NOT valid' /tmp/updForged.log
           sudo FORCE=1 bash deploy/update.sh /tmp/relB-small 2>&1 | tee /tmp/updB.log
+          grep -q 'Release signature OK' /tmp/updB.log
           docker image inspect caddy:2.11.7-alpine >/dev/null
           grep -q 'Runtime .* already here' /tmp/updB.log
           grep -q 'Caddy and LiveKit already up to date' /tmp/updB.log

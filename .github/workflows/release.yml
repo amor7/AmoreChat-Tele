@@ -43,12 +43,27 @@ jobs:
           bash deploy/make-docker-bundle.sh 24.04 .
           bash deploy/make-docker-bundle.sh 22.04 .
           ls -lh *.tar.gz manifest.json
+      - name: Sign the release (SHA256SUMS + signature; update.sh refuses files that don't match)
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: |
+          [ -n "$RELEASE_SIGNING_KEY" ] || { echo "::error::RELEASE_SIGNING_KEY secret is missing"; exit 1; }
+          umask 077
+          printf '%s\n' "$RELEASE_SIGNING_KEY" > /tmp/release.key
+          sha256sum *.tar.gz *.apk manifest.json > SHA256SUMS
+          openssl pkeyutl -sign -inkey /tmp/release.key -rawin -in SHA256SUMS -out SHA256SUMS.sig
+          rm -f /tmp/release.key
+          # The key in the repository must verify it (the one installed servers use).
+          bash deploy/verify-release.sh . deploy/release-signing.pub
+          cat SHA256SUMS
       - uses: actions/upload-artifact@v4
         with:
           name: amorechat-offline
           path: |
             *.tar.gz
             manifest.json
+            SHA256SUMS
+            SHA256SUMS.sig
       - name: Release notes from CHANGELOG.md
         run: |
           awk -v tag="## ${GITHUB_REF_NAME}" '$0==tag{f=1;next} /^## /{f=0} f' CHANGELOG.md > notes.md
@@ -62,4 +77,6 @@ jobs:
             *.tar.gz
             *.apk
             manifest.json
+            SHA256SUMS
+            SHA256SUMS.sig
           body_path: notes.md

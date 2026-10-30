@@ -48,6 +48,7 @@ export default async function messageRoutes(app) {
 
   app.get('/api/search', async (req) => {
     const terms = String(req.query.q || '')
+      .replace(/[\u0000-\u001f\u007f]/g, ' ')
       .trim()
       .split(/\s+/)
       .filter(Boolean)
@@ -56,7 +57,9 @@ export default async function messageRoutes(app) {
     // Each term becomes a quoted prefix query so user input can't inject FTS syntax.
     const match = terms.map((t) => `"${t.replace(/"/g, '""')}"*`).join(' ');
     const chatId = Number(req.query.chatId) || null;
-    const ids = all(
+    let ids = [];
+    try {
+      ids = all(
       `SELECT m.id FROM messages_fts f
        JOIN messages m ON m.id = f.rowid
        JOIN chat_members cm ON cm.chat_id = m.chat_id AND cm.user_id = ?
@@ -67,6 +70,10 @@ export default async function messageRoutes(app) {
       chatId,
       chatId,
     ).map((r) => r.id);
+    } catch {
+      // Whatever the search text was, a query it can't run finds nothing (never a server error).
+      ids = [];
+    }
     return { messages: loadMessagesByIds(ids) };
   });
 

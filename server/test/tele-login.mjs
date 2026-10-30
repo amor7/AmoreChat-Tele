@@ -14,6 +14,7 @@ for (const k of ['TELEGRAM_API_ID', 'TELEGRAM_API_HASH', 'TG_TEST_PHONE', 'TG_TE
   if (!env(k)) throw new Error(`${k} is not set`);
 }
 const GROUP_TITLE = 'AmoreChat E2E';
+const CHANNEL_TITLE = 'AmoreChat E2E channel';
 
 const tdl = await import('tdl');
 const { getTdjson } = await import('prebuilt-tdlib');
@@ -62,13 +63,21 @@ try {
     const bot = await (await fetch(`https://api.telegram.org/bot${env('TG_TEST_BOT_TOKEN')}/getMe`)).json();
     if (!bot.ok) throw new Error(`TG_TEST_BOT_TOKEN refused: ${bot.description}`);
     const botChat = await client.invoke({ _: 'searchPublicChat', username: bot.result.username });
+    // The bot's id as Telegram (TDLib) knows it.
+    const botUserId = botChat.type?.user_id;
+    if (!botUserId) throw new Error('the bot was not found');
     const hist = await client.invoke({ _: 'getChatHistory', chat_id: botChat.id, from_message_id: 0, offset: 0, limit: 1, only_local: false });
     if (!hist.messages?.length) {
       await client.invoke({ _: 'sendMessage', chat_id: botChat.id, input_message_content: { _: 'inputMessageText', text: { _: 'formattedText', text: '/start' } } });
     }
     // A group of the account and the bot (made once; its id is kept).
     const metaFile = path.join(dir, 'meta.json');
-    const meta = fs.existsSync(metaFile) ? JSON.parse(fs.readFileSync(metaFile, 'utf8')) : {};
+    let meta = {};
+    try {
+      meta = JSON.parse(fs.readFileSync(metaFile, 'utf8'));
+    } catch {
+      /* first run */
+    }
     let groupChatId = meta.groupChatId;
     if (groupChatId) {
       try {
@@ -79,11 +88,38 @@ try {
       }
     }
     if (!groupChatId) {
-      const g = await client.invoke({ _: 'createNewBasicGroupChat', user_ids: [bot.result.id], title: GROUP_TITLE, message_auto_delete_time: 0 });
+      const g = await client.invoke({ _: 'createNewBasicGroupChat', user_ids: [botUserId], title: GROUP_TITLE, message_auto_delete_time: 0 });
       groupChatId = g.chat_id ?? g.id;
       console.log('group made');
     }
-    fs.writeFileSync(metaFile, JSON.stringify({ userId: me.id, botUserId: bot.result.id, botChatId: botChat.id, groupChatId, groupTitle: GROUP_TITLE }), { mode: 0o600 });
+    // A channel of the account where the bot posts (for mirroring channels into the app).
+    let channelChatId = meta.channelChatId;
+    if (channelChatId) {
+      try {
+        const c = await client.invoke({ _: 'getChat', chat_id: channelChatId });
+        if (c.title !== CHANNEL_TITLE) channelChatId = null;
+      } catch {
+        channelChatId = null;
+      }
+    }
+    if (!channelChatId) {
+      const c = await client.invoke({ _: 'createNewSupergroupChat', title: CHANNEL_TITLE, is_forum: false, is_channel: true, description: 'AmoreChat test', location: null, message_auto_delete_time: 0, for_import: false });
+      channelChatId = c.id;
+      console.log('channel made');
+    }
+    await client.invoke({
+      _: 'setChatMemberStatus',
+      chat_id: channelChatId,
+      member_id: { _: 'messageSenderUser', user_id: botUserId },
+      status: { _: 'chatMemberStatusAdministrator', can_be_edited: true, rights: { _: 'chatAdministratorRights', can_manage_chat: true, can_post_messages: true, can_edit_messages: true, can_delete_messages: true } },
+    });
+    // Only numbers from the network go into the file.
+    const ids = { userId: me.id, botUserId, botChatId: botChat.id, groupChatId, channelChatId };
+    for (const [k, v] of Object.entries(ids)) {
+      if (!Number.isSafeInteger(Number(v))) throw new Error(`unexpected ${k}`);
+      ids[k] = Number(v);
+    }
+    fs.writeFileSync(metaFile, JSON.stringify({ ...ids, groupTitle: GROUP_TITLE, channelTitle: CHANNEL_TITLE }), { mode: 0o600 });
     console.log('\nReady: the Tele e2e test can now use this account.');
   }
 } catch (e) {

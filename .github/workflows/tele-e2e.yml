@@ -81,7 +81,7 @@ jobs:
           if-no-files-found: ignore
       - name: Re-save the session (refreshes its place in the cache)
         if: always() && env.TELE_SESSION_DIR != ''
-        run: tar cz -C /tmp/sess tele-session | openssl enc -aes-256-cbc -pbkdf2 -salt -pass env:SESSION_KEY -out tele-session.enc
+        run: tar cz -C /tmp/sess tele-session $([ -d /tmp/sess/tele-bot ] && echo tele-bot) | openssl enc -aes-256-cbc -pbkdf2 -salt -pass env:SESSION_KEY -out tele-session.enc
       - uses: actions/cache/save@v4
         if: always() && env.TELE_SESSION_DIR != '' && github.event_name != 'pull_request'
         with:

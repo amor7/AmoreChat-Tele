@@ -59,12 +59,47 @@ TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 BASE="https://github.com/${REPO}/releases/download/${TAG}"
 
+# Release signature: SHA256SUMS signed with the project's key. It is checked with the key of the
+# version installed NOW (before anything new is unpacked), and every file used below must match it,
+# so files changed on the way (download, USB stick) are refused.
+SIG="$TMP/sig"
+mkdir -p "$SIG"
+if [ -n "$LOCAL" ]; then
+  cp "$LOCAL/SHA256SUMS" "$LOCAL/SHA256SUMS.sig" "$SIG/" 2>/dev/null || true
+else
+  curl -fsSL --retry 3 -o "$SIG/SHA256SUMS" "${BASE}/SHA256SUMS" 2>/dev/null && curl -fsSL --retry 3 -o "$SIG/SHA256SUMS.sig" "${BASE}/SHA256SUMS.sig" 2>/dev/null || true
+fi
+SIGNED=""
+if [ -f "$SIG/SHA256SUMS.sig" ] && [ -f deploy/release-signing.pub ]; then
+  # Offline: every file of the folder is checked now, before anything is unpacked.
+  bash deploy/verify-release.sh "${LOCAL:-$SIG}" "$PWD/deploy/release-signing.pub" || exit 1
+  SIGNED=1
+elif [ -f deploy/release-signing.pub ] && [ "${AMORECHAT_ALLOW_UNSIGNED:-}" != "1" ]; then
+  echo "!! ${TAG} has no release signature (SHA256SUMS + SHA256SUMS.sig)."
+  [ -n "$LOCAL" ] && echo "   Copy those two files from the release next to the others."
+  echo "   Only for a version from before signing: AMORECHAT_ALLOW_UNSIGNED=1 sudo amorechat-update ${TAG}"
+  exit 1
+fi
+# check <name in the release> <file>: matches the signed list (when the release is signed).
+check() {
+  [ -n "$SIGNED" ] || return 0
+  local want
+  want=$(awk -v n="$1" '{ sub(/^\*/, "", $2) } $2 == n { print $1 }' "$SIG/SHA256SUMS")
+  if [ -z "$want" ] || [ "$(sha256sum < "$2" | cut -d' ' -f1)" != "$want" ]; then
+    echo "!! $1 does not match the signed release (changed or damaged); nothing was installed."
+    rm -f "$CACHE/$1" 2>/dev/null || true
+    exit 1
+  fi
+}
+CACHE=/var/cache/amorechat
+
 if [ -n "$LOCAL" ]; then
   cp "$LOCAL/amorechat-source.tar.gz" "$TMP/source.tar.gz"
 else
   echo ">> Downloading ${TAG} source..."
   curl -fL --retry 3 -o "$TMP/source.tar.gz" "${BASE}/amorechat-source.tar.gz" || { echo "!! Version ${TAG} not found."; exit 1; }
 fi
+check amorechat-source.tar.gz "$TMP/source.tar.gz"
 if [ -d .git ] && [ -z "$LOCAL" ]; then
   # Git checkout: move to the release tag so `git status` stays clean.
   git fetch -q --tags --force origin && git checkout -q -f "$TAG"
@@ -106,6 +141,7 @@ if [ -n "$LOCAL" ]; then
 elif [ "$(uname -m)" = "x86_64" ] && curl -fsSL --retry 3 -o "$TMP/manifest.json" "${BASE}/manifest.json"; then
   MANIFEST="$TMP/manifest.json"
 fi
+[ -n "$MANIFEST" ] && check manifest.json "$MANIFEST"
 
 LOADED=""
 if [ -n "$MANIFEST" ]; then
@@ -126,6 +162,7 @@ if [ -n "$MANIFEST" ]; then
   if docker image inspect "amorechat-runtime:$RUNTIME" >/dev/null 2>&1; then
     echo ">> Runtime $RUNTIME already here (no download)"
   elif f=$(get "amorechat-runtime-$RUNTIME-amd64.tar.gz"); then
+    check "amorechat-runtime-$RUNTIME-amd64.tar.gz" "$f"
     gunzip -c "$f" | docker load
   else
     echo "!! This version needs amorechat-runtime-$RUNTIME-amd64.tar.gz (or the full amorechat-offline-amd64.tar.gz) from the release"
@@ -133,11 +170,13 @@ if [ -n "$MANIFEST" ]; then
   if [ -z "$NEED_DEPS" ]; then
     echo ">> Caddy and LiveKit already up to date (no download)"
   elif f=$(get "amorechat-deps-$DEPS-amd64.tar.gz"); then
+    check "amorechat-deps-$DEPS-amd64.tar.gz" "$f"
     gunzip -c "$f" | docker load
   else
     echo "!! New Caddy/LiveKit: also copy amorechat-deps-$DEPS-amd64.tar.gz from the release (the old ones keep working meanwhile)"
   fi
   if docker image inspect "amorechat-runtime:$RUNTIME" >/dev/null 2>&1 && f=$(get amorechat-app.tar.gz); then
+    check amorechat-app.tar.gz "$f"
     echo ">> Building the new version on this server (no internet needed)..."
     mkdir -p "$TMP/app"
     tar xzf "$f" -C "$TMP/app"
@@ -147,8 +186,10 @@ fi
 if [ -z "$LOADED" ]; then
   # Older releases (one big file) or a folder holding only the full bundle.
   if [ -n "$LOCAL" ] && [ -f "$LOCAL/amorechat-offline-amd64.tar.gz" ]; then
+    check amorechat-offline-amd64.tar.gz "$LOCAL/amorechat-offline-amd64.tar.gz"
     gunzip -c "$LOCAL/amorechat-offline-amd64.tar.gz" | docker load && LOADED=1
   elif [ -z "$LOCAL" ] && [ "$(uname -m)" = "x86_64" ] && f=$(get amorechat-offline-amd64.tar.gz); then
+    check amorechat-offline-amd64.tar.gz "$f"
     gunzip -c "$f" | docker load && LOADED=1
   fi
 fi

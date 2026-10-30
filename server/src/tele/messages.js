@@ -3,7 +3,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { get, all, run, now, DATA_DIR } from '../db.js';
 import { settingNumber } from '../settings.js';
-import { getAccountForUser, liveClient, listDialogs, upsertDialog, onTeleUpdate } from './accounts.js';
+import { getAccountForUser, liveClient, listDialogs, upsertDialog, onTeleUpdate, assertQuota, overQuota } from './accounts.js';
 import { ensureEgress } from './egress.js';
 import { ffmpeg, mediaReady } from '../media.js';
 
@@ -15,7 +15,7 @@ export function listStoredMessages(accountId, dialogId, { limit = 50, beforeTgId
   // Telegram's own message ids give the real order (rows from a later "load older" have higher row ids).
   const rows = beforeTgId
     ? all(`SELECT * FROM tele_messages WHERE account_id = ? AND dialog_id = ? AND tg_msg_id < ? ORDER BY tg_msg_id DESC LIMIT ?`, accountId, dialogId, Number(beforeTgId), n)
-    : all(`SELECT * FROM tele_messages WHERE account_id = ? AND dialog_id = ? ORDER BY tg_msg_id DESC, id DESC LIMIT ?`, accountId, dialogId, n);
+    : all(`SELECT * FROM tele_messages WHERE account_id = ? AND dialog_id = ? ORDER BY tg_msg_id IS NULL DESC, tg_msg_id DESC, id DESC LIMIT ?`, accountId, dialogId, n);
   return rows.reverse();
 }
 
@@ -35,7 +35,26 @@ function voiceInfo(content) {
   const v = content.voice_note;
   return { type: 'voice', duration: v.duration || 0, mime: v.mime_type || '', size: v.voice?.size || v.voice?.expected_size || 0, remote: v.voice?.remote?.id || '', wave: v.waveform || '' };
 }
-const mediaInfo = (content) => photoInfo(content) || voiceInfo(content);
+// Files, videos, music and GIFs: name, size and the file to fetch on request (never on their own).
+function fileInfo(content) {
+  const pick = {
+    messageDocument: [content?.document, content?.document?.document, 'fileTypeDocument'],
+    messageVideo: [content?.video, content?.video?.video, 'fileTypeVideo'],
+    messageAudio: [content?.audio, content?.audio?.audio, 'fileTypeAudio'],
+    messageAnimation: [content?.animation, content?.animation?.animation, 'fileTypeAnimation'],
+  }[content?._];
+  if (!pick || !pick[0] || !pick[1]) return null;
+  const [m, f, fileType] = pick;
+  const video = content._ === 'messageVideo' || content._ === 'messageAnimation';
+  const ext = video ? '.mp4' : content._ === 'messageAudio' ? '.mp3' : '';
+  return {
+    type: 'file', fileType, video, gif: content._ === 'messageAnimation',
+    name: String(m.file_name || m.title || (video ? 'video' : 'file') + ext).slice(0, 200),
+    mime: m.mime_type || '', size: f.size || f.expected_size || 0, remote: f.remote?.id || '',
+    duration: m.duration || 0, w: m.width || 0, h: m.height || 0, mini: m.minithumbnail?.data || '',
+  };
+}
+const mediaInfo = (content) => photoInfo(content) || voiceInfo(content) || fileInfo(content);
 const parseMedia = (s) => {
   try {
     return s ? JSON.parse(s) : null;
@@ -69,6 +88,7 @@ export function publicMessage(row, quoted = null) {
     createdAt: row.created_at, senderId: row.sender_id || '', senderName: row.sender_name || '', replyTo,
     photo: media?.type === 'photo' ? { w: media.w, h: media.h, mini: media.mini } : null,
     voice: media?.type === 'voice' ? { duration: media.duration, wave: media.wave, size: media.size } : null,
+    file: media?.type === 'file' ? { name: media.name, size: media.size, mime: media.mime, video: media.video, gif: media.gif, duration: media.duration, w: media.w, h: media.h, mini: media.mini } : null,
   };
 }
 function storeMessage(accountId, dialogId, { tgMsgId, direction, kind, text, createdAt, senderId = '', senderName = '', replyTo = null, media = null }) {
@@ -109,7 +129,7 @@ export function contentText(content) {
   if (content._ === 'messageDocument' && content.document?.file_name) return `${label}: ${content.document.file_name}${caption ? '\n' + caption : ''}`;
   return caption ? `${label}\n${caption}` : label;
 }
-const kindOf = (content) => ({ messageText: 'text', messagePhoto: 'photo', messageVoiceNote: 'voice' })[content?._] || 'other';
+const kindOf = (content) => ({ messageText: 'text', messagePhoto: 'photo', messageVoiceNote: 'voice', messageDocument: 'file', messageVideo: 'file', messageAudio: 'file', messageAnimation: 'file' })[content?._] || 'other';
 
 // Display names of senders, per TDLib client (users and chats rarely change name).
 const names = new WeakMap();
@@ -281,8 +301,16 @@ export async function searchDialogMessages(userId, dialogId, query) {
 async function sendContent(userId, dialogId, content, { replyTo = null, text = '', kind = 'text', media = null } = {}) {
   const { account, dialog } = ownDialog(userId, dialogId);
   if (account.status !== 'connected') throw Object.assign(new Error('حساب وصل نیست'), { statusCode: 400 });
-  await ensureEgress();
-  const client = await liveClient(account);
+  assertQuota(account);
+  let client;
+  try {
+    await ensureEgress();
+    client = await liveClient(account);
+  } catch (e) {
+    // No tunnel right now (all proxies down…): keep the message and send it once it is back.
+    if (e.egress) return queueContent(account, dialog, content, { replyTo, text, kind, media });
+    throw e;
+  }
   if (!client) throw Object.assign(new Error('اتصال به تلگرام برقرار نیست'), { statusCode: 503, expose: true });
   const result = await client.invoke({
     _: 'sendMessage',
@@ -301,6 +329,82 @@ async function sendContent(userId, dialogId, content, { replyTo = null, text = '
     return publicMessage(get('SELECT * FROM tele_messages WHERE id = ?', row.id));
   }
   return publicMessage(row);
+}
+
+// ---------- Waiting for the tunnel ----------
+// A message sent while the tunnel is down is stored as "queued" (no Telegram id yet) and sent, in
+// order, once a proxy works again. Nothing leaves the server before that: fail-closed as ever.
+function queueContent(account, dialog, content, { replyTo, text, kind, media }) {
+  const row = storeMessage(account.id, dialog.id, { tgMsgId: null, direction: 'out', kind: 'queued', text, createdAt: now(), replyTo, media });
+  run('INSERT INTO tele_queue (account_id, dialog_id, message_id, content, created_at) VALUES (?, ?, ?, ?, ?)', account.id, dialog.id, row.id, JSON.stringify({ content, replyTo, kind }), now());
+  upsertDialog(account.id, { tgChatId: dialog.tg_chat_id, lastText: text, lastAt: now(), lastOut: true });
+  return publicMessage(row);
+}
+
+let flushing = false;
+/** Sends queued messages (oldest first) when the tunnel is up; called every few seconds. */
+export async function flushQueue() {
+  if (flushing) return;
+  flushing = true;
+  try {
+    const items = all('SELECT q.*, d.tg_chat_id FROM tele_queue q JOIN tele_dialogs d ON d.id = q.dialog_id ORDER BY q.id');
+    for (const q of items) {
+      const account = get('SELECT * FROM tele_accounts WHERE id = ?', q.account_id);
+      if (!account || account.status !== 'connected') {
+        run("UPDATE tele_messages SET kind = 'failed' WHERE id = ?", q.message_id);
+        run('DELETE FROM tele_queue WHERE id = ?', q.id);
+        continue;
+      }
+      if (overQuota(account)) continue;
+      let client;
+      try {
+        await ensureEgress();
+        client = await liveClient(account);
+      } catch (e) {
+        if (e.egress) break; // still no tunnel: try again later
+        continue;
+      }
+      if (!client) continue;
+      const c = JSON.parse(q.content);
+      try {
+        const result = await client.invoke({
+          _: 'sendMessage',
+          chat_id: Number(q.tg_chat_id),
+          ...(c.replyTo ? { reply_to: { _: 'inputMessageReplyToMessage', message_id: Number(c.replyTo) } } : {}),
+          input_message_content: c.content,
+        });
+        // From here on like any sent message: the temporary id, then the final one (applySent).
+        run('UPDATE tele_messages SET tg_msg_id = ?, kind = ?, created_at = ? WHERE id = ?', result.id, c.kind || 'text', result.date ? result.date * 1000 : now(), q.message_id);
+        run('DELETE FROM tele_queue WHERE id = ?', q.id);
+        const confirmed = early.get(`${account.id}:${result.id}`);
+        if (confirmed) {
+          early.delete(`${account.id}:${result.id}`);
+          applySent(account.id, confirmed);
+        }
+      } catch (e) {
+        // Telegram refused it (chat gone, no right to write…): after a few tries it is marked failed.
+        if (q.attempts + 1 >= 5) {
+          run("UPDATE tele_messages SET kind = 'failed' WHERE id = ?", q.message_id);
+          run('DELETE FROM tele_queue WHERE id = ?', q.id);
+        } else {
+          run('UPDATE tele_queue SET attempts = attempts + 1, last_error = ? WHERE id = ?', String(e?.message || e).slice(0, 300), q.id);
+        }
+      }
+    }
+  } finally {
+    flushing = false;
+  }
+}
+setInterval(() => flushQueue().catch(() => {}), Number(process.env.TELE_QUEUE_MS) || 10000).unref();
+
+/** Takes back a message that is still waiting for the tunnel. */
+export function cancelQueued(userId, messageId) {
+  const account = getAccountForUser(userId);
+  const row = account && get('SELECT * FROM tele_messages WHERE id = ? AND account_id = ?', Number(messageId), account.id);
+  if (!row) throw Object.assign(new Error('پیام پیدا نشد'), { statusCode: 404 });
+  if (row.kind !== 'queued') throw Object.assign(new Error('این پیام فرستاده شده و قابل پس گرفتن نیست'), { statusCode: 400 });
+  run('DELETE FROM tele_messages WHERE id = ?', row.id);
+  return { ok: true };
 }
 
 export async function sendTeleMessage(userId, dialogId, text, replyTo = null) {
@@ -331,7 +435,7 @@ export function newUploadPath(ext = '.jpg') {
   for (const f of fs.readdirSync(UPLOADS)) {
     const p = path.join(UPLOADS, f);
     try {
-      if (Date.now() - fs.statSync(p).mtimeMs > 86400000) fs.rmSync(p, { force: true });
+      if (Date.now() - fs.statSync(p).mtimeMs > 86400000) fs.rmSync(p, { force: true, recursive: true });
     } catch {
       /* ignore */
     }
@@ -467,4 +571,47 @@ export function ownTeleMessage(userId, messageId) {
   if (!row) throw Object.assign(new Error('پیام پیدا نشد'), { statusCode: 404 });
   const dialog = get('SELECT * FROM tele_dialogs WHERE id = ?', row.dialog_id);
   return { account, row, dialog, media: parseMedia(row.media) };
+}
+
+// ---------- Files and videos: only for accounts an admin allowed, and up to their own size limit ----------
+export const fileMaxBytes = () => (settingNumber('tele_file_max_mb') || 20) * 1048576;
+function filesAccount(userId) {
+  const account = getAccountForUser(userId);
+  if (!account?.allow_files) throw Object.assign(new Error('دسترسی به فایل‌های تلگرام برای شما فعال نیست'), { statusCode: 403 });
+  return account;
+}
+/** A message's file, downloaded through the tunnel on first request. */
+export async function teleFileFile(userId, messageId) {
+  const account = filesAccount(userId);
+  const row = get('SELECT * FROM tele_messages WHERE id = ? AND account_id = ?', Number(messageId), account.id);
+  const media = parseMedia(row?.media);
+  if (media?.type !== 'file' || !media.remote) throw Object.assign(new Error('فایل پیدا نشد'), { statusCode: 404 });
+  if (media.size > fileMaxBytes()) throw Object.assign(new Error(`حجم این فایل بیشتر از سقف مجاز (${settingNumber('tele_file_max_mb') || 20} مگابایت) است`), { statusCode: 413 });
+  const client = await liveClient(account);
+  if (!client) throw Object.assign(new Error('اتصال به تلگرام برقرار نیست'), { statusCode: 503, expose: true });
+  let file = await client.invoke({ _: 'getRemoteFile', remote_file_id: media.remote, file_type: { _: media.fileType || 'fileTypeDocument' } });
+  if (!file.local?.is_downloading_completed) {
+    await ensureEgress();
+    file = await client.invoke({ _: 'downloadFile', file_id: file.id, priority: 16, offset: 0, limit: 0, synchronous: true });
+  }
+  if (!file.local?.path || !fs.existsSync(file.local.path)) throw Object.assign(new Error('دانلود فایل ناموفق بود'), { statusCode: 502, expose: true });
+  return { file: file.local.path, name: media.name, mime: media.mime, video: media.video };
+}
+/** A temporary folder for an upload, so Telegram shows the file under its own name. */
+export function newUploadFile(name) {
+  const dir = newUploadPath('');
+  fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const safe = String(name || 'file').replace(/[\\/:*?"<>|\x00-\x1f]/g, '_').replace(/^\.+/, '').slice(0, 120) || 'file';
+  return path.join(dir, safe);
+}
+/** Sends a file (a video as a playable video). */
+export async function sendTeleFile(userId, dialogId, file, { mime = '', caption = '', replyTo = null } = {}) {
+  filesAccount(userId);
+  const text = String(caption || '').trim();
+  const name = path.basename(file);
+  const cap = text ? { _: 'formattedText', text } : undefined;
+  const content = /^video\/(mp4|quicktime|webm)$/.test(mime)
+    ? { _: 'inputMessageVideo', video: { _: 'inputVideo', video: { _: 'inputFileLocal', path: file }, supports_streaming: true }, caption: cap }
+    : { _: 'inputMessageDocument', document: { _: 'inputDocument', document: { _: 'inputFileLocal', path: file } }, caption: cap };
+  return sendContent(userId, dialogId, content, { replyTo, text: text ? `📎 ${name}\n${text}` : `📎 ${name}`, kind: 'file' });
 }

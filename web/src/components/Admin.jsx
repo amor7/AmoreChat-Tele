@@ -5,16 +5,18 @@ import { Modal } from './Modals';
 import { Live } from './AdminRtc';
 import Health from './Health';
 import TeleAdmin from './TeleAdmin';
+import AdminSecurity from './AdminSecurity';
 import { Stats, Users } from './AdminPanelsA1';
 import { Invites, Chats, Backups } from './AdminPanelsA2';
 import { Settings, Reports, Audit } from './AdminPanelsB';
-import { HeartPulse, ChartColumn, Flag, Users as UsersIcon, Ticket, MessagesSquare, Radio, Settings as SettingsIcon, ScrollText, DatabaseBackup, Cable } from 'lucide-react';
+import { HeartPulse, ChartColumn, Flag, Users as UsersIcon, Ticket, MessagesSquare, Radio, Settings as SettingsIcon, ScrollText, DatabaseBackup, Cable, ShieldAlert } from 'lucide-react';
 
 const TABS = [
   ['health', 'سلامت سرور', 'view_audit', HeartPulse],
   ['stats', 'آمار', 'view_audit', ChartColumn],
   ['reports', 'گزارش‌ها', 'handle_reports', Flag],
   ['users', 'کاربران', 'manage_users', UsersIcon],
+  ['security', 'امنیت', 'manage_users', ShieldAlert],
   ['invites', 'کدهای دعوت', 'manage_invites', Ticket],
   ['chats', 'گروه‌ها', 'manage_chats', MessagesSquare],
   ['live', 'زنده', 'manage_chats', Radio],
@@ -48,6 +50,7 @@ export default function Admin({ onClose }) {
       {tab === 'audit' && <Audit />}
       {tab === 'live' && <Live />}
       {tab === 'tele' && <TeleAdmin />}
+      {tab === 'security' && <AdminSecurity />}
       {tab === 'backup' && <Backups />}
     </Modal>
   );

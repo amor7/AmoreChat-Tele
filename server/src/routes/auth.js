@@ -15,6 +15,7 @@ import {
   randomCode,
 } from '../auth.js';
 import { fail, addMember, ensureEmergencyChannel, ensureSavedChat, systemMessage, audit } from '../chats.js';
+import { noteLoginFailure, noteLogin } from '../secwatch.js';
 import { checkTotp, useRecoveryCode, passwordProblem, deviceName } from '../security.js';
 import { isOnline } from '../realtime.js';
 import { mediaReady } from '../media.js';
@@ -52,6 +53,7 @@ function issueTicket(userId) {
 
 // Creates the session cookie and leaves a "new login" note in the user's Saved Messages.
 function startSession(user, req, reply) {
+  noteLogin(user, req.ip, deviceName(req.headers['user-agent']));
   reply.setCookie(SESSION_COOKIE, createSession(user.id, req.headers['user-agent'], req.ip), cookieOptions(req));
   const saved = ensureSavedChat(user.id);
   systemMessage(saved, `🔐 ورود جدید به حساب شما: ${deviceName(req.headers['user-agent'])} · IP ${req.ip}. اگر شما نبودید، از پروفایل ← دستگاه‌ها آن را خارج کنید و رمز را عوض کنید.`);
@@ -118,6 +120,8 @@ export default async function authRoutes(app) {
     addMember(ensureEmergencyChannel(), userId, firstUser ? 'owner' : 'member', { silent: true });
     audit(userId, 'user.register', userId, inv ? { invite: inv.code } : '');
 
+    // Where the account was made counts as a known place (a later login from elsewhere is "new").
+    noteLogin(get('SELECT * FROM users WHERE id = ?', userId), req.ip, deviceName(req.headers['user-agent']));
     reply.setCookie(SESSION_COOKIE, createSession(userId, req.headers['user-agent'], req.ip), cookieOptions(req));
     return { user: selfUser(get('SELECT * FROM users WHERE id = ?', userId)) };
   });
@@ -128,6 +132,7 @@ export default async function authRoutes(app) {
     const { username, password } = req.body || {};
     const user = get('SELECT * FROM users WHERE username = ?', String(username || ''));
     if (user?.locked_until && user.locked_until > now()) {
+      noteLoginFailure(req.ip, username);
       const mins = Math.ceil((user.locked_until - now()) / 60000);
       fail(429, `به خاطر تلاش‌های ناموفق زیاد، ورود به این حساب ${mins} دقیقه قفل است`);
     }
@@ -135,6 +140,7 @@ export default async function authRoutes(app) {
     // so timing doesn't tell which usernames exist.
     if (!(await verifyPassword(String(password || ''), user?.password_hash || DUMMY_HASH)) || !user) {
       if (user) noteFailedLogin(user, req);
+      noteLoginFailure(req.ip, username);
       fail(401, 'نام کاربری یا رمز عبور اشتباه است');
     }
     if (user.banned) fail(403, 'حساب شما مسدود شده است');
@@ -158,6 +164,7 @@ export default async function authRoutes(app) {
       if (!left) {
         if (++t.attempts >= 5) tickets.delete(req.body.ticket);
         noteFailedLogin(user, req);
+        noteLoginFailure(req.ip, user.username);
         fail(401, 'کد اشتباه است');
       }
       run('UPDATE users SET recovery_codes = ? WHERE id = ?', JSON.stringify(left), user.id);

@@ -105,7 +105,7 @@ let serverEnv = {};
 async function startServer(env = serverEnv) {
   serverEnv = env;
   const out = fs.openSync(LOG, 'a');
-  server = spawn(process.execPath, [path.join(ROOT, 'server/src/index.js')], { env: { ...process.env, PORT: String(PORT), TELE_ALERT_CHECK_MS: '1000', TELE_SWEEP_MS: '2000', ...env }, stdio: ['ignore', out, out] });
+  server = spawn(process.execPath, [path.join(ROOT, 'server/src/index.js')], { env: { ...process.env, PORT: String(PORT), TELE_ALERT_CHECK_MS: '1000', TELE_SWEEP_MS: '2000', TELE_QUEUE_MS: '2000', ...env }, stdio: ['ignore', out, out] });
   await until('server up', async () => (await fetch(`${BASE}/healthz`)).ok, 30000);
 }
 async function stopServer() {
@@ -131,6 +131,11 @@ function client() {
     return { ...(await res.json().catch(() => ({}))), http: res.status };
   }
   return { call, cookie: () => cookie };
+}
+/** A download as the browser gets it (headers and bytes). */
+async function download(who, url) {
+  const res = await fetch(BASE + url, { headers: { cookie: who.cookie(), 'x-forwarded-for': '10.9.9.9' } });
+  return { http: res.status, type: res.headers.get('content-type') || '', disposition: res.headers.get('content-disposition') || '', nosniff: res.headers.get('x-content-type-options'), bytes: Buffer.from(await res.arrayBuffer()) };
 }
 const ok = (r, what) => {
   assert.ok(r.http >= 200 && r.http < 300, `${what}: ${r.http} ${r.error || JSON.stringify(r).slice(0, 300)}`);
@@ -402,7 +407,10 @@ async function part2() {
   const tdl = await import('tdl');
   const { getTdjson } = await import('prebuilt-tdlib');
   tdl.configure({ tdjson: getTdjson(), verbosityLevel: 1 });
-  const botDir = fs.mkdtempSync(path.join(os.tmpdir(), 'tele-bot-'));
+  // The bot's session is kept with the account's (saved by the workflow): Telegram limits how often
+  // a bot may log in, and a fresh login on every run soon has to wait a quarter of an hour.
+  const botDir = path.join(path.dirname(SESSION_DIR), 'tele-bot');
+  fs.mkdirSync(botDir, { recursive: true, mode: 0o700 });
   bot = tdl.createClient({ apiId: API_ID, apiHash: API_HASH, databaseDirectory: path.join(botDir, 'db'), filesDirectory: path.join(botDir, 'files') });
   bot.on('error', (e) => console.warn('[bot]', e?.message || e));
   const botMsgs = [];
@@ -450,6 +458,21 @@ async function part2() {
     assert.equal(db.prepare('SELECT db_encrypted FROM tele_accounts WHERE id = 1').get().db_encrypted, 1, 'session not marked encrypted');
     db.close();
   }
+
+  log("Telegram sessions: this app is listed; it can't end itself from here");
+  r = ok(await alice.call('GET', '/api/tele/sessions'), 'sessions');
+  const curSession = r.sessions.find((x) => x.current);
+  assert.ok(curSession, 'this app is not in the session list');
+  assert.equal(typeof curSession.ip, 'string');
+  r = await alice.call('DELETE', `/api/tele/sessions/${curSession.id}`);
+  assert.equal(r.http, 400, 'ended its own session from the list');
+  r = await alice.call('DELETE', '/api/tele/sessions/123');
+  assert.equal(r.http, 404);
+  r = await alice.call('DELETE', '/api/tele/sessions/abc');
+  assert.equal(r.http, 400);
+  r = await bob.call('GET', '/api/tele/sessions');
+  assert.equal(r.http, 400, 'someone without Telegram reads sessions');
+  // "End all others" is never run here: the spare account's other devices belong to its owner.
 
   log('"Add a chat" lists the bot chat and the group; nothing is selected on its own');
   const { pd, gd } = await until('bot chat and group in the list', async () => {
@@ -684,6 +707,58 @@ async function part2() {
   ok(await owner.call('PATCH', `/api/admin/tele/accounts/${aliceAcc.id}`, { quotaMb: null }), 'default cap');
   db.close();
 
+  log('Files and videos: off by default, then on for Alice; downloads are attachments, never run in the page');
+  const docFile = path.join(botDir, 'notes.txt');
+  fs.writeFileSync(docFile, `file content ${RUN}`);
+  const mp4 = path.join(botDir, 'clip.mp4');
+  execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-f', 'lavfi', '-i', 'testsrc=size=160x120:rate=10', '-t', '2', '-pix_fmt', 'yuv420p', '-c:v', 'libx264', '-movflags', '+faststart', mp4]);
+  await bot.invoke({ _: 'sendMessage', chat_id: meta.userId, input_message_content: { _: 'inputMessageDocument', document: { _: 'inputDocument', document: { _: 'inputFileLocal', path: docFile } }, caption: { _: 'formattedText', text: `doc ${RUN}` } } });
+  await bot.invoke({ _: 'sendMessage', chat_id: meta.userId, input_message_content: { _: 'inputMessageVideo', video: { _: 'inputVideo', video: { _: 'inputFileLocal', path: mp4 }, duration: 2, width: 160, height: 120, supports_streaming: true }, caption: { _: 'formattedText', text: `video ${RUN}` } } });
+  const findFile = async (cap) => {
+    const x = ok(await alice.call('GET', `/api/tele/dialogs/${pd.id}/messages`), 'messages');
+    return x.messages.find((m) => m.file && m.text.includes(cap));
+  };
+  const docMsg = await until('document at Alice', () => findFile(`doc ${RUN}`), 60000);
+  const vidMsg = await until('video at Alice', () => findFile(`video ${RUN}`), 60000);
+  assert.equal(docMsg.file.name, 'notes.txt');
+  assert.ok(vidMsg.file.video, 'video not marked as video');
+  r = await download(alice, `/api/tele/messages/${docMsg.id}/file`);
+  assert.equal(r.http, 403, 'file loaded before the admin allowed it');
+  r = await alice.call('POST', `/api/tele/dialogs/${pd.id}/file`, null, { form: fileForm(Buffer.from('x'), 'text/plain', 'x.txt') });
+  assert.equal(r.http, 403, 'file sent before the admin allowed it');
+  ok(await owner.call('PATCH', `/api/admin/tele/accounts/${aliceAcc.id}`, { allowFiles: true }), 'allow files');
+  r = await download(alice, `/api/tele/messages/${docMsg.id}/file`);
+  assert.equal(r.http, 200);
+  assert.match(r.disposition, /^attachment/, 'a file is shown in the page instead of downloaded');
+  assert.equal(r.type, 'application/octet-stream');
+  assert.equal(r.nosniff, 'nosniff');
+  assert.equal(r.bytes.toString(), `file content ${RUN}`);
+  r = await download(alice, `/api/tele/messages/${vidMsg.id}/file?inline=1`);
+  assert.equal(r.http, 200);
+  assert.match(r.type, /^video\/mp4/, 'video not playable in the page');
+  assert.ok(r.bytes.length > 1000);
+  r = await download(bob, `/api/tele/messages/${docMsg.id}/file`);
+  assert.ok([403, 404].includes(r.http), "Bob got Alice's file");
+  r = await alice.call('POST', `/api/tele/dialogs/${pd.id}/file?caption=${encodeURIComponent(`my file ${RUN}`)}`, null, { form: fileForm(Buffer.from(`from alice ${RUN}`), 'text/plain', `alice-${RUN}.txt`) });
+  assert.equal(r.http, 201, JSON.stringify(r));
+  const gotDoc = await until('the bot receives the file', () => botMsgs.find((m) => m.content?._ === 'messageDocument' && textOf(m) === `my file ${RUN}`), 60000);
+  assert.equal(gotDoc.content.document.file_name, `alice-${RUN}.txt`, 'the file lost its name');
+  r = await alice.call('POST', `/api/tele/dialogs/${pd.id}/file?caption=${encodeURIComponent(`my video ${RUN}`)}`, null, { form: fileForm(fs.readFileSync(mp4), 'video/mp4', 'clip.mp4') });
+  assert.equal(r.http, 201, JSON.stringify(r));
+  await until('the bot receives the video', () => botMsgs.find((m) => m.content?._ === 'messageVideo' && textOf(m) === `my video ${RUN}`), 60000);
+  ok(await owner.call('PATCH', '/api/admin/tele/media', { fileMaxMb: 1 }), 'file cap 1 MB');
+  r = await alice.call('POST', `/api/tele/dialogs/${pd.id}/file`, null, { form: fileForm(Buffer.alloc(2 * 1048576, 1), 'application/octet-stream', 'big.bin') });
+  assert.equal(r.http, 413, 'a file over the cap was sent');
+  ok(await owner.call('PATCH', '/api/admin/tele/media', { fileMaxMb: 20 }), 'file cap back');
+  ok(await alice.call('POST', `/api/tele/messages/${docMsg.id}/forward`, { chatIds: [savedChat.id] }), 'forward file into the app');
+  fm = (await savedMsgs()).find((m) => m.type === 'file' && m.file?.name === 'notes.txt');
+  assert.ok(fm, 'the forwarded file is not in the chat');
+  const upDoc = await alice.call('POST', '/api/upload', null, { form: fileForm(Buffer.from('app doc'), 'text/plain', `app-${RUN}.txt`) });
+  const appDoc = ok(await alice.call('POST', `/api/chats/${savedChat.id}/messages`, { fileId: upDoc.file.id, type: 'file', text: `app doc ${RUN}` }), 'app doc').message;
+  ok(await alice.call('POST', '/api/tele/forward', { messageId: appDoc.id, dialogIds: [pd.id] }), 'app file to Telegram');
+  const gotAppDoc = await until('the bot gets the app file', () => botMsgs.find((m) => m.content?._ === 'messageDocument' && textOf(m) === `app doc ${RUN}`), 60000);
+  assert.equal(gotAppDoc.content.document.file_name, `app-${RUN}.txt`);
+
   log('Edited and deleted in Telegram: the same here');
   const editId = await botSendFinal(meta.userId, `to edit ${RUN}`);
   const delId = await botSendFinal(meta.userId, `to delete ${RUN}`);
@@ -709,19 +784,38 @@ async function part2() {
   ok(await alice.call('POST', `/api/tele/dialogs/${pd.id}/messages`, { text: `after restart ${RUN}` }), 'send after restart');
   await until('the bot receives it', () => botMsgs.find((m) => textOf(m) === `after restart ${RUN}`), 30000);
 
-  log('Proxy turned off: nothing goes out; stored messages still show');
+  log('Tunnel down: messages wait in a queue (nothing goes out) and go in order once it is back');
   ok(await owner.call('PATCH', `/api/admin/tele/proxies/${goodId}`, { enabled: false }), 'disable proxy');
   await until('tunnel stopped', async () => !(await tunnelRunning(owner)), 20000);
-  r = await alice.call('POST', `/api/tele/dialogs/${pd.id}/messages`, { text: `must not be sent ${RUN}` });
-  assert.ok(r.http >= 400, `sent without a proxy: ${JSON.stringify(r)}`);
-  r = ok(await alice.call('GET', `/api/tele/dialogs/${pd.id}/messages`), 'stored messages');
+  const queued = [];
+  for (const t of [`queued one ${RUN}`, `queued two ${RUN}`, `queued cancel ${RUN}`]) {
+    r = ok(await alice.call('POST', `/api/tele/dialogs/${pd.id}/messages`, { text: t }), 'send while down');
+    assert.equal(r.message.kind, 'queued', `not queued: ${JSON.stringify(r.message)}`);
+    assert.equal(r.message.tgMsgId, null);
+    queued.push(r.message);
+  }
+  ok(await alice.call('DELETE', `/api/tele/messages/${queued[2].id}`), 'take back a queued message');
+  r = await alice.call('DELETE', `/api/tele/messages/${hello.id}`);
+  assert.equal(r.http, 400, 'a sent message was taken back');
+  r = await bob.call('DELETE', `/api/tele/messages/${queued[0].id}`);
+  assert.equal(r.http, 404, "Bob took back Alice's message");
+  r = ok(await alice.call('GET', `/api/tele/dialogs/${pd.id}/messages`), 'stored messages while down');
   assert.ok(r.messages.some((m) => m.text === helloText), 'stored messages are still shown');
+  assert.deepEqual(r.messages.slice(-2).map((m) => [m.text, m.kind]), [[`queued one ${RUN}`, 'queued'], [`queued two ${RUN}`, 'queued']], 'queued messages are not last, in order');
+  assert.ok(!r.messages.some((m) => m.text === `queued cancel ${RUN}`), 'a taken-back message is still shown');
+  await sleep(5000);
+  assert.ok(!botMsgs.some((m) => textOf(m).startsWith('queued ') && textOf(m).endsWith(RUN)), 'a queued message went out without the proxy');
   ok(await owner.call('PATCH', `/api/admin/tele/proxies/${goodId}`, { enabled: true }), 'enable proxy');
   ok(await owner.call('POST', `/api/admin/tele/proxies/${goodId}/probe`, {}), 'probe');
   await until('tunnel back', () => tunnelRunning(owner), 30000);
-  ok(await alice.call('POST', `/api/tele/dialogs/${pd.id}/messages`, { text: `back online ${RUN}` }), 'send after proxy back');
-  await until('the bot receives it', () => botMsgs.find((m) => textOf(m) === `back online ${RUN}`), 60000);
-  assert.ok(!botMsgs.some((m) => textOf(m) === `must not be sent ${RUN}`), 'a message went out without the proxy');
+  await until('the queue is sent', () => botMsgs.some((m) => textOf(m) === `queued two ${RUN}`), 60000);
+  const order = botMsgs.filter((m) => textOf(m).startsWith('queued ') && textOf(m).endsWith(RUN)).map(textOf);
+  assert.deepEqual(order, [`queued one ${RUN}`, `queued two ${RUN}`], 'queue sent twice, out of order or with the taken-back one');
+  await until('queued messages got their Telegram ids', async () => {
+    const x = ok(await alice.call('GET', `/api/tele/dialogs/${pd.id}/messages?local=1`), 'local');
+    const q = x.messages.filter((m) => m.text.startsWith('queued ') && m.text.endsWith(RUN));
+    return q.length === 2 && q.every((m) => m.kind === 'text' && m.tgMsgId % 1048576 === 0);
+  }, 30000);
   // Never log out here: the spare account's session is shared with later runs.
   await stopServer();
 }
@@ -863,8 +957,17 @@ async function uiChecks({ owner, alice, bob, pd, gd, meta, photoMsg, voiceMsg, s
     ok(await alice.call('POST', `/api/chats/${savedChat.id}/messages`, { text: menuText }), 'app message');
     await page.goto(`${BASE}/#/chat/${savedChat.id}`, { waitUntil: 'networkidle0' });
     await waitText('.bubble', menuText);
-    const bubble = await page.evaluateHandle((t) => [...document.querySelectorAll('.bubble')].reverse().find((b) => b.textContent.includes(t)), menuText);
-    await bubble.click({ button: 'right' });
+    // The menu opens on the bubble's contextmenu event (sent to the element itself: the list may
+    // re-render between finding it and clicking it).
+    await until('message menu open', async () => {
+      await page.evaluate((t) => {
+        const b = [...document.querySelectorAll('.bubble')].reverse().find((x) => x.textContent.includes(t));
+        const r = b.getBoundingClientRect();
+        b.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: r.left + 10, clientY: r.top + 10 }));
+      }, menuText);
+      await sleep(300);
+      return page.evaluate(() => [...document.querySelectorAll('.menu.floating button')].some((x) => x.textContent.includes('ارسال به تلگرام')));
+    }, 15000);
     await clickText('.menu.floating button', 'ارسال به تلگرام');
     await page.waitForSelector('.modal .user-list input[type=checkbox]');
     await page.evaluate((title) => {
@@ -895,6 +998,42 @@ async function uiChecks({ owner, alice, bob, pd, gd, meta, photoMsg, voiceMsg, s
     await until('voice turned off from the panel', async () => !ok(await owner.call('GET', '/api/admin/tele/accounts'), 'accounts').accounts.find((a) => a.username === 'alice').allowVoice, 10000);
     const aliceId = ok(await owner.call('GET', '/api/admin/tele/accounts'), 'accounts').accounts.find((a) => a.username === 'alice').id;
     ok(await owner.call('PATCH', `/api/admin/tele/accounts/${aliceId}`, { allowVoice: true }), 'voice back on');
+
+    log('UI: Telegram sessions open from the page');
+    await open(alice, `#/tele/${pd.id}`, { width: 1280, height: 800 });
+    await page.click('button[aria-label="نشست‌های فعال تلگرام"]');
+    await waitText('.modal .tele-sessions', 'همین برنامه');
+    await noBrokenText('Telegram sessions');
+    await shot('sessions');
+    await clickText('.modal button', 'بستن پنجره');
+
+    log('UI: a video plays on tap, a file downloads');
+    await waitText('.tele-chat .tele-file', 'notes.txt');
+    await page.evaluate((cap) => {
+      const row = [...document.querySelectorAll('.tele-chat .msg-row')].find((r) => r.textContent.includes(cap) && r.querySelector('.tele-file'));
+      row.querySelector('.tele-file').click();
+    }, `video ${RUN}`);
+    await page.waitForFunction(() => {
+      const v = document.querySelector('.tele-chat video.tele-video');
+      return v && v.readyState >= 1;
+    }, { timeout: 60000 });
+    await page.evaluate(() => {
+      const row = [...document.querySelectorAll('.tele-chat .msg-row')].find((r) => r.querySelector('.tele-file')?.textContent.includes('notes.txt'));
+      row.querySelector('.tele-file').click();
+    });
+    await waitText('.tele-chat .tele-file', 'ذخیره شد', 30000);
+    await noBrokenText('files');
+    await shot('files');
+
+    log('UI: admin panel → Security');
+    await open(owner, '#/', { width: 1280, height: 900 });
+    await page.click('.menu-btn');
+    await clickText('.sidebar .menu > button', 'پنل مدیریت');
+    await clickText('.modal .tabs button', 'امنیت');
+    await waitText('.modal h4', 'تلاش‌های ناموفق ورود');
+    await waitText('.modal h4', 'آی‌پی‌های بن‌شده');
+    await noBrokenText('admin panel, Security');
+    await shot('security');
 
     log('UI (phone): list, open chat, back');
     await open(alice, '#/tele', { width: 390, height: 844, isMobile: true, hasTouch: true });
@@ -928,11 +1067,108 @@ async function uiChecks({ owner, alice, bob, pd, gd, meta, photoMsg, voiceMsg, s
   }
 }
 
+// ===================== Part 3: a Telegram channel mirrored into the app (owner) =====================
+async function part3() {
+  const meta = JSON.parse(fs.readFileSync(path.join(SESSION_DIR, 'meta.json'), 'utf8'));
+  if (!meta.channelChatId) {
+    console.log('\nPart 3 skipped: the saved session has no test channel yet (run the tele-login workflow once more)');
+    return;
+  }
+  const DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'tele-e2e-mirror-'));
+  const textOf = (m) => m.content?.text?.text || m.content?.caption?.text || '';
+  log('Part 3: the owner connects the spare account; the bot posts in its channel');
+  const { owner, alice } = await setupApp({ DATA_DIR });
+  await addProxies(owner);
+  fs.cpSync(SESSION_DIR, path.join(DATA_DIR, 'tele-sessions', '1'), { recursive: true });
+  let r = ok(await owner.call('POST', '/api/tele/login/phone', { phone: process.env.TG_TEST_PHONE }), 'owner connect');
+  assert.equal(r.status, 'ready');
+  r = await until('the channel in the owner\'s list', async () => {
+    const x = ok(await owner.call('POST', '/api/tele/dialogs/refresh', { all: true }), 'refresh all');
+    return x.dialogs.find((d) => Number(d.tgChatId) === meta.channelChatId);
+  });
+  assert.equal(r.kind, 'channel');
+  // The account made the channel, so it posts there itself (through the app, as a user would).
+  const channelDialog = r;
+  ok(await owner.call('PATCH', `/api/tele/dialogs/${channelDialog.id}`, { selected: true }), 'add the channel');
+  const ownerAcc = ok(await owner.call('GET', '/api/admin/tele/accounts'), 'accounts').accounts.find((a) => a.username === 'owner');
+  ok(await owner.call('PATCH', `/api/admin/tele/accounts/${ownerAcc.id}`, { allowMedia: true }), 'photos for the owner');
+  const postText = async (t) => ok(await owner.call('POST', `/api/tele/dialogs/${channelDialog.id}/messages`, { text: t }), 'post in the channel');
+  const postPhoto = async (buf, caption) => {
+    const x = await owner.call('POST', `/api/tele/dialogs/${channelDialog.id}/photo?caption=${encodeURIComponent(caption)}`, null, { form: photoForm(buf) });
+    assert.equal(x.http, 201, JSON.stringify(x));
+    // A photo gets its place in the channel once uploaded: wait, so the posts keep this order.
+    await until('photo posted', async () => {
+      const y = ok(await owner.call('GET', `/api/tele/dialogs/${channelDialog.id}/messages?local=1`), 'channel');
+      return y.messages.some((m) => m.photo && m.text.includes(caption) && m.tgMsgId % 1048576 === 0);
+    }, 60000);
+  };
+
+  log('Only the owner manages mirrors; bad requests are refused');
+  r = await alice.call('GET', '/api/admin/tele/mirrors');
+  assert.equal(r.http, 403);
+  r = await alice.call('POST', '/api/admin/tele/mirrors', { tgChatId: String(meta.channelChatId) });
+  assert.equal(r.http, 403);
+  r = ok(await owner.call('GET', '/api/admin/tele/mirrors'), 'mirrors');
+  assert.ok(r.connected && r.channels.some((c) => Number(c.tgChatId) === meta.channelChatId), 'channel not offered');
+  for (const bad of [{ tgChatId: 'abc' }, { tgChatId: String(meta.botChatId) }, { tgChatId: String(meta.channelChatId), importLast: 99 }]) {
+    r = await owner.call('POST', '/api/admin/tele/mirrors', bad);
+    assert.ok(r.http >= 400 && r.http < 500, `mirror ${JSON.stringify(bad)} → ${r.http}`);
+  }
+
+  log('The channel is mirrored: new posts (text and photo) appear in an app channel, once each');
+  r = ok(await owner.call('POST', '/api/admin/tele/mirrors', { tgChatId: String(meta.channelChatId), importLast: 0, withPhotos: true }), 'add mirror');
+  const mirror = r.mirror;
+  r = await owner.call('POST', '/api/admin/tele/mirrors', { tgChatId: String(meta.channelChatId) });
+  assert.equal(r.http, 400, 'the same channel added twice');
+  await postText(`news one ${RUN}`);
+  await postPhoto(png(200, 150, 33), `news photo ${RUN}`);
+  await postText(`news two ${RUN}`);
+  const appMsgs = async () => ok(await owner.call('GET', `/api/chats/${mirror.chatId}/messages?limit=100`), 'app channel').messages;
+  await until('posts in the app channel', async () => {
+    await owner.call('POST', '/api/admin/tele/mirrors/run', {});
+    const m = await appMsgs();
+    return m.some((x) => x.text === `news two ${RUN}`);
+  }, 90000);
+  let m = (await appMsgs()).filter((x) => x.type !== 'system');
+  assert.deepEqual(m.map((x) => x.text), [`news one ${RUN}`, `news photo ${RUN}`, `news two ${RUN}`], 'posts missing, twice or out of order');
+  assert.equal(m[1].type, 'image', 'the photo did not come along');
+  assert.ok(m.every((x) => x.forwardedFrom === `تلگرام · ${meta.channelTitle}`), 'source not shown');
+  ok(await owner.call('POST', '/api/admin/tele/mirrors/run', {}), 'run again');
+  assert.equal((await appMsgs()).filter((x) => x.type !== 'system').length, 3, 'posts copied twice');
+
+  log('Everyone can follow the app channel (no Telegram needed)');
+  ok(await alice.call('POST', `/api/chats/${mirror.chatId}/join`, {}), 'alice joins');
+  r = ok(await alice.call('GET', `/api/chats/${mirror.chatId}/messages`), 'alice reads');
+  assert.ok(r.messages.some((x) => x.text === `news one ${RUN}`));
+  r = await alice.call('POST', `/api/chats/${mirror.chatId}/messages`, { text: 'not allowed' });
+  assert.ok(r.http >= 400, 'a member posted in the news channel');
+
+  log('Paused: nothing is copied; resumed: it catches up');
+  ok(await owner.call('PATCH', `/api/admin/tele/mirrors/${mirror.id}`, { enabled: false }), 'pause');
+  await postText(`news three ${RUN}`);
+  await sleep(3000);
+  ok(await owner.call('POST', '/api/admin/tele/mirrors/run', {}), 'run while paused');
+  assert.ok(!(await appMsgs()).some((x) => x.text === `news three ${RUN}`), 'copied while paused');
+  ok(await owner.call('PATCH', `/api/admin/tele/mirrors/${mirror.id}`, { enabled: true }), 'resume');
+  await until('caught up', async () => {
+    await owner.call('POST', '/api/admin/tele/mirrors/run', {});
+    return (await appMsgs()).some((x) => x.text === `news three ${RUN}`);
+  }, 60000);
+  ok(await owner.call('DELETE', `/api/admin/tele/mirrors/${mirror.id}`), 'remove mirror');
+  r = ok(await owner.call('GET', '/api/admin/tele/mirrors'), 'mirrors');
+  assert.equal(r.mirrors.length, 0);
+  assert.ok((await appMsgs()).length > 0, 'the app channel lost its posts');
+  await stopServer();
+}
+
 let fail = null;
 try {
   fs.writeFileSync(LOG, '');
   await part1();
-  if (FULL) await part2();
+  if (FULL) {
+    await part2();
+    await part3();
+  }
   else console.log('\nPart 2 (real Telegram) skipped: no saved session yet (run the tele-login workflow), or TG_TEST_* secrets missing');
   console.log(`\nTele e2e: passed${FULL ? ' (both parts)' : ' (part 1)'}`);
 } catch (e) {

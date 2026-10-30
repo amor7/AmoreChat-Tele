@@ -14,6 +14,16 @@ export const DEFAULTS = {
   // Tele: monthly traffic per user (MB, sent + received through the VPN); 0 = no cap. Each user can
   // have their own cap instead.
   tele_quota_mb: '0',
+  // Tele: largest file / video (MB) users with file permission may load or send.
+  tele_file_max_mb: '20',
+  // Tele: minutes between checks of mirrored Telegram channels.
+  tele_mirror_minutes: '5',
+  // Security alerts to the owner (Saved Messages); wrong passwords from one IP in 15 minutes that
+  // count as an attack; ban such an IP by itself, and for how many minutes (0 = until unbanned).
+  sec_alerts: '1',
+  sec_fail_threshold: '10',
+  sec_auto_ban: '0',
+  sec_auto_ban_minutes: '0',
   // Total upload quota per user in MB; 0 = unlimited.
   user_quota_mb: '0',
   // Delete uploaded media older than this many days; 0 = keep forever.

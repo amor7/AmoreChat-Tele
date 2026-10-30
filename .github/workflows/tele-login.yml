@@ -54,7 +54,7 @@ jobs:
         if: always()
         run: |
           if [ -d tele-session ]; then
-            tar cz tele-session | openssl enc -aes-256-cbc -pbkdf2 -salt -pass env:SESSION_KEY -out tele-session.enc
+            tar cz tele-session $([ -d tele-bot ] && echo tele-bot) | openssl enc -aes-256-cbc -pbkdf2 -salt -pass env:SESSION_KEY -out tele-session.enc
           fi
       - uses: actions/cache/save@v4
         if: always()
