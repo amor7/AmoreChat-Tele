@@ -5,6 +5,7 @@
  */
 import { get, all, run, now, parseJSON } from '../db.js';
 import { detectProtocol, outboundFromConfig, nameOfConfig } from './uri.js';
+import { syncOvpn } from './ovpn.js';
 
 export const ROUTE_MODES = ['manual', 'best', 'random', 'priority'];
 
@@ -78,6 +79,7 @@ export function createProxy({ name, config, protocol, priority = 100, groupName 
     t,
     t,
   );
+  if (proto === 'openvpn') syncOvpn();
   return publicProxy(getProxy(Number(r.lastInsertRowid)));
 }
 
@@ -111,6 +113,7 @@ export function updateProxy(id, patch) {
     t,
     row.id,
   );
+  if (protocol === 'openvpn' || row.protocol === 'openvpn') syncOvpn();
   return publicProxy(getProxy(row.id));
 }
 
@@ -121,6 +124,7 @@ export function deleteProxy(id) {
   // Clear active selection if it pointed at this proxy.
   const active = getTeleSetting('tele_active_proxy_id');
   if (active && Number(active) === row.id) setTeleSetting('tele_active_proxy_id', '');
+  if (row.protocol === 'openvpn') syncOvpn();
   return true;
 }
 

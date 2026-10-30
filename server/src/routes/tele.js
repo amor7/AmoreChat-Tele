@@ -3,7 +3,9 @@ import { fail, audit } from '../chats.js';
 import { listProxies, getProxy, createProxy, updateProxy, deleteProxy, getRoutePolicy, setRoutePolicy, publicProxy, PROTOCOL_HINTS, ROUTE_MODES } from '../tele/proxies.js';
 import { probeViaEgress, probeAll, egressStatus, ensureEgress, stopEgress, refreshEgress, liveTunnelError } from '../tele/egress.js';
 import { splitConfigs, outboundFromForm } from '../tele/uri.js';
-import { beginLogin, submitCode, submitPassword, disconnectAccount, getAccountForUser, publicAccount, listDialogs, setDialogSelected, teleRuntimeInfo, clearStaleLogin, isLive, trafficOf, usageOf, quotaOf, listTeleSessions, endTeleSession, endOtherTeleSessions, resendCode, loginCodeInfo, teleAllowed, assertTeleAllowed, teleAccessMode, ACCESS_MODES, enforceTeleAccess } from '../tele/accounts.js';
+import { ovpnConfig, looksLikeOvpn } from '../tele/ovpn.js';
+import { beginLogin, submitCode, submitPassword, disconnectAccount, getAccountForUser, publicAccount, listDialogs, setDialogSelected, teleRuntimeInfo, clearStaleLogin, isLive, trafficOf, usageOf, quotaOf, listTeleSessions, endTeleSession, endOtherTeleSessions, resendCode, loginCodeInfo, teleAllowed, assertTeleAllowed, enforceTeleAccess, exploreAllowed, usageHistory } from '../tele/accounts.js';
+import { ACCESS_MODES, ACCESS_LISTS, accessMode, accessAllowed } from '../access.js';
 import { findTelegram, openTelegramChat, joinTelegramChat, leaveTelegramChat } from '../tele/explore.js';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -16,7 +18,7 @@ import { getMember, postMessage } from '../chats.js';
 import { requireChat } from './chats.js';
 import { assertCanPost } from './messages.js';
 import { registerFile, newRel } from './files.js';
-import { ownerAccount, listMirrors, createMirror, runMirrors, telegramChannels, setVisibility, renewInvite, loadMirrorPhoto, VISIBILITY } from '../tele/mirror.js';
+import { ownerAccount, listMirrors, createMirror, runMirrors, telegramChannels, setVisibility, renewInvite, loadMirrorMedia, VISIBILITY } from '../tele/mirror.js';
 
 const loginLimit = { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } };
 // Each of these costs the server's VPN traffic (and too many sends get a Telegram account limited).
@@ -59,6 +61,15 @@ export default async function teleRoutes(app) {
       const name = String(b.name || '').trim() || `${b.form.type} ${out.server || out.peers?.[0]?.address}:${out.server_port || out.peers?.[0]?.port}`;
       const proxy = createProxy({ name, config: JSON.stringify(out), protocol, priority: b.priority, enabled: b.enabled !== false });
       audit(req.user.id, 'tele.proxy.create', proxy.id, { form: b.form.type });
+      return { proxies: [proxy], proxy, errors: [] };
+    }
+    // OpenVPN: a .ovpn file (and its login, if it asks for one), run by the ovpn service.
+    const ovpn = b.openvpn && typeof b.openvpn === 'object' ? b.openvpn : looksLikeOvpn(b.links) ? { ovpn: b.links } : null;
+    if (ovpn) {
+      const config = ovpnConfig(ovpn);
+      const remote = JSON.parse(config).ovpn.match(/^remote\s+(\S+)/m)?.[1] || '';
+      const proxy = createProxy({ name: String(b.name || '').trim() || `OpenVPN ${remote}`.trim(), config, protocol: 'openvpn', priority: b.priority, enabled: b.enabled !== false });
+      audit(req.user.id, 'tele.proxy.create', proxy.id, { form: 'openvpn' });
       return { proxies: [proxy], proxy, errors: [] };
     }
     // Several configs at once: share links one per line, WireGuard .conf / JSON kept whole.
@@ -353,13 +364,13 @@ export default async function teleRoutes(app) {
     const month = new Date().toISOString().slice(0, 7);
     // Highest traffic first: who uses the VPN the most this month.
     const accounts = all(
-      `SELECT a.*, a.display_name AS tg_name, u.display_name AS name, u.username, IFNULL(t.sent, 0) + IFNULL(t.received, 0) AS used
+      `SELECT a.*, a.display_name AS tg_name, u.display_name AS name, u.username, u.role, IFNULL(t.sent, 0) + IFNULL(t.received, 0) AS used
        FROM tele_accounts a JOIN users u ON u.id = a.user_id LEFT JOIN tele_usage t ON t.account_id = a.id AND t.month = ?
        ORDER BY used DESC, u.display_name`,
       month,
     ).map((a) => ({
       id: a.id, userId: a.user_id, name: a.name, username: a.username, tgName: a.tg_name, status: a.status, live: isLive(a.id),
-      allowMedia: !!a.allow_media, allowVoice: !!a.allow_voice, allowFiles: !!a.allow_files, allowExplore: !!a.allow_explore, used: a.used, quotaMb: a.quota_mb, effectiveQuotaMb: quotaOf(a),
+      allowMedia: !!a.allow_media, allowVoice: !!a.allow_voice, allowFiles: !!a.allow_files, allowExplore: exploreAllowed(a), owner: a.role === 'owner', used: a.used, quotaMb: a.quota_mb, effectiveQuotaMb: quotaOf(a),
     }));
     return { accounts, month, mediaMaxMb: settingNumber('tele_media_max_mb') || 5, fileMaxMb: settingNumber('tele_file_max_mb') || 20, defaultQuotaMb: settingNumber('tele_quota_mb') };
   });
@@ -382,35 +393,59 @@ export default async function teleRoutes(app) {
     audit(req.user.id, 'tele.account', id, { allowMedia: b.allowMedia, allowVoice: b.allowVoice, allowFiles: b.allowFiles, allowExplore: b.allowExplore, quotaMb: b.quotaMb });
     return { ok: true };
   });
-  // Who may use Telegram: everyone, nobody, only the listed users, or everyone but them.
-  const accessView = () => ({
-    mode: teleAccessMode(),
-    modes: ACCESS_MODES,
-    users: all(
-      `SELECT u.id, u.display_name AS name, u.username, u.role, (x.user_id IS NOT NULL) AS listed, a.status AS teleStatus
-       FROM users u LEFT JOIN tele_access x ON x.user_id = u.id LEFT JOIN tele_accounts a ON a.user_id = u.id
-       WHERE u.banned = 0 ORDER BY listed DESC, u.display_name LIMIT 5000`,
-    ).map((u) => ({ id: u.id, name: u.name, username: u.username, teleStatus: u.teleStatus, listed: !!u.listed, owner: u.role === 'owner', allowed: teleAllowed(u) })),
-  });
-  app.get('/api/admin/tele/access', async (req) => {
+  // Traffic of one account per day (30 days) and per month (6 months).
+  app.get('/api/admin/tele/accounts/:id/usage', async (req) => {
     needTeleAdmin(req);
-    return accessView();
+    const a = get('SELECT * FROM tele_accounts WHERE id = ?', Number(req.params.id));
+    if (!a) fail(404, 'حساب پیدا نشد');
+    return { ...usageHistory(a.id), quotaMb: quotaOf(a), used: usageOf(a.id).used };
   });
-  app.patch('/api/admin/tele/access', async (req) => {
+  // Per-user features: everyone, nobody, only the listed users, or everyone but them.
+  // tele: the Telegram part; mirror_files: fetching videos / files of mirrored channels.
+  const accessView = (list) => {
+    const { table } = ACCESS_LISTS[list];
+    return {
+      mode: accessMode(list),
+      modes: ACCESS_MODES,
+      users: all(
+        `SELECT u.id, u.display_name AS name, u.username, u.role, (x.user_id IS NOT NULL) AS listed, a.status AS teleStatus
+         FROM users u LEFT JOIN ${table} x ON x.user_id = u.id LEFT JOIN tele_accounts a ON a.user_id = u.id
+         WHERE u.banned = 0 ORDER BY listed DESC, u.display_name LIMIT 5000`,
+      ).map((u) => ({ id: u.id, name: u.name, username: u.username, teleStatus: u.teleStatus, listed: !!u.listed, owner: u.role === 'owner', allowed: accessAllowed(list, u) })),
+    };
+  };
+  // /api/admin/tele/access is the v1.0.15 address of the Telegram list.
+  const accessList = (req) => {
+    const name = req.params.list || 'tele';
+    const list = name === 'mirror-files' ? 'mirror_files' : name === 'tele' ? 'tele' : null;
+    if (!list) fail(404, 'پیدا نشد');
+    return list;
+  };
+  const getAccess = async (req) => {
     needTeleAdmin(req);
+    return accessView(accessList(req));
+  };
+  app.get('/api/admin/access/:list', getAccess);
+  app.get('/api/admin/tele/access', getAccess);
+  const patchAccess = async (req) => {
+    needTeleAdmin(req);
+    const list = accessList(req);
+    const { setting, table } = ACCESS_LISTS[list];
     const b = req.body || {};
     if (b.mode != null) {
       if (!ACCESS_MODES.includes(b.mode)) fail(400, 'حالت نامعتبر است');
-      setSetting('tele_access', b.mode);
+      setSetting(setting, b.mode);
     }
     const ids = (x) => (Array.isArray(x) ? x.map(Number).filter((n) => Number.isInteger(n) && n > 0).slice(0, 5000) : []);
-    for (const id of ids(b.add)) run('INSERT OR IGNORE INTO tele_access (user_id, by, at) SELECT id, ?, ? FROM users WHERE id = ?', req.user.id, now(), id);
-    for (const id of ids(b.remove)) run('DELETE FROM tele_access WHERE user_id = ?', id);
-    // Closed for someone with Telegram open: it closes now (their session is kept for later).
-    await enforceTeleAccess();
-    audit(req.user.id, 'tele.access', '', { mode: b.mode, add: ids(b.add), remove: ids(b.remove) });
-    return accessView();
-  });
+    for (const id of ids(b.add)) run(`INSERT OR IGNORE INTO ${table} (user_id, by, at) SELECT id, ?, ? FROM users WHERE id = ?`, req.user.id, now(), id);
+    for (const id of ids(b.remove)) run(`DELETE FROM ${table} WHERE user_id = ?`, id);
+    // Telegram closed for someone with it open: it closes now (their session is kept for later).
+    if (list === 'tele') await enforceTeleAccess();
+    audit(req.user.id, list === 'tele' ? 'tele.access' : 'mirror.files.access', '', { mode: b.mode, add: ids(b.add), remove: ids(b.remove) });
+    return accessView(list);
+  };
+  app.patch('/api/admin/access/:list', patchAccess);
+  app.patch('/api/admin/tele/access', patchAccess);
   app.patch('/api/admin/tele/quota', async (req) => {
     needTeleAdmin(req);
     const mb = Number(req.body?.defaultMb);
@@ -441,7 +476,7 @@ export default async function teleRoutes(app) {
   app.post('/api/admin/tele/mirrors', limit(10), async (req) => {
     needOwner(req);
     const b = req.body || {};
-    const mirror = await createMirror(req.user, { tgChatId: b.tgChatId, chatId: b.chatId, newTitle: b.newTitle, withPhotos: !!b.withPhotos, importLast: b.importLast ?? 3, visibility: b.visibility || 'public' });
+    const mirror = await createMirror(req.user, { tgChatId: b.tgChatId, chatId: b.chatId, newTitle: b.newTitle, withPhotos: !!b.withPhotos, withFiles: !!b.withFiles, importLast: b.importLast ?? 3, visibility: b.visibility || 'public' });
     audit(req.user.id, 'tele.mirror.create', mirror.id, { tgChatId: b.tgChatId, chatId: mirror.chatId });
     return { mirror };
   });
@@ -452,6 +487,7 @@ export default async function teleRoutes(app) {
     if (!m) fail(404, 'پیدا نشد');
     if (req.body?.enabled != null) run('UPDATE tele_mirrors SET enabled = ? WHERE id = ?', req.body.enabled ? 1 : 0, m.id);
     if (req.body?.withPhotos != null) run('UPDATE tele_mirrors SET with_photos = ? WHERE id = ?', req.body.withPhotos ? 1 : 0, m.id);
+    if (req.body?.withFiles != null) run('UPDATE tele_mirrors SET with_files = ? WHERE id = ?', req.body.withFiles ? 1 : 0, m.id);
     if (req.body?.visibility != null) {
       if (!VISIBILITY.includes(req.body.visibility)) fail(400, 'حالت نمایش نامعتبر است');
       setVisibility(m.chat_id, req.body.visibility, req.user.id);
@@ -491,9 +527,12 @@ export default async function teleRoutes(app) {
     return { minutes: n };
   });
 
-  // A mirrored post's photo: fetched from Telegram by the first member who opens it (any app user,
-  // not only Telegram users, so not under /api/tele/).
-  app.post('/api/mirror-photos/:id', limit(30), async (req) => ({ message: await loadMirrorPhoto(req.user, req.params.id) }));
+  // A mirrored post's photo, video or file: fetched from Telegram by the first member who opens it
+  // (any app user, not only Telegram users, so not under /api/tele/; videos and files only users the
+  // admin allowed). /mirror-photos is the v1.0.15 address.
+  for (const route of ['/api/mirror-media/:id', '/api/mirror-photos/:id']) {
+    app.post(route, limit(30), async (req) => ({ message: await loadMirrorMedia(req.user, req.params.id) }));
+  }
 
   // ---------- Admin: alerts ----------
   app.get('/api/admin/tele/alerts', async (req) => {

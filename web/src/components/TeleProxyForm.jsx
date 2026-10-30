@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { api } from '../api';
 import { useStore } from '../store';
 import { toFa } from '../util';
-import { Plus, ClipboardPaste, SlidersHorizontal } from 'lucide-react';
+import { Plus, ClipboardPaste, SlidersHorizontal, FileKey } from 'lucide-react';
 
 // Adding a Telegram proxy: a form per protocol (like the outbound form of x-ui panels) or a pasted
 // config. The server checks every field and builds the sing-box config itself.
@@ -136,6 +136,7 @@ export default function TeleAddProxy({ onAdded }) {
   const [form, setForm] = useState(DEFAULTS);
   const [name, setName] = useState('');
   const [links, setLinks] = useState('');
+  const [ovpn, setOvpn] = useState({ ovpn: '', file: '', username: '', password: '' });
   const [busy, setBusy] = useState(false);
   const def = TYPES[type];
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
@@ -144,13 +145,20 @@ export default function TeleAddProxy({ onAdded }) {
     e.preventDefault();
     setBusy(true);
     try {
-      const body = mode === 'form' ? { name: name || undefined, form: { ...form, type } } : { name: name || undefined, links };
+      const body =
+        mode === 'form'
+          ? { name: name || undefined, form: { ...form, type } }
+          : mode === 'openvpn'
+            ? { name: name || undefined, openvpn: { ovpn: ovpn.ovpn, username: ovpn.username, password: ovpn.password } }
+            : { name: name || undefined, links };
       if (mode === 'paste' && !links.trim()) return;
+      if (mode === 'openvpn' && !ovpn.ovpn.trim()) return showToast('فایل .ovpn را انتخاب کنید');
       const r = await api('POST', '/admin/tele/proxies', body);
       const n = r.proxies?.length || 0;
       showToast(r.errors?.length ? `${toFa(n)} پروکسی اضافه شد؛ ${toFa(r.errors.length)} مورد خطا داشت: ${r.errors.join(' · ')}` : `${toFa(n)} پروکسی اضافه شد؛ حالا تستش کنید`);
       setLinks('');
       setName('');
+      setOvpn({ ovpn: '', file: '', username: '', password: '' });
       // Secrets are not kept in the browser after adding.
       setForm(DEFAULTS);
       onAdded?.();
@@ -170,6 +178,9 @@ export default function TeleAddProxy({ onAdded }) {
         <button type="button" role="tab" aria-selected={mode === 'paste'} className={mode === 'paste' ? 'active' : ''} onClick={() => setMode('paste')}>
           <ClipboardPaste size={15} /> چسباندن کانفیگ / لینک
         </button>
+        <button type="button" role="tab" aria-selected={mode === 'openvpn'} className={mode === 'openvpn' ? 'active' : ''} onClick={() => setMode('openvpn')}>
+          <FileKey size={15} /> OpenVPN
+        </button>
       </div>
 
       <label>
@@ -177,7 +188,37 @@ export default function TeleAddProxy({ onAdded }) {
         <input value={name} onChange={(e) => setName(e.target.value)} placeholder="مثلاً: آلمان ۱" maxLength={80} />
       </label>
 
-      {mode === 'form' ? (
+      {mode === 'openvpn' ? (
+        <>
+          <p className="hint">فایل ‎.ovpn‎ را که فروشنده یا پنل VPN داده انتخاب کنید (گواهی‌ها داخل همان فایل باشند). اگر نام کاربری و رمز دارد، پایین بنویسید. فقط ترافیک تلگرام از این تونل می‌رود؛ بعد از افزودن چند ثانیه طول می‌کشد تا وصل شود، بعد «تست» را بزنید.</p>
+          <label>
+            فایل OpenVPN
+            <input
+              type="file"
+              accept=".ovpn,.conf,text/plain"
+              onChange={async (e) => {
+                const f = e.target.files?.[0];
+                if (!f) return;
+                if (f.size > 256 * 1024) return showToast('فایل بیش از حد بزرگ است');
+                const text = await f.text();
+                setOvpn((o) => ({ ...o, ovpn: text, file: f.name }));
+                if (!name) setName(f.name.replace(/\.(ovpn|conf)$/i, '').slice(0, 80));
+              }}
+            />
+          </label>
+          {ovpn.file && <small className="muted">{ovpn.file} · {toFa(ovpn.ovpn.split('\n').length)} خط</small>}
+          <div className="tele-fields">
+            <label>
+              نام کاربری (اگر دارد)
+              <input value={ovpn.username} onChange={(e) => setOvpn((o) => ({ ...o, username: e.target.value }))} dir="ltr" autoComplete="off" spellCheck={false} />
+            </label>
+            <label>
+              رمز (اگر دارد)
+              <input type="password" value={ovpn.password} onChange={(e) => setOvpn((o) => ({ ...o, password: e.target.value }))} dir="ltr" autoComplete="new-password" />
+            </label>
+          </div>
+        </>
+      ) : mode === 'form' ? (
         <>
           <label>
             نوع

@@ -1294,6 +1294,48 @@ async function part3() {
   assert.ok((await discover(dave)).includes(mirror.chatId), 'not listed while public');
   ok(await dave.call('POST', `/api/chats/${mirror.chatId}/join`, {}), 'dave joins from explore');
 
+  log('Videos and files: only noted; fetched only by users the admin allowed, then open to every member');
+  ok(await owner.call('PATCH', `/api/admin/tele/accounts/${ownerAcc.id}`, { allowFiles: true }), 'files for the owner');
+  ok(await owner.call('PATCH', `/api/admin/tele/mirrors/${mirror.id}`, { withFiles: true }), 'mirror files');
+  r = await owner.call('POST', `/api/tele/dialogs/${channelDialog.id}/file?caption=${encodeURIComponent(`news file ${RUN}`)}`, null, { form: fileForm(Buffer.from(`file body ${RUN}`), 'text/plain', `news-${RUN}.txt`) });
+  assert.equal(r.http, 201, JSON.stringify(r));
+  const filePost = await until('the file post in the app channel', async () => {
+    await owner.call('POST', '/api/admin/tele/mirrors/run', {});
+    return (await appMsgs()).find((x) => x.text === `news file ${RUN}`);
+  }, 90000);
+  assert.ok(filePost.pendingFile && !filePost.file, `file fetched already: ${JSON.stringify(filePost)}`);
+  assert.equal(filePost.pendingFile.name, `news-${RUN}.txt`);
+  assert.equal(filePost.pendingFile.kind, 'file');
+  assert.equal((await alice.call('GET', '/api/auth/me')).user.mirrorFiles, false);
+  r = await alice.call('POST', `/api/mirror-media/${filePost.id}`, {});
+  assert.equal(r.http, 403, 'fetched without permission');
+  r = ok(await owner.call('GET', '/api/admin/access/mirror-files'), 'file access');
+  ok(await owner.call('PATCH', '/api/admin/access/mirror-files', { add: [r.users.find((u) => u.username === 'alice').id] }), 'allow alice');
+  r = ok(await alice.call('POST', `/api/mirror-media/${filePost.id}`, {}), 'alice fetches the file');
+  assert.equal(r.message.type, 'file');
+  assert.equal(r.message.file.name, `news-${RUN}.txt`);
+  assert.ok(!r.message.pendingFile);
+  const doc = await download(dave, `/api/files/${r.message.file.id}?download=1`);
+  assert.equal(doc.http, 200, 'another member can not download it');
+  assert.equal(doc.bytes.toString(), `file body ${RUN}`);
+
+  log('A Telegram group: its messages appear in an app channel with the name of who wrote them');
+  r = ok(await owner.call('GET', '/api/admin/tele/mirrors/channels'), 'channels and groups');
+  assert.ok(r.channels.some((c) => Number(c.tgChatId) === meta.groupChatId && c.kind === 'group'), 'group not offered');
+  r = ok(await owner.call('POST', '/api/admin/tele/mirrors', { tgChatId: String(meta.groupChatId), importLast: 0, visibility: 'link' }), 'mirror the group');
+  const gm = r.mirror;
+  assert.equal(gm.kind, 'group');
+  const botMe = await bot.invoke({ _: 'getMe' });
+  const botName = [botMe.first_name, botMe.last_name].filter(Boolean).join(' ');
+  await bot.invoke({ _: 'sendMessage', chat_id: meta.groupChatId, input_message_content: { _: 'inputMessageText', text: { _: 'formattedText', text: `group news ${RUN}` } } });
+  const groupPost = await until('the group message in the app channel', async () => {
+    await owner.call('POST', '/api/admin/tele/mirrors/run', {});
+    const x = ok(await owner.call('GET', `/api/chats/${gm.chatId}/messages?limit=50`), 'group channel');
+    return x.messages.find((y) => y.text === `group news ${RUN}`);
+  }, 90000);
+  assert.equal(groupPost.forwardedFrom, `تلگرام · ${gm.title} · ${botName}`.slice(0, 120), 'the writer is not shown');
+  ok(await owner.call('DELETE', `/api/admin/tele/mirrors/${gm.id}`), 'remove the group mirror');
+
   log('Paused: nothing is copied; resumed: it catches up');
   ok(await owner.call('PATCH', `/api/admin/tele/mirrors/${mirror.id}`, { enabled: false }), 'pause');
   await postText(`news three ${RUN}`);
@@ -1309,6 +1351,12 @@ async function part3() {
   r = ok(await owner.call('GET', '/api/admin/tele/mirrors'), 'mirrors');
   assert.equal(r.mirrors.length, 0);
   assert.ok((await appMsgs()).length > 0, 'the app channel lost its posts');
+
+  log('Traffic per day: the owner\'s Telegram use shows up for today');
+  r = ok(await owner.call('GET', `/api/admin/tele/accounts/${ownerAcc.id}/usage`), 'usage history');
+  assert.equal(r.days.length, 30);
+  assert.equal(r.months.length, 6);
+  assert.ok(r.days.at(-1).bytes > 0, `nothing counted today: ${JSON.stringify(r.days.slice(-2))}`);
   await stopServer();
 }
 

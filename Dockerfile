@@ -10,7 +10,7 @@ RUN npm run build && npm prune --omit=dev && mkdir -p android-dist
 
 FROM node:24-bookworm-slim
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ffmpeg tini ca-certificates wget \
+  && apt-get install -y --no-install-recommends ffmpeg tini ca-certificates wget openvpn iproute2 \
   && rm -rf /var/lib/apt/lists/* \
   && mkdir /data && chown node:node /data \
   # npm is not used at run time (and brings its own packages with known issues): out of the image.

@@ -28,9 +28,11 @@ import appRoutes from './routes/app.js';
 import folderRoutes from './routes/folders.js';
 import teleRoutes from './routes/tele.js';
 import securityRoutes from './routes/security.js';
+import updateRoutes from './routes/update.js';
 import { refreshEgress, startHealthLoop, stopEgress } from './tele/egress.js';
 import { startAlertLoop } from './tele/alerts.js';
 import { startMirrorLoop } from './tele/mirror.js';
+import { syncOvpn } from './tele/ovpn.js';
 import { isBanned, pruneSecurity } from './secwatch.js';
 import { startVoiceSync } from './voice.js';
 import { startHealth } from './health.js';
@@ -131,7 +133,13 @@ await app.register(fileRoutes);
 await app.register(adminRoutes);
 await app.register(teleRoutes);
 await app.register(securityRoutes);
+await app.register(updateRoutes);
 // Bring the Telegram tunnel back after a restart or update (not only on the next login).
+try {
+  syncOvpn();
+} catch (e) {
+  console.warn('[tele] OpenVPN configs:', e?.message || e);
+}
 refreshEgress();
 // Scheduled proxy checks (when the admin turned them on): test all, move to the best healthy one.
 startHealthLoop();

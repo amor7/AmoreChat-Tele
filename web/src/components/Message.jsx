@@ -1,11 +1,11 @@
 import { memo, useRef, useState } from 'react';
 import { api } from '../api';
 import { useStore } from '../store';
-import { formatTime, messagePreview, toFa, callSummary } from '../util';
+import { formatTime, messagePreview, toFa, callSummary, formatSize, formatClock } from '../util';
 import { startCall } from '../rtc';
 import { EmojiImg, RichText, isBigEmoji } from './Emoji';
 import PreviewIcon from './PreviewIcon';
-import { Clock, AlertCircle, Hourglass, Forward, Timer, Pin, Check, CheckCheck, EllipsisVertical, PhoneMissed, PhoneOutgoing, PhoneIncoming, Phone, Video, ImageDown } from 'lucide-react';
+import { Clock, AlertCircle, Hourglass, Forward, Timer, Pin, Check, CheckCheck, EllipsisVertical, PhoneMissed, PhoneOutgoing, PhoneIncoming, Phone, Video, ImageDown, Film, FileText, Download } from 'lucide-react';
 import Avatar from './Avatar';
 import { VoicePlayer, ImageMessage, VideoMessage, FileCard } from './Media';
 
@@ -63,9 +63,45 @@ function PendingPhoto({ m }) {
   );
 }
 
+// A mirrored channel's video or file not fetched yet: users the admin allowed fetch it (for everyone).
+const PENDING_KIND = { video: 'ویدیو', audio: 'صدا', file: 'فایل' };
+function PendingFile({ m }) {
+  const [busy, setBusy] = useState(false);
+  const may = useStore((s) => !!s.me?.mirrorFiles);
+  const p = m.pendingFile;
+  const Icon = p.kind === 'video' ? Film : FileText;
+  const load = async () => {
+    setBusy(true);
+    try {
+      const r = await api('POST', `/mirror-media/${m.id}`, {}, { timeout: 15 * 60000 });
+      useStore.getState().updateMessage(r.message);
+    } catch (e) {
+      useStore.getState().showToast(e.message);
+      setBusy(false);
+    }
+  };
+  const info = [PENDING_KIND[p.kind] || 'فایل', p.size ? formatSize(p.size) : '', p.duration ? formatClock(p.duration) : ''].filter(Boolean).join(' · ');
+  return (
+    <div className="pending-file">
+      <Icon size={26} />
+      <span className="grow">
+        <b dir="auto">{p.name || PENDING_KIND[p.kind]}</b>
+        <small className="muted">{info}</small>
+        {!may && <small className="muted">هنوز دریافت نشده؛ وقتی کسی که اجازه دارد آن را بگیرد، برای شما هم باز می‌شود.</small>}
+      </span>
+      {may && (
+        <button className="btn sm" onClick={load} disabled={busy}>
+          <Download size={14} /> {busy ? 'در حال دریافت…' : 'دریافت'}
+        </button>
+      )}
+    </div>
+  );
+}
+
 function Content({ m, mine }) {
   const f = m.file;
   if (!f && m.pendingPhoto && m.type !== 'deleted') return <PendingPhoto m={m} />;
+  if (!f && m.pendingFile && m.type !== 'deleted') return <PendingFile m={m} />;
   if (!f) return null;
   if (f.purged)
     return (

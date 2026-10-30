@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { promisify } from 'node:util';
 import { get, all, run, now } from './db.js';
 import { effectiveLimits } from './limits.js';
+import { accessAllowed } from './access.js';
 import { disconnectSessions } from './realtime.js';
 
 const scrypt = promisify(crypto.scrypt);
@@ -93,5 +94,5 @@ export function publicUser(u) {
 }
 
 export function selfUser(u) {
-  return { ...publicUser(u), adminPerms: JSON.parse(u.admin_perms || '[]'), limits: effectiveLimits(u), twoFactor: !!u.totp_enabled };
+  return { ...publicUser(u), adminPerms: JSON.parse(u.admin_perms || '[]'), limits: effectiveLimits(u), twoFactor: !!u.totp_enabled, mirrorFiles: accessAllowed('mirror_files', u) };
 }

@@ -3,7 +3,8 @@
 # downloads it again when a library changed; the app code goes on top (deploy/Dockerfile.app).
 FROM node:24-alpine
 # ffmpeg is used for voice/video processing (bundled so offline installs already have it).
-RUN apk add --no-cache ffmpeg tini && mkdir /data && chown node:node /data
+# openvpn and iproute2: only for the separate "ovpn" service (OpenVPN configs of the Tele VPN).
+RUN apk add --no-cache ffmpeg tini openvpn iproute2 && mkdir /data && chown node:node /data
 # sing-box: the tunnel that carries only Telegram traffic through the admin's proxy. Bundled (and
 # checksum-verified) so offline servers have it; SING_BOX_PATH or data/bin/sing-box can override it.
 ARG SING_BOX_VERSION=1.14.4

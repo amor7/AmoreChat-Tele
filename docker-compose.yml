@@ -30,6 +30,24 @@ services:
     expose:
       - '3000'
 
+  # OpenVPN configs of the Tele VPN (if the admin adds any): the same image, with the network rights
+  # a VPN client needs, which the app itself does not get. Each config is a tunnel used only by
+  # Telegram traffic (see server/ovpn/); with no OpenVPN config it only waits.
+  ovpn:
+    image: amorechat:latest
+    pull_policy: never
+    depends_on:
+      - app
+    restart: unless-stopped
+    user: root
+    cap_add:
+      - NET_ADMIN
+    entrypoint: ['/sbin/tini', '--', '/bin/sh', '/app/server/ovpn/supervisor.sh']
+    healthcheck:
+      disable: true
+    volumes:
+      - ./data:/data
+
   # Voice/video media server (calls, voice chats, streaming).
   livekit:
     image: livekit/livekit-server:v1.13.7
