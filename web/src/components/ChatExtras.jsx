@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Bell, BellOff, Play, FileText, Mic, Link as LinkIcon, Image as ImageIcon } from 'lucide-react';
+import { Bell, BellOff, Play, FileText, Mic, Link as LinkIcon, Image as ImageIcon, Music } from 'lucide-react';
 import { api, fileUrl } from '../api';
 import { useStore } from '../store';
 import { isChatMuted } from '../socket';
@@ -60,6 +60,7 @@ export function NotifyMute({ chat }) {
 const TABS = [
   ['media', 'عکس و ویدیو', ImageIcon],
   ['files', 'فایل', FileText],
+  ['music', 'موزیک', Music],
   ['voice', 'صدا', Mic],
   ['links', 'لینک', LinkIcon],
 ];
@@ -133,7 +134,7 @@ export function MediaGallery({ chatId }) {
                   ))
                 ) : (
                   <button className="row-item" onClick={() => openMessage(m)}>
-                    {kind === 'voice' ? <Mic size={20} /> : <FileText size={20} />}
+                    {kind === 'voice' ? <Mic size={20} /> : kind === 'music' ? <Music size={20} /> : <FileText size={20} />}
                     <span className="grow">
                       <b>{kind === 'voice' ? m.sender?.displayName || 'پیام صوتی' : m.file?.name}</b>
                       <small className="muted">

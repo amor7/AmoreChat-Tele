@@ -1,9 +1,9 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useStore, isUserOnline } from '../store';
 import { api } from '../api';
-import { formatDay, formatLastSeen, sameDay, toFa, hasChatPerm, canPostInChannel, messagePreview, copyText, QUICK_REACTIONS } from '../util';
+import { formatDay, formatLastSeen, sameDay, toFa, hasChatPerm, hasSitePerm, canPostInChannel, messagePreview, copyText, QUICK_REACTIONS } from '../util';
 import Avatar from './Avatar';
-import Message from './Message';
+import Message, { DeletedNote } from './Message';
 import Composer from './Composer';
 import { VoiceBanner } from './Voice';
 import { isStageAdmin } from './VoiceTools';
@@ -187,7 +187,7 @@ export default function ChatView({ chatId }) {
       if (action === 'toTele') st().openModal('chatToTele', { message: m });
       if (action === 'readers') st().openModal('readers', { message: m });
       if (action === 'pin' || action === 'unpin') await api('POST', `/messages/${m.id}/pin`, { pinned: action === 'pin' });
-      if (action === 'delete' && confirm('این پیام برای همه حذف شود؟')) await api('DELETE', `/messages/${m.id}`);
+      if (action === 'delete' && confirm(chat.type === 'dm' || chat.type === 'saved' ? 'این پیام برای همه حذف شود؟' : 'این پیام برای همه حذف شود؟ مدیران سرور تا مدتی می‌توانند اصل آن را ببینند.')) await api('DELETE', `/messages/${m.id}`);
       if (action === 'report') {
         const reason = prompt('دلیل گزارش این پیام (اختیاری):');
         if (reason !== null) {
@@ -210,6 +210,10 @@ export default function ChatView({ chatId }) {
   const canPin = chat.type === 'dm' || chat.type === 'saved' || hasChatPerm(me, chat, 'pin_messages');
   const canDeleteOthers = hasChatPerm(me, chat, 'delete_messages');
 
+  // A deleted message leaves no trace, except for moderators where its content is kept.
+  const moderator = hasSitePerm(me, 'manage_chats');
+  const shown = messages?.filter((m) => m.type !== 'deleted' || (moderator && m.kept));
+
   return (
     <div
       className="chat-view"
@@ -226,22 +230,26 @@ export default function ChatView({ chatId }) {
       <div className="messages" ref={listRef} onScroll={onScroll}>
         {hasMore && messages?.length > 0 && <div className="muted center pad">…</div>}
         {!messages && <div className="muted center pad">در حال بارگذاری…</div>}
-        {messages?.length === 0 && <div className="muted center pad">هنوز پیامی نیست. اولین پیام را بفرستید!</div>}
-        {messages?.map((m, i) => {
-          const prev = messages[i - 1];
+        {shown?.length === 0 && <div className="muted center pad">هنوز پیامی نیست. اولین پیام را بفرستید!</div>}
+        {shown?.map((m, i) => {
+          const prev = shown[i - 1];
           const newDay = !prev || !sameDay(prev.createdAt, m.createdAt);
           const grouped = !newDay && prev && prev.type !== 'system' && prev.sender?.id === m.sender?.id && m.createdAt - prev.createdAt < 5 * 60000;
           return (
             <Fragment key={m.id}>
               {newDay && <div className="day-sep">{formatDay(m.createdAt)}</div>}
-              <Message
-                m={m}
-                chat={chat}
-                mine={m.sender?.id === me.id}
-                grouped={grouped}
-                onJump={goTo}
-                onMenu={(x, y) => setMenu({ m, x, y })}
-              />
+              {m.type === 'deleted' ? (
+                <DeletedNote m={m} />
+              ) : (
+                <Message
+                  m={m}
+                  chat={chat}
+                  mine={m.sender?.id === me.id}
+                  grouped={grouped}
+                  onJump={goTo}
+                  onMenu={(x, y) => setMenu({ m, x, y })}
+                />
+              )}
             </Fragment>
           );
         })}

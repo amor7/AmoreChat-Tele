@@ -56,9 +56,16 @@ jobs:
           CODE=$(grep -oP 'SETUP CODE: \K\S+' server-tl.log)
           DATA_DIR=/tmp/hs-tl node server/test/tele-local.mjs http://127.0.0.1:3106 "$CODE"
           ! grep "\"level\":50" server-tl.log
+      - name: Deleted messages, account lock, music tags
+        run: |
+          DATA_DIR=/tmp/hs-dm PORT=3107 node server/src/index.js > server-dm.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf http://localhost:3107/healthz && break; sleep 1; done
+          CODE=$(grep -oP 'SETUP CODE: \K\S+' server-dm.log)
+          node server/test/deleted-music.mjs http://127.0.0.1:3107 "$CODE"
+          ! grep "\"level\":50" server-dm.log
       - name: Server logs
         if: always()
-        run: cat server.log server-rtc.log server-acc.log server-pen.log server-tl.log
+        run: cat server.log server-rtc.log server-acc.log server-pen.log server-tl.log server-dm.log
 
   compose:
     runs-on: ubuntu-latest

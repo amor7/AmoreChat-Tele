@@ -11,6 +11,7 @@ import ChatView from './components/ChatView';
 import TeleView from './components/TeleView';
 import Modals from './components/Modals';
 import { VoiceBar, RoomView, IncomingCall, useAutoExpandCalls } from './components/Voice';
+import { MusicBar } from './components/Music';
 import { initNative } from './native';
 import { saveBoot, loadBoot, startOutbox } from './offline';
 import { useAppUpdateCheck } from './components/AndroidApp';
@@ -121,6 +122,7 @@ function Main() {
       <EmergencyBanner />
       <div className="voice-area">
         <VoiceBar />
+        <MusicBar />
       </div>
       {tele ? (
         <TeleView dialogId={tele.dialogId} />

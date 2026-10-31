@@ -255,6 +255,13 @@ public class MainActivity extends Activity {
 
     // ---------- Native -> web events ----------
 
+    /** A button of the music notification: back to the player in the page. */
+    static void musicCommand(String cmd, long ms) {
+        MainActivity a = current.get();
+        if (a == null || a.web == null) return;
+        a.runOnUiThread(() -> a.web.evaluateJavascript("window.__amoreMusic&&window.__amoreMusic(" + JSONObject.quote(cmd) + "," + ms + ")", null));
+    }
+
     void toWeb(JSONObject event) {
         String js = "(window.__amoreQ=window.__amoreQ||[]).push(" + event + ");window.dispatchEvent(new Event('amore-native'));";
         runOnUiThread(() -> {
@@ -364,6 +371,8 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        // The sound lives in the page: without the page there is no player to show.
+        MusicService.stop(this);
         if (web != null) {
             web.removeJavascriptInterface("AmoreAndroid");
             web.destroy();
@@ -747,6 +756,20 @@ public class MainActivity extends Activity {
             runOnUiThread(() -> {
                 String server = Prefs.server(MainActivity.this);
                 web.loadUrl(server == null ? SETUP_URL : server + "/");
+            });
+        }
+
+        // The player's state (see web/src/music.js): an empty object when it closed.
+        @JavascriptInterface
+        public void music(String json) {
+            runOnUiThread(() -> {
+                try {
+                    JSONObject j = new JSONObject(json);
+                    String title = j.optString("title", "");
+                    if (title.isEmpty()) MusicService.stop(MainActivity.this);
+                    else MusicService.update(MainActivity.this, title, j.optString("artist", ""), j.optBoolean("playing"), j.optLong("position"), j.optLong("duration"), (float) j.optDouble("speed", 1));
+                } catch (Exception ignored) {
+                }
             });
         }
 

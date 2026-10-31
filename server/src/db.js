@@ -454,6 +454,27 @@ const migrations = [
   );
   ALTER TABLE tele_accounts ADD COLUMN quota_warned TEXT NOT NULL DEFAULT '';
   `,
+  // v17: what people delete in groups and channels, kept a while for moderators; browsers that
+  // logged in before (they get past an account lock); title and artist of music files.
+  `
+  CREATE TABLE deleted_messages (
+    message_id INTEGER PRIMARY KEY REFERENCES messages(id) ON DELETE CASCADE,
+    type TEXT NOT NULL,
+    text TEXT NOT NULL DEFAULT '',
+    file_id INTEGER,
+    by INTEGER,
+    at INTEGER NOT NULL
+  );
+  CREATE INDEX deleted_messages_file ON deleted_messages (file_id);
+  CREATE TABLE trusted_devices (
+    token_hash TEXT NOT NULL,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    at INTEGER NOT NULL,
+    PRIMARY KEY (token_hash, user_id)
+  );
+  ALTER TABLE files ADD COLUMN title TEXT;
+  ALTER TABLE files ADD COLUMN artist TEXT;
+  `,
 ];
 
 const current = db.prepare('PRAGMA user_version').get().user_version;

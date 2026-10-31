@@ -1,5 +1,6 @@
 // Voice rooms, 1:1 calls and streaming on top of LiveKit.
 // livekit-client is loaded lazily so plain chat users never download it.
+import { pauseMusic } from './music';
 import { api } from './api';
 import { useStore } from './store';
 import { startRing, stopRing } from './sounds';
@@ -200,6 +201,7 @@ async function connect(session, token, { video = false, speak = true } = {}) {
     rtc: { state: 'connecting', participants: [], micOn: false, camOn: false, screenOn: false, deafened: false, ptt: false, expanded: false, stage: null, hand: false, ...session },
   });
   try {
+    pauseMusic();
     await r.connect(wsUrl(), token, { autoSubscribe: session.kind === 'call' });
   } catch (e) {
     cleanup();

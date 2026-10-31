@@ -223,10 +223,16 @@ export const useStore = create((set, get) => ({
       };
     });
   },
-  markDeleted({ id, chatId }) {
+  markDeleted({ id, chatId, kept }) {
     const list = get().messages[chatId];
+    const wasLast = get().chats[chatId]?.lastMessage?.id === id;
     const m = list?.find((x) => x.id === id) || get().chats[chatId]?.lastMessage;
-    if (m?.id === id) get().updateMessage({ ...m, type: 'deleted', text: '', file: null, pinned: false });
+    if (m?.id === id) get().updateMessage({ ...m, type: 'deleted', kept: !!kept, text: '', file: null, sender: null, pinned: false });
+    // Replies lose their quote, and the chat list shows the message before it.
+    if (list?.some((x) => x.replyTo?.id === id)) {
+      set((s) => ({ messages: { ...s.messages, [chatId]: s.messages[chatId].map((x) => (x.replyTo?.id === id ? { ...x, replyTo: { ...x.replyTo, type: 'deleted', text: '' } } : x)) } }));
+    }
+    if (wasLast) get().refreshChat(chatId);
   },
 
   markRead(chatId) {

@@ -11,6 +11,7 @@ export function purgeIfOrphan(fileId) {
   const used = get(
     `SELECT 1 AS x WHERE
        EXISTS (SELECT 1 FROM messages WHERE file_id = ?1 AND deleted = 0)
+       OR EXISTS (SELECT 1 FROM deleted_messages WHERE file_id = ?1)
        OR EXISTS (SELECT 1 FROM users WHERE avatar_file_id = ?1)
        OR EXISTS (SELECT 1 FROM chats WHERE avatar_file_id = ?1)`,
     fileId,
@@ -18,11 +19,24 @@ export function purgeIfOrphan(fileId) {
   if (!used) purgeFile(fileId);
 }
 
-export function deleteMessage(m) {
+// `by`: who deleted it. In a group or channel its content is kept for moderators for a while (see
+// sweepKeptDeleted); in private chats, and for messages that delete themselves, it is gone at once.
+export function deleteMessage(m, { by = null } = {}) {
+  const chat = by ? get('SELECT type FROM chats WHERE id = ?', m.chat_id) : null;
+  const kept = ['group', 'channel', 'voice'].includes(chat?.type) && settingNumber('deleted_keep_days') > 0;
+  if (kept) run('INSERT OR REPLACE INTO deleted_messages (message_id, type, text, file_id, by, at) VALUES (?, ?, ?, ?, ?, ?)', m.id, m.type, m.text || '', m.file_id || null, by, now());
   run("UPDATE messages SET deleted = 1, text = '', pinned = 0 WHERE id = ?", m.id);
   run('DELETE FROM reactions WHERE message_id = ?', m.id);
   purgeIfOrphan(m.file_id);
-  toChat(m.chat_id, 'message:delete', { id: m.id, chatId: m.chat_id });
+  toChat(m.chat_id, 'message:delete', { id: m.id, chatId: m.chat_id, kept });
+}
+
+function sweepKeptDeleted() {
+  const days = settingNumber('deleted_keep_days') || 30;
+  for (const d of all('SELECT message_id, file_id FROM deleted_messages WHERE at < ? LIMIT 500', now() - days * 86400000)) {
+    run('DELETE FROM deleted_messages WHERE message_id = ?', d.message_id);
+    purgeIfOrphan(d.file_id);
+  }
 }
 
 function sweepExpired() {
@@ -58,7 +72,10 @@ export function startSweeper(log) {
     try {
       sweepExpired();
       // Media retention is cheap but not urgent: check roughly hourly.
-      if (ticks++ % Math.max(1, Math.round(3600_000 / interval)) === 0) sweepOldMedia();
+      if (ticks++ % Math.max(1, Math.round(3600_000 / interval)) === 0) {
+        sweepOldMedia();
+        sweepKeptDeleted();
+      }
     } catch (e) {
       log.error(e, 'sweeper failed');
     }

@@ -155,7 +155,8 @@ for (let i = 0; i < 10; i++) {
   if (r.status === 429 && i < 9) break; // per-IP limiter may trigger first
 }
 r = await client().call('POST', '/api/auth/login', { username: 'bob', password: PASS });
-assert.equal(r.status, 429, 'locked even with the right password');
+assert.equal(r.status, 401, 'locked even with the right password, and it does not say so');
+assert.equal(r.error, (await client().call('POST', '/api/auth/login', { username: 'nobody-here', password: 'x' })).error, 'a locked account looks like any wrong login');
 
 // ---- Mentions & per-chat mute ----
 r = await owner.call('POST', '/api/chats', { type: 'group', title: 'تیم', memberIds: [aliceId, bobId] });

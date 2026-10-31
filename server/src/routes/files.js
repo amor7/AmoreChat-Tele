@@ -5,7 +5,8 @@ import { pipeline } from 'node:stream/promises';
 import { get, all, run, now, parseJSON, UPLOAD_DIR, DATA_DIR } from '../db.js';
 import { effectiveLimits } from '../limits.js';
 import { fail } from '../chats.js';
-import { mediaReady, processVoice, queueVideo, fileVariants } from '../media.js';
+import { hasSitePerm } from '../perms.js';
+import { mediaReady, processVoice, processMusic, queueVideo, fileVariants } from '../media.js';
 
 // Only these types are ever served inline; everything else is a forced
 // download, so an uploaded HTML/SVG file can never run script on our origin.
@@ -77,6 +78,7 @@ export async function registerFile(user, { rel, mime, name, q = {} }) {
   );
   const id = Number(r.lastInsertRowid);
   if (kind === 'audio' && String(q.voice) === '1') await processVoice(id);
+  else if (kind === 'audio' && (await mediaReady)) await processMusic(id).catch(() => {});
   if (processVideo) queueVideo(id, maxQuality);
   const f = get('SELECT * FROM files WHERE id = ?', id);
   return { id, mime: f.mime, size: f.size, kind, name: f.name, status: f.status };
@@ -231,7 +233,9 @@ export default async function fileRoutes(app) {
                       WHERE m.file_id = ?1 AND m.deleted = 0)`,
         f.id,
         uid,
-      );
+      ) ||
+      // Moderators, while a deleted message's content is kept.
+      (hasSitePerm(req.user, 'manage_chats') && get('SELECT 1 AS ok FROM deleted_messages WHERE file_id = ?', f.id));
     if (!allowed) fail(403, 'دسترسی ندارید');
     if (f.purged) fail(410, 'این فایل منقضی و حذف شده است');
 
