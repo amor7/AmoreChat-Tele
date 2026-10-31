@@ -248,4 +248,29 @@ assert.equal(r.http, 400);
 r = await owner('DELETE', '/api/admin/update/files');
 assert.equal(r.files.length, 0);
 
+console.log('- backups: owner only, bad names and a wrong password are refused');
+const backup = (await owner('POST', '/api/admin/backups')).name;
+r = await alice.call('POST', `/api/admin/backups/${backup}/check`);
+assert.equal(r.http, 403);
+r = await owner('POST', `/api/admin/backups/${backup}/check`, {});
+assert.equal(r.check.ok, true, JSON.stringify(r));
+assert.ok(r.check.users >= 4);
+r = await owner('POST', '/api/admin/backups/evil.db/check', {});
+assert.equal(r.http, 400);
+r = await alice.call('POST', `/api/admin/backups/${backup}/restore`, { password: PASS });
+assert.equal(r.http, 403);
+r = await owner('POST', `/api/admin/backups/${backup}/restore`, { password: 'wrong' });
+assert.equal(r.http, 403);
+if (DATA) {
+  fs.rmSync(path.join(DATA, 'update', 'host.json'), { force: true });
+  r = await owner('POST', `/api/admin/backups/${backup}/restore`, { password: PASS });
+  assert.equal(r.http, 400, 'without the helper on the server it says so');
+  // A damaged backup says it is damaged, and is not restored.
+  const damaged = path.join(DATA, 'backups', backup);
+  fs.writeFileSync(damaged, Buffer.concat([Buffer.from('SQLite format 3\0'), Buffer.alloc(9000, 7)]));
+  r = await owner('POST', `/api/admin/backups/${backup}/check`, {});
+  assert.equal(r.check.ok, false);
+  assert.equal((await owner('GET', '/api/admin/backups')).files.find((f) => f.name === backup).check.ok, false);
+}
+
 console.log('\nTele (local): all checks passed');

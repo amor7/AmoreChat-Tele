@@ -49,7 +49,43 @@ export function Backups() {
           <li key={f.name}>
             <span className="grow">
               {formatDateTime(f.createdAt)} <small className="muted">· {formatSize(f.size)}</small>
+              {f.check && <small className={f.check.ok ? 'ok' : 'tele-warn'}> · {f.check.ok ? `سالم، ${toFa(f.check.messages)} پیام` : `خراب: ${f.check.error}`}</small>}
             </span>
+            <button
+              className="btn sm"
+              disabled={busy}
+              onClick={async () => {
+                setBusy(true);
+                try {
+                  await api('POST', `/admin/backups/${f.name}/check`, {}, { timeout: 30 * 60000 });
+                  load();
+                } catch (e) {
+                  showToast(e.message);
+                }
+                setBusy(false);
+              }}
+            >
+              بررسی
+            </button>
+            <button
+              className="btn sm danger"
+              disabled={busy}
+              onClick={async () => {
+                const password = prompt(`همه چیز به ${formatDateTime(f.createdAt)} برمی‌گردد و پیام‌های بعد از آن از بین می‌رود (فایل‌های آپلودی پاک نمی‌شوند). برنامه حدود یک دقیقه در دسترس نیست و شاید دوباره باید وارد شوید.\nبرای ادامه رمز عبور خود را بنویسید:`);
+                if (!password) return;
+                setBusy(true);
+                try {
+                  await api('POST', `/admin/backups/${f.name}/restore`, { password }, { timeout: 30 * 60000 });
+                  showToast('در حال بازگردانی…');
+                  setTimeout(() => location.reload(), 45000);
+                } catch (e) {
+                  showToast(e.message);
+                  setBusy(false);
+                }
+              }}
+            >
+              بازگردانی
+            </button>
             <a className="btn sm" href={`/api/admin/backups/${f.name}`} download>
               <Download size={15} /> دانلود
             </a>

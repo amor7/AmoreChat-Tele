@@ -17,6 +17,8 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
       - run: npm ci
       - run: npm run build
+      - name: Watchdog (when it restarts, and when it must not)
+        run: bash server/test/watchdog.test.sh
       - name: Proxy links and WireGuard files
         run: DATA_DIR=/tmp/hs-uri node server/test/uri.test.mjs
       - name: /ca page fingerprint
@@ -125,6 +127,8 @@ jobs:
           grep -q '"agent":true' /tmp/upd.json
           sudo test -f data/update/host.json && sudo grep -q 'amorechat-runtime\|amorechat:latest' data/update/host.json
           sudo test -f data/update/release-signing.pub
+      - name: Backup restored from the panel; a broken release goes back by itself
+        run: bash server/test/recovery-e2e.sh
       - name: Every address setting gives a valid Caddy config
         run: |
           set -e
