@@ -24,6 +24,8 @@ export const DEFAULTS = {
   // Mirrored channels: who may fetch a video or file from Telegram (same modes as tele_access; once
   // fetched, every member of the channel has it). Default: only the listed users (and the owner).
   mirror_files_access: 'allow',
+  // Messages deleted in groups and channels: days their content stays for moderators.
+  deleted_keep_days: '30',
   // Security alerts to the owner (Saved Messages); wrong passwords from one IP in 15 minutes that
   // count as an attack; ban such an IP by itself, and for how many minutes (0 = until unbanned).
   sec_alerts: '1',

@@ -64,6 +64,10 @@ export function Settings() {
         <input type="number" min="0" value={f.media_retention_days} onChange={(e) => setF({ ...f, media_retention_days: e.target.value })} />
       </label>
       <p className="hint">برای وقتی دیسک سرور کوچک است. پیام‌ها می‌مانند، فقط فایل‌هایشان حذف می‌شود. عکس پروفایل‌ها حذف نمی‌شوند.</p>
+      <label>
+        نگه داشتن پیام‌های حذف‌شده گروه و کانال برای مدیران (روز، ۰ = نگه داشته نشود)
+        <input type="number" min="0" value={f.deleted_keep_days} onChange={(e) => setF({ ...f, deleted_keep_days: e.target.value })} />
+      </label>
       <RtcSettings f={f} setF={setF} />
       <button className="btn primary">ذخیره تنظیمات</button>
     </form>

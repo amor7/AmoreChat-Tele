@@ -3,14 +3,8 @@ import { fileUrl } from '../api';
 import { useStore, useDataSaver } from '../store';
 import { formatSize, formatClock, decodeWaveform } from '../util';
 import { startDownload, cancelDownload } from '../download';
+import { claimPlayback } from '../playback';
 import { Play, Pause, Download, X, Image as ImageIcon } from 'lucide-react';
-
-// Only one voice note / video plays at a time.
-let current = null;
-function claimPlayback(el) {
-  if (current && current !== el) current.pause();
-  current = el;
-}
 
 const SPEEDS = [1, 1.5, 2];
 

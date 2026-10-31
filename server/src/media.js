@@ -78,6 +78,36 @@ export async function processVoice(fileId) {
 const queue = [];
 let busy = false;
 let onUpdate = () => {};
+/** A music file: its length, title, artist and cover picture, from the file's own tags. */
+export async function processMusic(fileId) {
+  const f = get('SELECT * FROM files WHERE id = ?', fileId);
+  if (!f) return;
+  const src = abs(f.path);
+  let info = '';
+  try {
+    info = await ffmpeg(['-hide_banner', '-i', src]);
+  } catch (e) {
+    info = e.stderr || '';
+  }
+  const dur = info.match(/Duration: (\d+):(\d+):(\d+(?:\.\d+)?)/);
+  const tag = (name) => info.match(new RegExp(`^\\s*${name}\\s*: (.+)$`, 'im'))?.[1].trim().slice(0, 200) || null;
+  let thumb = null;
+  if (/Stream #.*: Video:/.test(info)) {
+    const out = f.path + '.thumb.jpg';
+    await ffmpeg(['-y', '-i', src, '-an', '-frames:v', '1', '-vf', 'scale=480:-2', '-q:v', '5', abs(out)])
+      .then(() => (thumb = out))
+      .catch(() => {});
+  }
+  run(
+    'UPDATE files SET duration = ?, title = ?, artist = ?, thumb = ? WHERE id = ?',
+    dur ? Number(dur[1]) * 3600 + Number(dur[2]) * 60 + Number(dur[3]) : f.duration,
+    tag('title'),
+    tag('artist') || tag('album_artist'),
+    thumb,
+    f.id,
+  );
+}
+
 export const onMediaUpdate = (fn) => {
   onUpdate = fn;
 };

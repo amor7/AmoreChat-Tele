@@ -195,9 +195,29 @@ export default async function messageRoutes(app) {
     const { m, chat, member } = requireMessage(req, req.params.id);
     const own = m.sender_id === req.user.id;
     if (!own && !hasChatPerm(req.user, member, 'delete_messages')) fail(403, 'دسترسی حذف این پیام را ندارید');
-    deleteMessage(m);
+    deleteMessage(m, { by: req.user.id });
     if (!own) audit(req.user.id, 'message.delete', m.id, { chat: chat.id, sender: m.sender_id });
     return { ok: true };
+  });
+
+  // What a deleted group / channel message was: moderators only, while it is kept, and logged.
+  app.get('/api/messages/:id/deleted', async (req) => {
+    if (!hasSitePerm(req.user, 'manage_chats')) fail(403, 'دسترسی ندارید');
+    const id = Number(req.params.id);
+    const d = get(
+      `SELECT d.*, m.chat_id, m.created_at, s.display_name AS sender, s.username AS sender_username, b.display_name AS deleted_by,
+         f.name AS f_name, f.mime AS f_mime, f.size AS f_size, f.kind AS f_kind, f.purged AS f_purged
+       FROM deleted_messages d JOIN messages m ON m.id = d.message_id
+       LEFT JOIN users s ON s.id = m.sender_id LEFT JOIN users b ON b.id = d.by LEFT JOIN files f ON f.id = d.file_id
+       WHERE d.message_id = ?`,
+      id,
+    );
+    if (!d) fail(404, 'محتوای این پیام دیگر نگه داشته نشده است');
+    audit(req.user.id, 'message.view_deleted', id, { chat: d.chat_id });
+    return {
+      type: d.type, text: d.text, sender: d.sender, senderUsername: d.sender_username, deletedBy: d.deleted_by, deletedAt: d.at, createdAt: d.created_at,
+      file: d.file_id && !d.f_purged ? { id: d.file_id, name: d.f_name, mime: d.f_mime, size: d.f_size, kind: d.f_kind } : null,
+    };
   });
 
   app.post('/api/messages/:id/pin', async (req) => {
@@ -234,6 +254,7 @@ export default async function messageRoutes(app) {
     const where = {
       media: "m.type IN ('image', 'video')",
       files: "m.type = 'file'",
+      music: "m.type = 'file' AND f.kind = 'audio'",
       voice: "m.type = 'voice'",
       links: "m.type = 'text' AND (m.text LIKE '%http://%' OR m.text LIKE '%https://%')",
     }[req.query.kind] || "m.type IN ('image', 'video')";

@@ -275,7 +275,7 @@ export default async function adminRoutes(app) {
     const action = req.body?.action === 'delete' ? 'delete' : 'dismiss';
     if (action === 'delete') {
       const m = get('SELECT * FROM messages WHERE id = ?', r.message_id);
-      if (m && !m.deleted) deleteMessage(m);
+      if (m && !m.deleted) deleteMessage(m, { by: req.user.id });
     }
     // Close every open report about the same message at once.
     run(

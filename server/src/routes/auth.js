@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs';
+import crypto from 'node:crypto';
 import { get, all, run, now, tx, parseJSON } from '../db.js';
 import { getSetting, hasAnyUser } from '../settings.js';
 import {
@@ -29,10 +30,38 @@ const authLimit = { rateLimit: { max: 10, timeWindow: '1 minute' } };
 const DUMMY_HASH = await hashPassword(randomCode(16));
 
 // Lock an account for 15 minutes after 10 wrong passwords/codes in a row (on top of the
-// per-IP rate limit), so guessing a password from many IPs doesn't work either.
+// per-IP rate limit), so guessing a password from many IPs doesn't work either. Browsers that
+// logged in to the account before have a device cookie and are counted apart: strangers typing wrong
+// passwords can't keep the owner out. A locked account answers like any wrong password, so the
+// answer doesn't tell which usernames exist.
 const LOCK_AFTER = 10;
 const LOCK_MS = 15 * 60 * 1000;
+const WRONG_LOGIN = 'نام کاربری یا رمز عبور اشتباه است (بعد از چند تلاش ناموفق، ورود ۱۵ دقیقه قفل می‌شود)';
+const DEVICE_COOKIE = 'ac_device';
+const DEVICE_MS = 365 * 24 * 3600 * 1000;
+const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
+const deviceFails = new Map(); // "user:token hash" → { n, until }
+function trustedDevice(user, req) {
+  const token = req.cookies[DEVICE_COOKIE];
+  if (!user || !token) return null;
+  const hash = sha256(token);
+  return get('SELECT 1 AS ok FROM trusted_devices WHERE token_hash = ? AND user_id = ? AND at > ?', hash, user.id, now() - DEVICE_MS) ? `${user.id}:${hash}` : null;
+}
+const isLocked = (user, device) => (device ? (deviceFails.get(device)?.until || 0) > now() : (user?.locked_until || 0) > now());
+function rememberDevice(user, req, reply) {
+  const token = req.cookies[DEVICE_COOKIE] || randomCode(32);
+  run('INSERT OR REPLACE INTO trusted_devices (token_hash, user_id, at) VALUES (?, ?, ?)', sha256(token), user.id, now());
+  reply.setCookie(DEVICE_COOKIE, token, { ...cookieOptions(req), maxAge: DEVICE_MS / 1000 });
+}
 function noteFailedLogin(user, req) {
+  const device = trustedDevice(user, req);
+  if (device) {
+    const d = deviceFails.get(device) || { n: 0, until: 0 };
+    d.n += 1;
+    if (d.n >= LOCK_AFTER) Object.assign(d, { n: 0, until: now() + LOCK_MS });
+    deviceFails.set(device, d);
+    return;
+  }
   const n = (user.failed_logins || 0) + 1;
   if (n >= LOCK_AFTER) {
     run('UPDATE users SET failed_logins = 0, locked_until = ? WHERE id = ?', now() + LOCK_MS, user.id);
@@ -55,6 +84,7 @@ function issueTicket(userId) {
 function startSession(user, req, reply) {
   noteLogin(user, req.ip, deviceName(req.headers['user-agent']));
   reply.setCookie(SESSION_COOKIE, createSession(user.id, req.headers['user-agent'], req.ip), cookieOptions(req));
+  rememberDevice(user, req, reply);
   const saved = ensureSavedChat(user.id);
   systemMessage(saved, `🔐 ورود جدید به حساب شما: ${deviceName(req.headers['user-agent'])} · IP ${req.ip}. اگر شما نبودید، از پروفایل ← دستگاه‌ها آن را خارج کنید و رمز را عوض کنید.`);
 }
@@ -124,6 +154,7 @@ export default async function authRoutes(app) {
     // Where the account was made counts as a known place (a later login from elsewhere is "new").
     noteLogin(get('SELECT * FROM users WHERE id = ?', userId), req.ip, deviceName(req.headers['user-agent']));
     reply.setCookie(SESSION_COOKIE, createSession(userId, req.headers['user-agent'], req.ip), cookieOptions(req));
+    rememberDevice({ id: userId }, req, reply);
     return { user: selfUser(get('SELECT * FROM users WHERE id = ?', userId)) };
   });
 
@@ -132,20 +163,20 @@ export default async function authRoutes(app) {
   app.post('/api/auth/login', { config: { public: true, ...authLimit } }, async (req, reply) => {
     const { username, password } = req.body || {};
     const user = get('SELECT * FROM users WHERE username = ?', String(username || ''));
-    if (user?.locked_until && user.locked_until > now()) {
-      noteLoginFailure(req.ip, username);
-      const mins = Math.ceil((user.locked_until - now()) / 60000);
-      fail(429, `به خاطر تلاش‌های ناموفق زیاد، ورود به این حساب ${mins} دقیقه قفل است`);
-    }
+    const device = trustedDevice(user, req);
+    const locked = isLocked(user, device);
     // Unknown usernames are checked against a dummy hash too: the same response time either way,
     // so timing doesn't tell which usernames exist.
-    if (!(await verifyPassword(String(password || ''), user?.password_hash || DUMMY_HASH)) || !user) {
-      if (user) noteFailedLogin(user, req);
+    const right = await verifyPassword(String(password || ''), user?.password_hash || DUMMY_HASH);
+    if (!right || !user || locked) {
+      if (user && !locked) noteFailedLogin(user, req);
       noteLoginFailure(req.ip, username);
-      fail(401, 'نام کاربری یا رمز عبور اشتباه است');
+      fail(401, WRONG_LOGIN);
     }
     if (user.banned) fail(403, 'حساب شما مسدود شده است');
-    run('UPDATE users SET failed_logins = 0, locked_until = NULL WHERE id = ?', user.id);
+    if (device) deviceFails.delete(device);
+    // Coming in on a known device during an attack doesn't give the attacker new tries.
+    if ((user.locked_until || 0) <= now()) run('UPDATE users SET failed_logins = 0, locked_until = NULL WHERE id = ?', user.id);
     if (user.totp_enabled) return { twoFactor: true, ticket: issueTicket(user.id) };
     startSession(user, req, reply);
     return { user: selfUser(user) };

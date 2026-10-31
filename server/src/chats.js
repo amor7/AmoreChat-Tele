@@ -19,16 +19,18 @@ const MSG_SELECT = `
     u.display_name AS sender_name, u.username AS sender_username, u.avatar_file_id AS sender_avatar,
     f.mime AS f_mime, f.size AS f_size, f.name AS f_name, f.kind AS f_kind,
     f.width AS f_w, f.height AS f_h, f.duration AS f_dur, f.status AS f_status,
-    f.variants AS f_variants, f.thumb AS f_thumb, f.waveform AS f_wave, f.purged AS f_purged,
+    f.variants AS f_variants, f.thumb AS f_thumb, f.waveform AS f_wave, f.purged AS f_purged, f.title AS f_title, f.artist AS f_artist,
     ch.type AS chat_type, ch.title AS chat_title, ch.avatar_file_id AS chat_avatar, r.text AS r_text, r.type AS r_type, r.deleted AS r_deleted, ru.display_name AS r_sender,
-    tp.message_id AS tp_id, tp.w AS tp_w, tp.h AS tp_h, tp.size AS tp_size, tp.kind AS tp_kind, tp.name AS tp_name, tp.duration AS tp_dur
+    tp.message_id AS tp_id, tp.w AS tp_w, tp.h AS tp_h, tp.size AS tp_size, tp.kind AS tp_kind, tp.name AS tp_name, tp.duration AS tp_dur,
+    dm.message_id AS dm_id
   FROM messages m
   LEFT JOIN users u ON u.id = m.sender_id
   LEFT JOIN files f ON f.id = m.file_id
   LEFT JOIN messages r ON r.id = m.reply_to
   LEFT JOIN users ru ON ru.id = r.sender_id
   LEFT JOIN chats ch ON ch.id = m.chat_id
-  LEFT JOIN tele_mirror_photos tp ON tp.message_id = m.id`;
+  LEFT JOIN tele_mirror_photos tp ON tp.message_id = m.id
+  LEFT JOIN deleted_messages dm ON dm.message_id = m.id`;
 
 // Reactions grouped per emoji: [{ emoji, users: [userId, ...] }]
 function reactionsFor(ids) {
@@ -66,8 +68,10 @@ export function serializeMessage(m, reactions = []) {
     chatId: m.chat_id,
     type: deleted ? 'deleted' : m.type,
     text: deleted ? '' : m.text,
+    // Deleted: only that it was (so apps drop it); moderators can ask for what is kept (`kept`).
+    kept: deleted && !!m.dm_id,
     // Channel posts appear under the channel's name (like Telegram): subscribers never learn who the admins are.
-    sender: !m.sender_id
+    sender: !m.sender_id || deleted
       ? null
       : m.chat_type === 'channel'
         ? { id: 0, displayName: m.chat_title, username: '', avatar: m.chat_avatar, channel: true }
@@ -87,6 +91,8 @@ export function serializeMessage(m, reactions = []) {
             purged: !!m.f_purged,
             thumb: !!m.f_thumb,
             waveform: m.f_wave,
+            title: m.f_title,
+            artist: m.f_artist,
             variants: parseJSON(m.f_variants, []).map((v) => ({ q: v.q, size: v.size })),
           }
         : null,
@@ -185,7 +191,7 @@ const SUMMARY_SELECT = `
        AND m.deleted = 0 AND m.type != 'system' AND IFNULL(m.sender_id, 0) != cm.user_id) AS unread,
     (SELECT COUNT(*) FROM messages m WHERE m.chat_id = c.id AND m.id > cm.last_read AND m.deleted = 0
        AND m.mentions IS NOT NULL AND EXISTS (SELECT 1 FROM json_each(m.mentions) j WHERE j.value = cm.user_id)) AS unread_mentions,
-    (SELECT MAX(id) FROM messages m WHERE m.chat_id = c.id) AS last_msg_id,
+    (SELECT MAX(id) FROM messages m WHERE m.chat_id = c.id AND m.deleted = 0) AS last_msg_id,
     (SELECT MAX(o.last_read) FROM chat_members o WHERE o.chat_id = c.id AND o.user_id != cm.user_id) AS others_read
   FROM chats c JOIN chat_members cm ON cm.chat_id = c.id AND cm.user_id = ?`;
 

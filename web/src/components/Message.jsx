@@ -1,13 +1,14 @@
 import { memo, useRef, useState } from 'react';
-import { api } from '../api';
+import { api, fileUrl } from '../api';
 import { useStore } from '../store';
-import { formatTime, messagePreview, toFa, callSummary, formatSize, formatClock } from '../util';
+import { formatTime, formatDateTime, messagePreview, toFa, callSummary, formatSize, formatClock } from '../util';
 import { startCall } from '../rtc';
 import { EmojiImg, RichText, isBigEmoji } from './Emoji';
 import PreviewIcon from './PreviewIcon';
-import { Clock, AlertCircle, Hourglass, Forward, Timer, Pin, Check, CheckCheck, EllipsisVertical, PhoneMissed, PhoneOutgoing, PhoneIncoming, Phone, Video, ImageDown, Film, FileText, Download } from 'lucide-react';
+import { Clock, AlertCircle, Hourglass, Forward, Timer, Pin, Check, CheckCheck, EllipsisVertical, PhoneMissed, PhoneOutgoing, PhoneIncoming, Phone, Video, ImageDown, Film, FileText, Download, Trash2 } from 'lucide-react';
 import Avatar from './Avatar';
 import { VoicePlayer, ImageMessage, VideoMessage, FileCard } from './Media';
+import { MusicMessage } from './Music';
 
 const URL_RE = /(https?:\/\/[^\s<]+[^\s<.,;:!?)\]'"،؛])/g;
 
@@ -112,7 +113,49 @@ function Content({ m, mine }) {
   if (m.type === 'image') return <ImageMessage file={f} />;
   if (m.type === 'video') return <VideoMessage file={f} />;
   if (m.type === 'voice') return <VoicePlayer file={f} mine={mine} />;
+  if (f.kind === 'audio') return <MusicMessage m={m} />;
   return <FileCard file={f} />;
+}
+
+// For moderators: where a group or channel message was deleted, and what it said.
+export function DeletedNote({ m }) {
+  const [d, setD] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const show = async () => {
+    setBusy(true);
+    try {
+      setD(await api('GET', `/messages/${m.id}/deleted`));
+    } catch (e) {
+      useStore.getState().showToast(e.message);
+    }
+    setBusy(false);
+  };
+  return (
+    <div className="deleted-note">
+      <div>
+        <Trash2 size={14} /> پیام پاک شده
+        {!d && (
+          <button className="link" disabled={busy} onClick={show}>
+            {busy ? '…' : 'نمایش'}
+          </button>
+        )}
+      </div>
+      {d && (
+        <div className="deleted-body">
+          <small className="muted">
+            از {d.sender || '؟'}
+            {d.senderUsername ? ` (@${d.senderUsername})` : ''} · پاک‌شده توسط {d.deletedBy || '؟'} · {formatDateTime(d.deletedAt)}
+          </small>
+          {d.text && <p dir="auto">{d.text}</p>}
+          {d.file && (
+            <a href={fileUrl(d.file.id)} target="_blank" rel="noreferrer" dir="auto">
+              {d.file.name} ({formatSize(d.file.size)})
+            </a>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 function Reactions({ m, meId }) {
@@ -198,7 +241,7 @@ function Message({ m, chat, mine, grouped, onJump, onMenu }) {
               <Forward size={13} /> فوروارد از {m.forwardedFrom}
             </div>
           )}
-          {m.replyTo && (
+          {m.replyTo && m.replyTo.type !== 'deleted' && (
             <button className="reply-quote" onClick={() => onJump(m.replyTo.id)}>
               <b>{m.replyTo.sender || 'پیام'}</b>
               <span>

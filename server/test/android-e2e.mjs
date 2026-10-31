@@ -240,6 +240,12 @@ try {
 
   step('profile shows the notification connection as connected');
   dt = await devtools();
+  // The page's player tells the app; the app shows it in a notification with the screen off.
+  await dt.evaluate(`AmoreAndroid.music(JSON.stringify({ title: 'آهنگ آزمایشی', artist: 'تست', playing: true, position: 0, duration: 60000, speed: 1 })), true`);
+  await waitUntil(() => notifications().includes('آهنگ آزمایشی'), 'music notification posted');
+  screenshot('music-notification');
+  await dt.evaluate('AmoreAndroid.music("{}"), true');
+  await waitUntil(() => !notifications().includes('آهنگ آزمایشی'), 'music notification removed');
   await waitUntil(async () => {
     const i = JSON.parse(await dt.evaluate('AmoreAndroid.info()'));
     return i.connected === true && i.status === 'متصل';
