@@ -157,7 +157,9 @@ if [ -n "$MANIFEST" ]; then
     if [ "$have" != "$want" ] && [ -n "$want" ] && docker image inspect "$want" >/dev/null 2>&1; then
       docker tag "$want" "$ref" && have=$want
     fi
-    [ "$have" = "$want" ] || NEED_DEPS=1
+    # Their versions are pinned, so the name and version are enough: the id can differ between
+    # Docker versions, and loading the same file again would not change it.
+    [ -n "$have" ] || NEED_DEPS=1
   done
   if docker image inspect "amorechat-runtime:$RUNTIME" >/dev/null 2>&1; then
     echo ">> Runtime $RUNTIME already here (no download)"

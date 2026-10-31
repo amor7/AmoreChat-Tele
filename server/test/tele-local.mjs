@@ -229,6 +229,12 @@ if (DATA) {
   const need = r.needed.map((n) => n.name);
   for (const n of ['amorechat-source.tar.gz', 'manifest.json', 'amorechat-app.tar.gz', 'SHA256SUMS', 'SHA256SUMS.sig', 'amorechat-runtime-aaaaaaaaaaaa-amd64.tar.gz', 'amorechat-deps-bbbbbbbbbbbb-amd64.tar.gz']) assert.ok(need.includes(n), `needs ${n}`);
   assert.ok(r.needed.find((n) => n.name === 'manifest.json').have);
+  // Caddy and LiveKit here under their names, with other ids (other Docker): nothing more is needed.
+  fs.writeFileSync(path.join(DATA, 'update', 'host.json'), JSON.stringify({ at: 1, version: '1.0.0', images: ['amorechat-runtime:aaaaaaaaaaaa sha256:r', 'docker.io/library/caddy:x sha256:other', 'lk:x sha256:other2'] }));
+  fs.utimesSync(path.join(DATA, 'update', 'host.json'), new Date(), new Date());
+  const again = (await owner('GET', '/api/admin/update')).needed.map((n) => n.name);
+  assert.ok(!again.some((n) => n.includes('amorechat-deps-')), 'the deps file is not asked for again');
+  assert.ok(!again.some((n) => n.includes('amorechat-runtime-')));
   // A signature that is not the release's.
   fs.copyFileSync(path.resolve(import.meta.dirname, '../../deploy/release-signing.pub'), path.join(DATA, 'update', 'release-signing.pub'));
   await owner('PUT', '/api/admin/update/files/SHA256SUMS?offset=0', null, Buffer.from('0'.repeat(64) + '  manifest.json\n'));
