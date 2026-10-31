@@ -43,6 +43,28 @@ PathChanged=${DIR}/data/update/request
 [Install]
 WantedBy=multi-user.target
 UNIT
+  # The watchdog: see deploy/watchdog.sh. It only looks at the app on this server, never the network.
+  cat > /etc/systemd/system/amorechat-watchdog.service <<UNIT
+[Unit]
+Description=AmoreChat: restart the app if it is really stuck
+
+[Service]
+Type=oneshot
+Nice=10
+ExecStart=/bin/bash ${DIR}/deploy/watchdog.sh
+UNIT
+  cat > /etc/systemd/system/amorechat-watchdog.timer <<UNIT
+[Unit]
+Description=AmoreChat: check that the app answers
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=1min
+
+[Install]
+WantedBy=timers.target
+UNIT
   systemctl daemon-reload
   systemctl enable --now amorechat-panel-update.path >/dev/null 2>&1 || echo "!! Could not enable updates from the admin panel (systemd)"
+  systemctl enable --now amorechat-watchdog.timer >/dev/null 2>&1 || echo "!! Could not enable the watchdog (systemd)"
 fi

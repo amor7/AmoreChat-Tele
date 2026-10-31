@@ -4,7 +4,9 @@ import path from 'node:path';
 import { Readable } from 'node:stream';
 import { backup } from 'node:sqlite';
 import { db, UPLOAD_DIR, DB_FILE } from '../db.js';
-import { BACKUP_DIR, backupNow } from '../backup.js';
+import { BACKUP_DIR, backupNow, checkBackup, lastCheck } from '../backup.js';
+import { verifyPassword } from '../auth.js';
+import { DATA_DIR } from '../db.js';
 import { fail, audit } from '../chats.js';
 
 // Backups contain every message and password hash: owner only.
@@ -91,7 +93,7 @@ export default async function backupRoutes(app) {
           .reverse()
           .map((name) => {
             const st = fs.statSync(path.join(BACKUP_DIR, name));
-            return { name, size: st.size, createdAt: st.mtimeMs };
+            return { name, size: st.size, createdAt: st.mtimeMs, check: lastCheck(path.join(BACKUP_DIR, name)) };
           })
       : [];
     let uploads = 0;
@@ -143,6 +145,35 @@ export default async function backupRoutes(app) {
     ownerOnly(req);
     const f = await backupNow();
     audit(req.user.id, 'backup.create', '', { file: path.basename(f) });
+    checkBackup(f).catch(() => {});
     return { name: path.basename(f) };
+  });
+
+  const backupFile = (req) => {
+    const name = String(req.params.name);
+    if (!/^amorechat-\d+\.db$/.test(name)) fail(400, 'نام نامعتبر');
+    const abs = path.join(BACKUP_DIR, name);
+    if (!fs.existsSync(abs)) fail(404, 'پیدا نشد');
+    return { name, abs };
+  };
+  app.post('/api/admin/backups/:name/check', { config: { rateLimit: { max: 6, timeWindow: '1 minute' } } }, async (req) => {
+    ownerOnly(req);
+    return { check: await checkBackup(backupFile(req).abs) };
+  });
+
+  // Puts a backup in place of the database (on the server, see deploy/panel-update.sh). Everything
+  // after that backup goes, so it asks for the password; the database of now is kept in backups/.
+  app.post('/api/admin/backups/:name/restore', { config: { rateLimit: { max: 5, timeWindow: '1 minute' } } }, async (req) => {
+    ownerOnly(req);
+    const { name, abs } = backupFile(req);
+    if (!(await verifyPassword(String(req.body?.password || ''), req.user.password_hash))) fail(403, 'رمز عبور اشتباه است');
+    const U = path.join(DATA_DIR, 'update');
+    if (!fs.existsSync(path.join(U, 'host.json'))) fail(400, 'ابزار سرور نصب نیست؛ بازگردانی را روی سرور انجام دهید (راهنمای پایین صفحه)');
+    const check = await checkBackup(abs);
+    if (!check.ok) fail(400, `این نسخه سالم نیست و بازگردانده نمی‌شود: ${check.error}`);
+    audit(req.user.id, 'backup.restore', '', { file: name });
+    fs.writeFileSync(path.join(U, 'restore-name'), name);
+    fs.writeFileSync(path.join(U, 'request'), 'restore\n');
+    return { ok: true };
   });
 }

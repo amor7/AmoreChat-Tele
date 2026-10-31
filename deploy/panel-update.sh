@@ -5,6 +5,8 @@
 #            can say which release files are still needed), and a copy of the release key
 #   apply    installs the files uploaded to data/update/incoming with deploy/update.sh: the same
 #            checks as by hand, the signature against the key of the version installed now
+#   restore  puts a backup (data/update/restore-name) in place of the database; the database of
+#            now is kept in data/backups/before-restore-*, and comes back if the app won't start
 # Everything runs inside main(): update.sh replaces this file while it runs.
 main() {
 set -uo pipefail
@@ -31,13 +33,47 @@ case "$req" in
     chmod 644 "$U/result.json" "$U/log.txt"
     state=failed
     # No terminal: a downgrade question (update.sh) is answered "no".
-    if AMORECHAT_DIR="$DIR" bash "$DIR/deploy/update.sh" "$U/incoming" </dev/null >> "$U/log.txt" 2>&1; then
-      state=done
-      rm -rf "$U/incoming"
-    fi
+    AMORECHAT_DIR="$DIR" bash "$DIR/deploy/update.sh" "$U/incoming" </dev/null >> "$U/log.txt" 2>&1
+    case $? in
+      0) state=done; rm -rf "$U/incoming" ;;
+      3) state=rolledback ;;
+    esac
     printf '{"state":"%s","at":%s}\n' "$state" "$(date +%s)" > "$U/result.json"
     chmod 644 "$U/result.json" "$U/log.txt"
     inspect
+    ;;
+  restore)
+    printf '{"kind":"restore","state":"running","at":%s}\n' "$(date +%s)" > "$U/result.json"
+    chmod 644 "$U/result.json"
+    state=failed
+    name=$(cat "$U/restore-name" 2>/dev/null)
+    db="$DIR/data/amorechat.db"
+    cd "$DIR" || exit 1
+    if [[ "$name" =~ ^amorechat-[0-9]+\.db$ ]] && [ -f "$DIR/data/backups/$name" ]; then
+      keep="$DIR/data/backups/before-restore-$(date +%Y%m%d%H%M%S).db"
+      docker compose stop app
+      cp -p "$db" "$keep"
+      rm -f "$db-wal" "$db-shm"
+      cp "$DIR/data/backups/$name" "$db"
+      chown 1000:1000 "$db" "$keep"
+      docker compose start app
+      ok=""
+      for _ in $(seq 1 36); do
+        docker compose exec -T app wget -qO- http://127.0.0.1:3000/healthz </dev/null >/dev/null 2>&1 && { ok=1; break; }
+        sleep 5
+      done
+      if [ -n "$ok" ]; then
+        state=restored
+      else
+        docker compose stop app
+        cp -p "$keep" "$db"
+        rm -f "$db-wal" "$db-shm"
+        docker compose start app
+      fi
+    fi
+    rm -f "$U/restore-name"
+    printf '{"kind":"restore","state":"%s","at":%s}\n' "$state" "$(date +%s)" > "$U/result.json"
+    chmod 644 "$U/result.json"
     ;;
 esac
 }

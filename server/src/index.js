@@ -193,6 +193,17 @@ if (!hasAnyUser()) {
 setupSocket(app);
 await app.listen({ port: PORT, host: HOST });
 scheduleBackups(app.log);
+// A note from the watchdog (deploy/watchdog.sh), which restarted the app or gave up.
+try {
+  const note = path.join(DATA_DIR, 'watchdog', 'note');
+  if (fs.existsSync(note)) {
+    const text = fs.readFileSync(note, 'utf8').trim();
+    fs.rmSync(note, { force: true });
+    if (text) (await import('./health.js')).raiseAlert(`watchdog-${Date.now()}`, text).catch(() => {});
+  }
+} catch (e) {
+  app.log.warn(e, 'watchdog note');
+}
 startSweeper(app.log);
 startVoiceSync(app.log);
 startHealth(app.log);

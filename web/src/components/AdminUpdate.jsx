@@ -203,10 +203,11 @@ export default function AdminUpdate() {
         <Rocket size={16} /> {running ? 'در حال نصب…' : s.target ? `نصب نسخه ${faDigits(s.target)}` : 'نصب'}
       </button>
       {lost && <p className="muted">برنامه در حال راه‌اندازی دوباره است؛ چند لحظه صبر کنید…</p>}
+      {state === 'rolledback' && <p className="tele-warn">نسخه جدید بالا نیامد و برنامه خودکار به نسخه قبلی برگشت؛ داده‌ها سر جایشان است. گزارش پایین را نگه دارید.</p>}
       {state === 'done' && <p className="ok">آپدیت انجام شد. صفحه را یک بار تازه کنید.</p>}
       {state === 'failed' && <p className="tele-warn">آپدیت انجام نشد؛ نسخه قبلی سر جایش است. جزئیات در گزارش پایین.</p>}
       {s.log && (
-        <details open={running || state === 'failed'}>
+        <details open={running || state === 'failed' || state === 'rolledback'}>
           <summary>گزارش نصب</summary>
           <pre className="update-log" dir="ltr">
             {s.log}

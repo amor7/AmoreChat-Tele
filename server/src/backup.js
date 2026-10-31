@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { backup } from 'node:sqlite';
+import { execFile } from 'node:child_process';
 import { db, DATA_DIR, UPLOAD_DIR } from './db.js';
 
 export const BACKUP_DIR = path.join(DATA_DIR, 'backups');
@@ -19,8 +20,35 @@ export async function backupNow() {
     .filter((f) => /^amorechat-\d+\.db$/.test(f))
     .sort()
     .slice(0, -KEEP);
-  for (const f of old) fs.rmSync(path.join(BACKUP_DIR, f), { force: true });
+  for (const f of old) {
+    fs.rmSync(path.join(BACKUP_DIR, f), { force: true });
+    fs.rmSync(path.join(BACKUP_DIR, `${f}.check.json`), { force: true });
+  }
   return file;
+}
+
+/** Opens a backup and checks it, in another process; the result stays next to it. */
+export function checkBackup(file) {
+  return new Promise((resolve) => {
+    execFile(process.execPath, [new URL('./backup-check.js', import.meta.url).pathname.replace(/^\/([A-Za-z]:)/, '$1'), file], { timeout: 30 * 60000 }, (err, stdout) => {
+      let r;
+      try {
+        r = JSON.parse(stdout);
+      } catch {
+        r = { ok: false, error: err?.message?.slice(0, 200) || 'بررسی نشد' };
+      }
+      r.at = Date.now();
+      fs.writeFileSync(`${file}.check.json`, JSON.stringify(r));
+      resolve(r);
+    });
+  });
+}
+export function lastCheck(file) {
+  try {
+    return JSON.parse(fs.readFileSync(`${file}.check.json`, 'utf8'));
+  } catch {
+    return null;
+  }
 }
 
 // Second copy (another disk, a USB drive or a network share mounted on the host): set
@@ -65,6 +93,8 @@ export function scheduleBackups(log) {
     try {
       const f = await backupNow();
       log.info(`backup written: ${f}`);
+      const check = await checkBackup(f);
+      if (!check.ok) throw new Error(`فایل بکاپ سالم نیست: ${check.error}`);
       const m = await mirrorBackup(f);
       if (m) log.info(`backup mirrored (${m.files} new files)`);
       await resolveAlert('backup');

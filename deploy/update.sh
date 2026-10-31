@@ -100,6 +100,49 @@ else
   curl -fL --retry 3 -o "$TMP/source.tar.gz" "${BASE}/amorechat-source.tar.gz" || { echo "!! Version ${TAG} not found."; exit 1; }
 fi
 check amorechat-source.tar.gz "$TMP/source.tar.gz"
+
+# What to go back to if the new version doesn't start: the code and scripts of now, and the app
+# image. The database stays: changes to it only add things, which an older version ignores (and the
+# backup above is there). data/, .env, Caddyfile and certs/ are not touched by updates anyway.
+ROLLBACK=/var/cache/amorechat/rollback
+CAN_GO_BACK=""
+rm -rf "$ROLLBACK"
+mkdir -p "$ROLLBACK"
+if tar czf "$ROLLBACK/code.tar.gz" --exclude=./data --exclude=./certs --exclude=./.env --exclude=./Caddyfile --exclude=./node_modules --exclude=./.git . \
+  && docker tag amorechat:latest amorechat:rollback 2>/dev/null; then
+  CAN_GO_BACK=1
+fi
+# The app answers from inside its container with the version just installed: no network needed.
+started_ok() {
+  local i
+  for i in $(seq 1 $(( ${HEALTH_WAIT:-180} / 5 ))); do
+    if docker compose exec -T app wget -qO- http://127.0.0.1:3000/api/config </dev/null 2>/dev/null | grep -q "\"version\":\"${TAG#v}\""; then
+      return 0
+    fi
+    sleep 5
+  done
+  return 1
+}
+go_back() {
+  echo "!! The new version did not start."
+  if [ -z "$CAN_GO_BACK" ]; then
+    echo "!! Nothing to go back to; see: docker compose logs app"
+    exit 1
+  fi
+  echo "!! going back to ${CURRENT}..."
+  tar xzf "$ROLLBACK/code.tar.gz"
+  docker tag amorechat:rollback amorechat:latest
+  # Recreated, or Docker just starts the same broken containers again.
+  docker compose up -d --no-build --force-recreate --remove-orphans app ovpn
+  docker compose up -d --no-build --remove-orphans
+  if TAG="$CURRENT" started_ok; then
+    echo "!! Back on ${CURRENT}. See the log above for what went wrong."
+  else
+    echo "!! ${CURRENT} did not come back either; see: docker compose logs app"
+  fi
+  exit 3
+}
+
 if [ -d .git ] && [ -z "$LOCAL" ]; then
   # Git checkout: move to the release tag so `git status` stays clean.
   git fetch -q --tags --force origin && git checkout -q -f "$TAG"
@@ -196,14 +239,16 @@ if [ -z "$LOADED" ]; then
   fi
 fi
 if [ -n "$LOADED" ]; then
-  docker compose up -d --no-build --remove-orphans
-  # Downloads are done with: free the cache; old images that nothing uses any more go too.
-  rm -f "$CACHE"/*.tar.gz
-  docker image prune -f >/dev/null 2>&1 || true
+  docker compose up -d --no-build --remove-orphans || go_back
 else
   echo ">> No prebuilt image for this server; building from source (needs Docker Hub + npm access)..."
-  docker compose up -d --build --remove-orphans
+  docker compose up -d --build --remove-orphans || go_back
 fi
+echo ">> Checking that the new version started..."
+started_ok || go_back
+# It works. Downloads are done with: free the cache; old images that nothing uses any more go too.
+rm -f "$CACHE"/*.tar.gz
+docker image prune -f >/dev/null 2>&1 || true
 
 # Caddy reads its config only at start: pick up address changes from .env.
 docker compose exec -T caddy caddy reload --config /etc/caddy/Caddyfile >/dev/null 2>&1 || docker compose restart caddy >/dev/null 2>&1 || true
