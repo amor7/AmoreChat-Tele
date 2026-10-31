@@ -366,6 +366,7 @@ function TeleUsers() {
   const [maxMb, setMaxMb] = useState('');
   const [fileMb, setFileMb] = useState('');
   const [quotaMb, setQuotaMb] = useState('');
+  const [chartFor, setChartFor] = useState(null);
   const load = () =>
     api('GET', '/admin/tele/accounts')
       .then((r) => {
@@ -409,7 +410,6 @@ function TeleUsers() {
     }
   };
   const top = data.accounts[0]?.used || 0;
-  const [chartFor, setChartFor] = useState(null);
 
   return (
     <div className="boxed" style={{ marginTop: 16 }}>

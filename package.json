@@ -13,6 +13,11 @@
     "build": "npm run build -w web",
     "start": "npm start -w server"
   },
+  "overrides": {
+    "@fastify/static": {
+      "glob": "^14.0.3"
+    }
+  },
   "engines": {
     "node": ">=24"
   }

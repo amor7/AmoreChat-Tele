@@ -4,6 +4,18 @@
 # ovpn service connects it, its SOCKS port reaches a page that only exists inside the tunnel, and
 # the app's own test reaches Telegram through it.
 set -euo pipefail
+ID=""
+# On a failure: what each side saw.
+dump() {
+  rc=$?
+  [ "$rc" = 0 ] && return
+  echo "!! failed ($rc)"
+  [ -n "$ID" ] && sudo tail -n 40 "data/ovpn/$ID/log" || true
+  docker logs ovpn-test-server 2>&1 | tail -n 30 || true
+  docker exec ovpn-test-server sh -c 'ip addr; netstat -ltn; ps' || true
+  docker compose exec -T ovpn sh -c 'ip rule; ip route show table all | grep -v "^local\|ff00\|fe80"; netstat -ltn; ps' || true
+}
+trap dump EXIT
 API=https://127.0.0.1/api
 CURL=(curl -sS --cacert /tmp/ca.crt -b /tmp/jar -H 'x-requested-with: amorechat')
 NET=$(docker inspect -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}}{{end}}' "$(docker compose ps -q app)")
@@ -41,7 +53,7 @@ docker run -d --name ovpn-test-server --network "$NET" --cap-add NET_ADMIN --sys
   mkdir -p /dev/net /www && [ -c /dev/net/tun ] || mknod /dev/net/tun c 10 200
   echo "inside-the-tunnel" > /www/index.html
   iptables -t nat -A POSTROUTING -s 10.8.0.0/24 -j MASQUERADE
-  (sleep 8; httpd -f -p 10.8.0.1:8080 -h /www) &
+  (until ip addr show tun0 2>/dev/null | grep -q 10.8.0.1; do sleep 1; done; httpd -f -p 10.8.0.1:8080 -h /www) &
   exec openvpn --config /pki/server.conf' >/dev/null
 
 # The client file as a VPN seller would give it (with lines the app must drop).
@@ -67,7 +79,11 @@ echo ">> tunnel address: $(sudo cat "data/ovpn/$ID/up")"
 PASS=$(sudo cat "data/ovpn/$ID/socks.auth")
 PORT=$((20000 + ID))
 echo ">> the SOCKS port reaches the page inside the tunnel"
-page=$(docker run --rm --network "$NET" curlimages/curl:8.11.1 -s --max-time 15 --socks5 "tele:$PASS@ovpn:$PORT" http://10.8.0.1:8080/)
+page=""
+for i in 1 2 3 4 5 6; do
+  page=$(docker run --rm --network "$NET" curlimages/curl:8.11.1 -sS --max-time 15 --socks5 "tele:$PASS@ovpn:$PORT" http://10.8.0.1:8080/) && break
+  sleep 3
+done
 [ "$page" = "inside-the-tunnel" ] || { echo "!! got: $page"; exit 1; }
 echo ">> without the password: refused"
 ! docker run --rm --network "$NET" curlimages/curl:8.11.1 -s --max-time 10 --socks5 "ovpn:$PORT" http://10.8.0.1:8080/
