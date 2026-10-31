@@ -157,7 +157,13 @@ for (const u of users) {
 const dms = new Map();
 async function dmOf(a, b) {
   const key = [a.name, b.name].sort().join('-');
-  if (!dms.has(key)) dms.set(key, ok(await a.api.call('POST', '/api/chats/dm', { userId: b.id ?? (await b.api.call('GET', '/api/auth/me')).user.id }), 'dm').chat.id);
+  if (!dms.has(key)) {
+    const id = ok(await a.api.call('POST', '/api/chats/dm', { userId: b.id ?? (await b.api.call('GET', '/api/auth/me')).user.id }), 'dm').chat.id;
+    // A private chat appears in lists with its first message.
+    ok(await a.api.call('POST', `/api/chats/${id}/messages`, { text: 'سلام' }), 'first message');
+    await sleep(800);
+    dms.set(key, id);
+  }
   return dms.get(key);
 }
 
