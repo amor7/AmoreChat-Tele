@@ -132,7 +132,14 @@ go_back() {
   echo "!! going back to ${CURRENT}..."
   tar xzf "$ROLLBACK/code.tar.gz"
   docker tag amorechat:rollback amorechat:latest
+  # Recreated, or Docker just starts the same broken containers again.
+  docker compose up -d --no-build --force-recreate --remove-orphans app ovpn
   docker compose up -d --no-build --remove-orphans
+  if TAG="$CURRENT" started_ok; then
+    echo "!! Back on ${CURRENT}. See the log above for what went wrong."
+  else
+    echo "!! ${CURRENT} did not come back either; see: docker compose logs app"
+  fi
   exit 3
 }
 

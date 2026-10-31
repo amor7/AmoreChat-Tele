@@ -41,7 +41,7 @@ tar czf /tmp/brel/amorechat-source.tar.gz -C /tmp/broken amorechat
 rc=0
 sudo AMORECHAT_ALLOW_UNSIGNED=1 HEALTH_WAIT=60 bash deploy/update.sh /tmp/brel 2>&1 | tee /tmp/broken.log | tail -12 || rc=${PIPESTATUS[0]}
 [ "$rc" = 3 ] || { echo "!! update ended with $rc, expected 3"; exit 1; }
-grep -q 'going back' /tmp/broken.log
+grep -q "Back on" /tmp/broken.log
 up
 curl -sf --cacert /tmp/ca.crt "$API/config" | grep -q "\"version\":\"$want\""
 grep -q "\"version\": \"$want\"" package.json
