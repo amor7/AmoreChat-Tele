@@ -12,6 +12,22 @@ const bad = (msg) => Object.assign(new Error(msg), { statusCode: 400 });
 let ovpnOutboundFn = null;
 export const setOvpnOutbound = (fn) => (ovpnOutboundFn = fn);
 
+// "host:port@user:pass" in parts [, host, port, user, pass], or null. Plain string search: the links
+// are pasted text of any length.
+function addressFirst(s) {
+  const at = s.indexOf('@');
+  const colon = s.lastIndexOf(':', at);
+  if (at < 0 || colon < 1) return null;
+  const host = s.slice(0, colon);
+  const port = s.slice(colon + 1, at);
+  if (/\s/.test(host) || !/^\d+$/.test(port)) return null;
+  const rest = s.slice(at + 1);
+  const end = rest.search(/[:@\s]/);
+  const user = end < 0 ? rest : rest.slice(0, end);
+  const pass = end < 0 ? '' : rest.slice(rest[end] === ':' ? end + 1 : end);
+  return /[\r\n]/.test(pass) ? null : [s, host, port, user, pass];
+}
+
 /**
  * SOCKS/HTTP links as sellers often write them, rewritten to the standard user:pass@host:port:
  *   socks5://203.0.113.1:1080@user:pass      (address first)
@@ -30,7 +46,7 @@ export function normalizeProxyLink(raw) {
   const isHost = (h) => /^(\d{1,3}(\.\d{1,3}){3}|\[[0-9a-f:]+\]|[a-z0-9-]+(\.[a-z0-9-]+)+)$/i.test(h);
   const portOk = (p) => /^\d{1,5}$/.test(p) && Number(p) >= 1 && Number(p) <= 65535;
   // host:port@user:pass — the part after @ has no valid port, the part before it is host:port.
-  let r = s.match(/^([^@\s]+):(\d+)@([^:@\s]*):?(.*)$/);
+  let r = addressFirst(s);
   if (r && isHost(r[1]) && !portOk((s.split('@')[1] || '').split(':').pop())) {
     if (!portOk(r[2])) throw bad(`پورت «${r[2]}» نامعتبر است (باید بین ۱ و ۶۵۵۳۵ باشد)`);
     return `${scheme}://${enc(decodeURIComponent(r[3]))}${r[4] ? ':' + enc(decodeURIComponent(r[4])) : ''}@${r[1]}:${r[2]}${remark}`;
@@ -242,7 +258,8 @@ function hostPort(s, defPort) {
  * WireGuard as a sing-box endpoint, from a standard .conf (all [Peer] sections, PresharedKey,
  * MTU, PersistentKeepalive) or from sing-box JSON (endpoint form or the older outbound form).
  */
-export function parseWireGuard(cfg) {
+export const WG_KEYS = new Set(['privatekey', 'address', 'mtu', 'publickey', 'presharedkey', 'endpoint', 'allowedips', 'persistentkeepalive']);
+function parseWireGuard(cfg) {
   const s = String(cfg || '').trim();
   if (s.startsWith('{')) {
     const j = JSON.parse(s);
@@ -259,15 +276,17 @@ export function parseWireGuard(cfg) {
   // INI: [Interface] then one or more [Peer]. Comments (# or ;) are ignored.
   const sections = [];
   for (const raw of s.split(/\r?\n/)) {
-    const line = raw.replace(/\s[#;].*$/, '').trim();
+    const comment = raw.search(/\s[#;]/);
+    const line = (comment < 0 ? raw : raw.slice(0, comment)).trim();
     if (!line || line.startsWith('#') || line.startsWith(';')) continue;
     const head = line.match(/^\[(\w+)\]$/);
     if (head) {
       sections.push({ name: head[1].toLowerCase(), v: {} });
       continue;
     }
-    const kv = line.match(/^([\w-]+)\s*=\s*(.*)$/);
-    if (kv && sections.length) sections.at(-1).v[kv[1].toLowerCase()] = kv[2].trim();
+    const eq = line.indexOf('=');
+    const key = line.slice(0, Math.max(eq, 0)).trim().toLowerCase();
+    if (sections.length && WG_KEYS.has(key)) sections.at(-1).v[key] = line.slice(eq + 1).trim();
   }
   const iface = sections.find((x) => x.name === 'interface')?.v || {};
   const peers = sections.filter((x) => x.name === 'peer').map((x) => x.v);
@@ -298,9 +317,7 @@ export function parseWireGuard(cfg) {
 function clean(o) {
   if (Array.isArray(o)) return o.map(clean);
   if (!o || typeof o !== 'object') return o;
-  const out = {};
-  for (const [k, v] of Object.entries(o)) if (v !== undefined && v !== null && v !== '') out[k] = clean(v);
-  return out;
+  return Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined && v !== null && v !== '').map(([k, v]) => [k, clean(v)]));
 }
 
 /** One stored config → a sing-box outbound (or, for WireGuard, an endpoint) with the given tag. */

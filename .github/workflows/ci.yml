@@ -17,6 +17,8 @@ jobs:
         run: sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
       - run: npm ci
       - run: npm run build
+      - name: Proxy links and WireGuard files
+        run: DATA_DIR=/tmp/hs-uri node server/test/uri.test.mjs
       - name: /ca page fingerprint
         run: node server/test/ca-fingerprint.mjs
       - name: HTTPS certificate expiry warning
