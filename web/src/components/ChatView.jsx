@@ -187,7 +187,7 @@ export default function ChatView({ chatId }) {
       if (action === 'toTele') st().openModal('chatToTele', { message: m });
       if (action === 'readers') st().openModal('readers', { message: m });
       if (action === 'pin' || action === 'unpin') await api('POST', `/messages/${m.id}/pin`, { pinned: action === 'pin' });
-      if (action === 'delete' && confirm(chat.type === 'dm' || chat.type === 'saved' ? 'این پیام برای همه حذف شود؟' : 'این پیام برای همه حذف شود؟ مدیران سرور تا مدتی می‌توانند اصل آن را ببینند.')) await api('DELETE', `/messages/${m.id}`);
+      if (action === 'delete' && confirm('این پیام برای همه حذف شود؟')) await api('DELETE', `/messages/${m.id}`);
       if (action === 'report') {
         const reason = prompt('دلیل گزارش این پیام (اختیاری):');
         if (reason !== null) {

@@ -57,18 +57,25 @@ export default async function messageRoutes(app) {
     // Each term becomes a quoted prefix query so user input can't inject FTS syntax.
     const match = terms.map((t) => `"${t.replace(/"/g, '""')}"*`).join(' ');
     const chatId = Number(req.query.chatId) || null;
+    // A mirrored channel's file not fetched yet: only its name is known, and it is not a file yet.
+    const pending = terms.map(() => "name LIKE ? ESCAPE '\\'").join(' AND ');
+    const likes = terms.map((t) => `%${t.replace(/[\\%_]/g, '\\$&')}%`);
     let ids = [];
     try {
       ids = all(
-      `SELECT m.id FROM messages_fts f
-       JOIN messages m ON m.id = f.rowid
+      `SELECT m.id FROM messages m
        JOIN chat_members cm ON cm.chat_id = m.chat_id AND cm.user_id = ?
-       WHERE messages_fts MATCH ? AND m.deleted = 0 AND m.type NOT IN ('system', 'call') AND (? IS NULL OR m.chat_id = ?)
+       WHERE m.deleted = 0 AND m.type NOT IN ('system', 'call') AND (? IS NULL OR m.chat_id = ?)
+         AND (m.id IN (SELECT rowid FROM messages_fts WHERE messages_fts MATCH ?)
+           OR m.file_id IN (SELECT rowid FROM files_fts WHERE files_fts MATCH ?)
+           OR m.id IN (SELECT message_id FROM tele_mirror_photos WHERE ${pending}))
        ORDER BY m.id DESC LIMIT 50`,
       req.user.id,
+      chatId,
+      chatId,
       match,
-      chatId,
-      chatId,
+      match,
+      ...likes,
     ).map((r) => r.id);
     } catch {
       // Whatever the search text was, a query it can't run finds nothing (never a server error).
