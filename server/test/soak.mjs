@@ -188,8 +188,10 @@ const wait = (page, fn, arg, what, timeout = 30000) =>
   });
 const go = async (u, chat) => {
   await u.page.evaluate((h) => (location.hash = h), `#/chat/${chat}`);
-  await wait(u.page, () => document.querySelector('.composer, .chat-head'), null, 'chat open');
-  await sleep(300);
+  await wait(u.page, () => document.querySelector('.chat-head'), null, 'chat open');
+  await sleep(500);
+  const at = await u.page.evaluate(() => location.hash);
+  if (at !== `#/chat/${chat}`) throw new Error(`opening a chat ended at ${at.replace(/\d+/g, 'N')}`);
 };
 const has = (page, sel, text, what, t) => wait(page, ([s, x]) => [...document.querySelectorAll(s)].some((e) => e.textContent.includes(x)), [sel, text], what, t);
 const click = async (page, sel, text) => {
@@ -228,8 +230,8 @@ const light = {
     ok(await u.api.call('PATCH', `/api/messages/${a.id}`, { text: edited }), 'edit');
     await go(other, group);
     await has(other.page, '.bubble', edited, 'the edit shows');
-    ok(await u.api.call('POST', `/api/messages/${a.id}/pin`, {}), 'pin');
-    ok(await u.api.call('POST', `/api/messages/${a.id}/pin`, {}), 'unpin');
+    ok(await owner.api.call('POST', `/api/messages/${a.id}/pin`, {}), 'pin');
+    ok(await owner.api.call('POST', `/api/messages/${a.id}/pin`, {}), 'unpin');
     ok(await other.api.call('DELETE', `/api/messages/${r.id}`, {}), 'delete');
   },
   async deleteIsGone(u) {
@@ -354,6 +356,8 @@ const light = {
     await u.page.keyboard.press('Escape');
     await u.page.evaluate(() => document.querySelector('.modal .close, .modal [aria-label="بستن"]')?.click());
   },
+};
+const admin = {
   async adminPanel() {
     const p = owner.page;
     await p.evaluate(() => (location.hash = '#/'));
@@ -454,13 +458,29 @@ async function run(name, fn, involved, recover = true) {
     await Promise.race([fn(), sleep(240000).then(() => Promise.reject(new Error('action took over 4 minutes')))]);
   } catch (e) {
     stats.failed[name] = (stats.failed[name] || 0) + 1;
-    await issue(/did not answer|delivered|differs|crash/.test(e.message) ? 'high' : 'medium', name, e.message, involved[0]?.page);
+    const u = involved[0];
+    const at = await u?.page.evaluate(() => location.hash.replace(/\d+/g, 'N')).catch(() => '?');
+    await issue(/did not answer|delivered|differs|crash/.test(e.message) ? 'high' : 'medium', name, `${e.message} [${u?.phone ? 'phone' : 'desktop'} ${at}]`, u?.page);
     if (recover) {
       for (const u of involved) {
         await u.page.goto(`${BASE}/#/`, { waitUntil: 'domcontentloaded' }).catch(() => {});
         await u.page.reload({ waitUntil: 'domcontentloaded' }).catch(() => {});
       }
     }
+  }
+}
+
+async function adminLoop() {
+  await sleep(60000);
+  while (Date.now() < END) {
+    await sleep(240000 + rnd(240000));
+    const name = pick(Object.keys(admin));
+    const who = name === 'banUnban' ? users.at(-1) : owner;
+    if (who.busy) continue;
+    who.busy = true;
+    await sleep(15000); // what they were doing ends
+    await run(name, admin[name], [who]);
+    who.busy = false;
   }
 }
 
@@ -505,7 +525,7 @@ async function sample() {
       return '0';
     }
   };
-  const rss = Math.round(Number(sh("ps -o rss= -C node | sort -n | tail -1")) / 1024);
+  const rss = Math.round(Number(sh("ps -o rss= -p $(pgrep -f server/src/index.js | head -1)")) / 1024);
   const chrome = Math.round(Number(sh("ps -o rss= -C chrome | awk '{s+=$1} END {print s}'")) / 1024);
   const disk = Number(sh(`du -sm ${process.env.DATA_DIR || '/tmp/soak'} | cut -f1`));
   let errors = 0;
@@ -552,7 +572,7 @@ async function consistency() {
 
 const timers = [setInterval(() => sample().catch(() => {}), 60000), setInterval(() => consistency().catch((e) => issue('medium', 'consistency', e.message)), 600000)];
 await sample();
-await Promise.all([...users.map(userLoop), callLoop()]);
+await Promise.all([...users.map(userLoop), callLoop(), adminLoop()]);
 timers.forEach(clearInterval);
 await sample();
 await consistency().catch(() => {});
