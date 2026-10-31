@@ -190,10 +190,13 @@ const IMAGE_MIME = (rel) => (/\.png$/i.test(rel) ? 'image/png' : /\.webp$/i.test
 export function loadMirrorMedia(user, messageId) {
   const id = Number(messageId);
   const p = get('SELECT * FROM tele_mirror_photos WHERE message_id = ?', id);
-  const msg = p && get('SELECT * FROM messages WHERE id = ?', id);
-  if (!p || !msg || msg.deleted) throw bad(404, 'فایل پیدا نشد');
+  const msg = get('SELECT * FROM messages WHERE id = ?', id);
+  // Fetched a moment ago by someone else (two people opening it at once): that post is the answer.
+  const fetched = !p && msg?.file_id && String(msg.forwarded_from || '').startsWith('تلگرام · ');
+  if (!msg || msg.deleted || (!p && !fetched)) throw bad(404, 'فایل پیدا نشد');
   const chat = get('SELECT * FROM chats WHERE id = ?', msg.chat_id);
   if (!getMember(msg.chat_id, user.id) && !chat?.is_public) throw bad(403, 'شما عضو این کانال نیستید');
+  if (fetched) return loadMessage(id);
   if (p.kind !== 'photo' && !accessAllowed('mirror_files', user)) throw bad(403, 'دریافت ویدیو و فایل کانال‌ها برای شما فعال نیست؛ وقتی کسی که اجازه دارد آن را باز کند، برای شما هم باز می‌شود');
   if (!loading.has(id)) {
     loading.set(

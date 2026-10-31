@@ -1259,8 +1259,8 @@ async function part3() {
   assert.ok(!m[1].pendingPhoto);
   const img = await download(alice, `/api/files/${m[1].file.id}`);
   assert.ok(img.http === 200 && /^image\//.test(img.type) && img.bytes.length > 100, `the photo file: ${img.http} ${img.type} ${img.bytes.length}`);
-  r = await alice.call('POST', `/api/mirror-photos/${m[1].id}`, {});
-  assert.equal(r.http, 404, 'fetched again');
+  r = ok(await alice.call('POST', `/api/mirror-photos/${m[1].id}`, {}), 'opened again');
+  assert.equal(r.message.file.id, p1.message.file.id, 'fetched again');
   console.log(`  (owner's Telegram traffic so far this month: ${await usageNow()} bytes)`);
 
   log('A new invite link: the old one stops working; members stay');
