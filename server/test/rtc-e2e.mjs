@@ -301,7 +301,7 @@ try {
   const post = (await owner.call('POST', `/api/chats/${radio}/messages`, { text: 'post to delete' })).message.id;
   const hasPost = () => [...document.querySelectorAll('.bubble')].some((b) => b.textContent.includes('post to delete'));
   await waitFor(B, hasPost, null, 'bob sees the post');
-  await owner.call('DELETE', `/api/messages/${post}`);
+  assert.equal((await owner.call('DELETE', `/api/messages/${post}`, {})).status, 200);
   await waitFor(B, () => ![...document.querySelectorAll('.bubble')].some((b) => b.textContent.includes('post to delete')), null, 'gone for bob');
   assert.equal(await B.evaluate(() => document.body.textContent.includes('حذف شد') || !!document.querySelector('.deleted-note')), false, 'bob sees no trace');
   await waitFor(A, () => document.querySelector('.deleted-note'), null, 'the owner sees where it was');

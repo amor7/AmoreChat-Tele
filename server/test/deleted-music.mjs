@@ -23,7 +23,7 @@ function client() {
       const [k, v] = c.split(';')[0].split('=');
       jar.set(k, v);
     }
-    if (url.includes('?raw')) return res;
+    if (url.includes('raw=1')) return res;
     return { http: res.status, ...(await res.json().catch(() => ({}))) };
   };
   return { call, jar };
