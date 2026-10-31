@@ -1171,6 +1171,14 @@ async function part3() {
   ok(await owner.call('PATCH', `/api/tele/dialogs/${channelDialog.id}`, { selected: true }), 'add the channel');
   const ownerAcc = ok(await owner.call('GET', '/api/admin/tele/accounts'), 'accounts').accounts.find((a) => a.username === 'owner');
   ok(await owner.call('PATCH', `/api/admin/tele/accounts/${ownerAcc.id}`, { allowMedia: true }), 'photos for the owner');
+  // "Check now" is limited per minute: wait out the limit.
+  const runNow = async () => {
+    for (;;) {
+      const x = await owner.call('POST', '/api/admin/tele/mirrors/run', {});
+      if (x.http !== 429) return x;
+      await sleep(5000);
+    }
+  };
   const postText = async (t) => ok(await owner.call('POST', `/api/tele/dialogs/${channelDialog.id}/messages`, { text: t }), 'post in the channel');
   const postPhoto = async (buf, caption) => {
     const x = await owner.call('POST', `/api/tele/dialogs/${channelDialog.id}/photo?caption=${encodeURIComponent(caption)}`, null, { form: photoForm(buf) });
@@ -1217,14 +1225,14 @@ async function part3() {
   await postText(`news two ${RUN}`);
   const appMsgs = async () => ok(await owner.call('GET', `/api/chats/${mirror.chatId}/messages?limit=100`), 'app channel').messages;
   await until('posts in the app channel', async () => {
-    await owner.call('POST', '/api/admin/tele/mirrors/run', {});
+    await runNow();
     const m = await appMsgs();
     return m.some((x) => x.text === `news two ${RUN}`);
   }, 90000);
   let m = (await appMsgs()).filter((x) => x.type !== 'system');
   assert.deepEqual(m.map((x) => x.text), [`news one ${RUN}`, `news photo ${RUN}`, `news two ${RUN}`], 'posts missing, twice or out of order');
   assert.ok(m.every((x) => x.forwardedFrom === `تلگرام · ${meta.channelTitle}`), 'source not shown');
-  ok(await owner.call('POST', '/api/admin/tele/mirrors/run', {}), 'run again');
+  ok(await runNow(), 'run again');
   assert.equal((await appMsgs()).filter((x) => x.type !== 'system').length, 3, 'posts copied twice');
 
   log('The photo is not fetched until someone opens it');
@@ -1302,7 +1310,7 @@ async function part3() {
   r = await owner.call('POST', `/api/tele/dialogs/${channelDialog.id}/file?caption=${encodeURIComponent(`news file ${RUN}`)}`, null, { form: fileForm(Buffer.from(`file body ${RUN}`), 'text/plain', `news-${RUN}.txt`) });
   assert.equal(r.http, 201, JSON.stringify(r));
   const filePost = await until('the file post in the app channel', async () => {
-    await owner.call('POST', '/api/admin/tele/mirrors/run', {});
+    await runNow();
     return (await appMsgs()).find((x) => x.text === `news file ${RUN}`);
   }, 90000);
   assert.ok(filePost.pendingFile && !filePost.file, `file fetched already: ${JSON.stringify(filePost)}`);
@@ -1331,7 +1339,7 @@ async function part3() {
   const botName = [botMe.first_name, botMe.last_name].filter(Boolean).join(' ');
   await bot.invoke({ _: 'sendMessage', chat_id: meta.groupChatId, input_message_content: { _: 'inputMessageText', text: { _: 'formattedText', text: `group news ${RUN}` } } });
   const groupPost = await until('the group message in the app channel', async () => {
-    await owner.call('POST', '/api/admin/tele/mirrors/run', {});
+    await runNow();
     const x = ok(await owner.call('GET', `/api/chats/${gm.chatId}/messages?limit=50`), 'group channel');
     return x.messages.find((y) => y.text === `group news ${RUN}`);
   }, 90000);
@@ -1342,11 +1350,11 @@ async function part3() {
   ok(await owner.call('PATCH', `/api/admin/tele/mirrors/${mirror.id}`, { enabled: false }), 'pause');
   await postText(`news three ${RUN}`);
   await sleep(3000);
-  ok(await owner.call('POST', '/api/admin/tele/mirrors/run', {}), 'run while paused');
+  ok(await runNow(), 'run while paused');
   assert.ok(!(await appMsgs()).some((x) => x.text === `news three ${RUN}`), 'copied while paused');
   ok(await owner.call('PATCH', `/api/admin/tele/mirrors/${mirror.id}`, { enabled: true }), 'resume');
   await until('caught up', async () => {
-    await owner.call('POST', '/api/admin/tele/mirrors/run', {});
+    await runNow();
     return (await appMsgs()).some((x) => x.text === `news three ${RUN}`);
   }, 60000);
   ok(await owner.call('DELETE', `/api/admin/tele/mirrors/${mirror.id}`), 'remove mirror');
