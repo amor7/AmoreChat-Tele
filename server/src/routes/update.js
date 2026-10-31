@@ -95,11 +95,14 @@ async function analyze() {
   const full = have.has('amorechat-offline-amd64.tar.gz');
   const need = new Set(full ? ['amorechat-source.tar.gz', 'SHA256SUMS', 'SHA256SUMS.sig'] : BASE);
   if (manifest && host?.images && !full) {
+    // Newer Docker may list "docker.io/library/caddy:…" and other ids than a release built elsewhere.
+    const bare = (ref) => String(ref).replace(/^docker\.io\//, '').replace(/^library\//, '');
     const images = host.images.map((s) => String(s).split(' '));
-    const hasRef = (ref) => images.some(([r]) => r === ref);
+    const hasRef = (ref) => images.some(([r]) => bare(r) === bare(ref));
     const hasId = (id) => !!id && images.some(([, i]) => i === id);
     if (!hasRef(`amorechat-runtime:${manifest.runtime}`)) need.add(`amorechat-runtime-${manifest.runtime}-amd64.tar.gz`);
-    const okImg = (ref, id) => images.some(([r, i]) => r === ref && i === id) || hasId(id);
+    // Same rule as deploy/update.sh: their versions are pinned, so the name and version are enough.
+    const okImg = (ref, id) => hasRef(ref) || hasId(id);
     if (!okImg(manifest.caddy, manifest.caddyId) || !okImg(manifest.livekit, manifest.livekitId)) need.add(`amorechat-deps-${manifest.deps}-amd64.tar.gz`);
   }
   // Which of the uploaded files are right: SHA256SUMS signed with the release key, and each file in it.
