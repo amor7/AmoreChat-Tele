@@ -186,6 +186,11 @@ const wait = (page, fn, arg, what, timeout = 30000) =>
   page.waitForFunction(fn, { timeout, polling: 300 }, arg).catch(() => {
     throw new Error(`timed out: ${what}`);
   });
+// Enter sends on desktop; on a phone it is a new line and the send button sends.
+const send = async (u) => {
+  if (u.phone) await u.page.click('.composer button[aria-label="ارسال"]');
+  else await u.page.keyboard.press('Enter');
+};
 const go = async (u, chat) => {
   await u.page.evaluate((h) => (location.hash = h), `#/chat/${chat}`);
   await wait(u.page, () => document.querySelector('.chat-head'), null, 'chat open');
@@ -209,7 +214,7 @@ const light = {
     await go(u, chat);
     await u.page.click('.composer textarea');
     await u.page.type('.composer textarea', text, { delay: 5 });
-    await u.page.keyboard.press('Enter');
+    await send(u);
     await has(u.page, '.bubble', text, 'own message shown');
     const seen = await waitApi(to, chat, text);
     if (seen > 1) throw new Error(`message delivered ${seen} times`);
@@ -222,7 +227,7 @@ const light = {
     if (nums.length !== 20 || nums.some((n, i) => n !== i)) throw new Error(`burst of 20 came back as ${nums.join(',')}`);
   },
   async replyEditReact(u) {
-    const other = pick(others(u));
+    const other = await borrow(u);
     const a = ok(await u.api.call('POST', `/api/chats/${group}/messages`, { text: `q ${word()}` }), 'msg').message;
     const r = ok(await other.api.call('POST', `/api/chats/${group}/messages`, { text: 'reply', replyTo: a.id }), 'reply').message;
     ok(await other.api.call('POST', `/api/messages/${a.id}/react`, { emoji: '👍' }), 'react');
@@ -235,7 +240,7 @@ const light = {
     ok(await other.api.call('DELETE', `/api/messages/${r.id}`, {}), 'delete');
   },
   async deleteIsGone(u) {
-    const other = pick(others(u).filter((x) => x !== owner));
+    const other = await borrow(u, (x) => x !== owner);
     const text = `gone ${word()}`;
     const m = ok(await u.api.call('POST', `/api/chats/${group}/messages`, { text }), 'msg').message;
     await go(other, group);
@@ -252,7 +257,7 @@ const light = {
     if (!r.messages.some((x) => x.id === m.id)) throw new Error('search did not find a message');
   },
   async photoUi(u) {
-    const other = pick(others(u));
+    const other = await borrow(u);
     await go(u, group);
     const input = await u.page.waitForSelector('.composer input[type=file]');
     await input.uploadFile(pick([fx.png, fx.jpg]));
@@ -263,7 +268,7 @@ const light = {
     await wait(other.page, () => [...document.querySelectorAll('.bubble img')].some((i) => i.complete && i.naturalWidth > 0), null, 'photo visible to the other user', 60000);
   },
   async video(u) {
-    const other = pick(others(u));
+    const other = await borrow(u);
     const fileId = await upload(u, fx.mp4, 'video/mp4');
     const m = ok(await u.api.call('POST', `/api/chats/${group}/messages`, { fileId, type: 'video' }), 'video').message;
     for (let i = 0; i < 40; i++) {
@@ -278,7 +283,7 @@ const light = {
     throw new Error('video never finished processing');
   },
   async voice(u) {
-    const other = pick(others(u));
+    const other = await borrow(u);
     const form = new FormData();
     form.append('file', blobOf(fx.voice, 'audio/ogg'), 'voice.ogg');
     const r = ok(await u.api.call('POST', '/api/upload?voice=1&dur=5', null, form), 'voice upload');
@@ -334,7 +339,7 @@ const light = {
       await sleep(3000 + rnd(10000));
       await u.page.click('.composer textarea');
       await u.page.type('.composer textarea', text);
-      await u.page.keyboard.press('Enter');
+      await send(u);
       await sleep(2000);
     } finally {
       await u.page.setOfflineMode(false);
@@ -398,7 +403,7 @@ async function waitApi(u, chat, text, timeout = 20000) {
 
 // Calls take a lot of the machine: one at a time, with free users.
 const hangup = (p) => p.evaluate(() => document.querySelector('.call-view .ctl.hangup, .room-view .ctl.hangup')?.click());
-const callFree = () => users.filter((u) => !u.busy && !u.offline);
+const callFree = () => users.filter((u) => !u.offline);
 const heavy = {
   async callVideo(a, b, video = true) {
     await go(a, await dmOf(a, b));
@@ -452,11 +457,46 @@ const heavy = {
   },
 };
 
+// One thing at a time on each page.
+async function lock(list) {
+  for (const u of [...list].sort((a, b) => a.name.localeCompare(b.name))) {
+    while (u.locked) await sleep(200);
+    u.locked = true;
+  }
+}
+// A second person to look at the result, if someone's page is free.
+const borrowed = new Map();
+async function borrow(u, ok2 = () => true) {
+  for (let i = 0; i < 60; i++) {
+    const free = others(u).filter((x) => !x.locked && !x.offline && ok2(x));
+    if (free.length) {
+      const x = pick(free);
+      x.locked = true;
+      borrowed.set(u, x);
+      return x;
+    }
+    await sleep(500);
+  }
+  throw new Error('SKIP');
+}
 async function run(name, fn, involved, recover = true) {
+  await lock(involved);
+  try {
+    await runLocked(name, fn, involved, recover);
+  } finally {
+    for (const u of involved) {
+      u.locked = false;
+      if (borrowed.has(u)) borrowed.get(u).locked = false;
+      borrowed.delete(u);
+    }
+  }
+}
+async function runLocked(name, fn, involved, recover) {
   stats.actions[name] = (stats.actions[name] || 0) + 1;
   try {
     await Promise.race([fn(), sleep(240000).then(() => Promise.reject(new Error('action took over 4 minutes')))]);
   } catch (e) {
+    if (e.message === 'SKIP') return;
     stats.failed[name] = (stats.failed[name] || 0) + 1;
     const u = involved[0];
     const at = await u?.page.evaluate(() => location.hash.replace(/\d+/g, 'N')).catch(() => '?');
@@ -476,11 +516,7 @@ async function adminLoop() {
     await sleep(240000 + rnd(240000));
     const name = pick(Object.keys(admin));
     const who = name === 'banUnban' ? users.at(-1) : owner;
-    if (who.busy) continue;
-    who.busy = true;
-    await sleep(15000); // what they were doing ends
     await run(name, admin[name], [who]);
-    who.busy = false;
   }
 }
 
@@ -488,10 +524,6 @@ const weighted = Object.keys(light).flatMap((k) => Array((['typeMessage', 'reply
 async function userLoop(u) {
   await sleep(rnd(20000));
   while (Date.now() < END) {
-    if (u.busy) {
-      await sleep(1000);
-      continue;
-    }
     const name = pick(weighted);
     await run(name, () => light[name](u), [u]);
     await sleep(2000 + rnd(8000));
@@ -504,11 +536,8 @@ async function callLoop() {
     const need = name === 'voiceRoom' ? 3 : 2;
     const free = callFree().sort(() => Math.random() - 0.5).slice(0, need);
     if (free.length === need) {
-      free.forEach((u) => (u.busy = true));
-      await sleep(12000); // what they were doing ends
       await run(name, () => heavy[name](...free), free);
       for (const u of free) await hangup(u.page).catch(() => {});
-      free.forEach((u) => (u.busy = false));
     }
     await sleep(30000 + rnd(60000));
   }
