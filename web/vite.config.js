@@ -36,7 +36,7 @@ export default defineConfig({
         globPatterns: ['**/*.{js,css,html,svg,png,woff2,webp,json}'],
         importScripts: ['sw-extra.js'],
         navigateFallback: '/index.html',
-        navigateFallbackDenylist: [/^\/api\//, /^\/socket\.io/, /^\/healthz/, /^\/rtc/, /^\/app/, /^\/ca/],
+        navigateFallbackDenylist: [/^\/api\//, /^\/socket\.io(\/|\?|$)/, /^\/healthz(\?|$)/, /^\/rtc(\/|\?|$)/, /^\/app(\/|\?|$)/, /^\/ca(\.crt|-help)?(\?|$)/],
         // Pictures already seen (photos, avatars, video thumbnails) stay visible offline.
         runtimeCaching: [
           {
