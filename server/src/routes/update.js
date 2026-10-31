@@ -162,13 +162,18 @@ export default async function updateRoutes(app) {
     if (!NAME.test(name)) fail(400, 'این فایل جزو فایل‌های نسخه نیست');
     if (!Buffer.isBuffer(req.body)) fail(400, 'محتوا نامعتبر است');
     fs.mkdirSync(IN, { recursive: true });
-    const file = path.join(IN, name);
-    const size = fs.existsSync(file) ? fs.statSync(file).size : 0;
     const offset = Number(req.query?.offset ?? 0);
-    if (offset === 0 && size) fs.rmSync(file);
-    else if (offset !== size) return { name, size, resend: true };
     if (offset + req.body.length > MAX_FILE) fail(400, 'فایل بیش از حد بزرگ است');
-    fs.appendFileSync(file, req.body);
+    // One open file for the size check and the write, so they are about the same file.
+    const file = await fs.promises.open(path.join(IN, name), 'a+', 0o600);
+    try {
+      const { size } = await file.stat();
+      if (offset === 0 && size) await file.truncate(0);
+      else if (offset !== size) return { name, size, resend: true };
+      await file.appendFile(req.body);
+    } finally {
+      await file.close();
+    }
     return { name, size: offset + req.body.length };
   });
 

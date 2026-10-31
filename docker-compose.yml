@@ -42,7 +42,8 @@ services:
     user: root
     cap_add:
       - NET_ADMIN
-    entrypoint: ['/sbin/tini', '--', '/bin/sh', '/app/server/ovpn/supervisor.sh']
+    init: true
+    entrypoint: ['/bin/sh', '/app/server/ovpn/supervisor.sh']
     healthcheck:
       disable: true
     volumes:

@@ -1054,17 +1054,19 @@ async function uiChecks({ owner, alice, bob, pd, gd, meta, photoMsg, voiceMsg, s
     await clickText('.modal button.btn.primary', 'ارسال');
     await until('the bot gets the message from the menu', () => botMsgs.find((m) => textOf(m) === menuText), 30000);
 
-    log('UI: admin panel → Tele / VPN shows alerts and the users');
+    log('UI: admin panel → VPN shows alerts, Telegram shows the users');
     await open(owner, '#/', { width: 1280, height: 900 });
     await page.click('.menu-btn');
     await clickText('.sidebar .menu > button', 'پنل مدیریت');
-    await clickText('.modal .tabs button', 'Tele / VPN');
+    await clickText('.modal .tabs button', 'VPN');
     await waitText('.modal h4', 'هشدارها');
-    await waitText('.modal .tele-users', 'Alice');
-    await noBrokenText('admin panel, Tele / VPN');
+    await noBrokenText('admin panel, VPN');
     await shot('admin');
     await page.evaluate(() => document.querySelector('.modal .tele-alerts').scrollIntoView());
     await shot('admin-alerts');
+    await clickText('.modal .tabs button', 'تلگرام');
+    await waitText('.modal .tele-users', 'Alice');
+    await noBrokenText('admin panel, Telegram');
     await page.evaluate(() => document.querySelector('.modal .tele-users').scrollIntoView());
     await shot('admin-users');
     // Turning voice off for Alice from the panel works.
