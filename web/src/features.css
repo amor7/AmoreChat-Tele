@@ -1583,6 +1583,9 @@ body:has(.room-view, .call-view) .toast {
   background: none;
   cursor: pointer;
 }
+.music-play .music-cover svg {
+  display: none;
+}
 .music-play-icon {
   position: absolute;
   inset: 0;
