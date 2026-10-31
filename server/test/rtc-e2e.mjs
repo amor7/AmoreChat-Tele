@@ -325,6 +325,8 @@ try {
     const barTitle = (t) => [...document.querySelectorAll('.music-bar-text b')].some((b) => b.textContent === t);
     await waitFor(A, barTitle, 'Song 1', 'the bar shows the song');
     await waitFor(A, barTitle, 'Song 2', 'the next song plays by itself', 15000);
+    // The timeline starts at its very start: nothing pushes it, and the fill follows the song.
+    assert.equal(await A.$eval('.music-bar-seek', (e) => getComputedStyle(e).paddingLeft), '0px');
     await A.click('.music-bar-text');
     await waitFor(A, () => document.querySelectorAll('.music-queue li').length === 3, null, 'the queue is the chat\'s music');
     await A.screenshot({ path: 'shot-music-player.png' });
@@ -336,7 +338,21 @@ try {
     await A.click('.music-sheet button[aria-label="تکرار همه"]');
     await waitFor(A, () => document.querySelector('.music-sheet button[aria-label="تکرار همین آهنگ"]'), null, 'repeat one');
     await A.click('.music-sheet button[aria-label="تکرار همین آهنگ"]');
-    await A.click('.music-sheet-close');
+    await A.screenshot({ path: 'shot-music-panel.png' });
+    await A.click('.music-sheet-back');
+    await waitFor(A, () => !document.querySelector('.music-sheet'), null, 'a click outside closes the panel');
+    assert.equal(await A.$eval('.music-bar', (b) => { const r = b.querySelector('.music-bar-text').getBoundingClientRect(); return r.height < 42; }), true, 'one line');
+    await A.click('.music-bar button[aria-label="قبلی"]');
+    await A.evaluate(() => document.activeElement?.blur());
+    await A.keyboard.press('Space');
+    await waitFor(A, () => document.querySelector('.music-bar button[aria-label="پخش"]'), null, 'Space pauses');
+    await sleep(1000);
+    const title = await A.$eval('.music-bar-text b', (b) => b.textContent);
+    await A.reload({ waitUntil: 'networkidle0' });
+    await waitFor(A, barTitle, title, 'the player comes back after a refresh');
+    await A.click('.music-bar-text');
+    await waitFor(A, () => document.querySelector('.music-sheet'), null, 'panel again');
+    await A.keyboard.press('Escape');
     await A.evaluate((id) => (location.hash = `#/chat/${id}`), dm);
     await waitFor(A, () => document.querySelector('.music-bar'), null, 'the bar stays in another chat');
     await A.click('.music-bar button[aria-label="بستن پلیر"]');

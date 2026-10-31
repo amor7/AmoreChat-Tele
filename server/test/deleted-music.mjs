@@ -80,6 +80,20 @@ assert.equal((await bob.call('GET', `/api/files/${r.file.id}?raw=1`)).status, 40
 r = ok(await owner.call('GET', '/api/admin/audit'));
 assert.ok(JSON.stringify(r).includes('message.view_deleted'), 'looking at a deleted message is logged');
 
+console.log('- search finds files by name, in a chat and everywhere, for its members only');
+const docF = await upload(alice, Buffer.from('x'), 'application/pdf', 'hayedeh - mast.pdf');
+const doc = ok(await alice.call('POST', `/api/chats/${group}/messages`, { fileId: docF.id ?? docF.file?.id, text: 'no name here' })).message;
+const found = async (who, q, chat) => ok(await who.call('GET', `/api/search?q=${encodeURIComponent(q)}${chat ? `&chatId=${chat}` : ''}`)).messages.map((x) => x.id);
+assert.deepEqual(await found(bob, 'mast', group), [doc.id]);
+assert.deepEqual(await found(bob, 'mast'), [doc.id]);
+assert.deepEqual(await found(bob, 'hayedeh mast'), [doc.id]);
+assert.deepEqual(await found(bob, 'mas'), [doc.id], 'the start of a word is enough');
+assert.deepEqual(await found(bob, 'no name'), [doc.id], 'the caption still counts');
+const outsider = await reg('outsider');
+assert.deepEqual(await found(outsider, 'mast'), [], 'not for someone outside the chat');
+ok(await alice.call('DELETE', `/api/messages/${doc.id}`));
+assert.deepEqual(await found(bob, 'mast'), [], 'not after it is deleted');
+
 console.log('- the chat list shows the last message that still exists');
 const last = ok(await alice.call('POST', `/api/chats/${group}/messages`, { text: 'last one' })).message.id;
 ok(await alice.call('DELETE', `/api/messages/${last}`));
@@ -137,6 +151,7 @@ if (ffmpeg) {
   assert.ok(Math.abs(msg.file.duration - 3) < 1, `duration ${msg.file.duration}`);
   assert.equal(msg.file.thumb, true);
   assert.equal((await bob.call('GET', `/api/files/${msg.file.id}?thumb=1&raw=1`)).status, 200);
+  assert.deepEqual((await ok(await bob.call('GET', `/api/search?q=${encodeURIComponent('خواننده')}`))).messages.map((x) => x.id), [msg.id], 'found by artist');
   r = ok(await bob.call('GET', `/api/chats/${group}/media?kind=music`));
   assert.deepEqual(r.messages.map((x) => x.id), [msg.id]);
 }

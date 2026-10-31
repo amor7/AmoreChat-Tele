@@ -475,6 +475,21 @@ const migrations = [
   ALTER TABLE files ADD COLUMN title TEXT;
   ALTER TABLE files ADD COLUMN artist TEXT;
   `,
+  // v18: search also finds files by name, and music by title and artist.
+  `
+  CREATE VIRTUAL TABLE files_fts USING fts5(name, title, artist, content='files', content_rowid='id', tokenize='unicode61 remove_diacritics 2');
+  CREATE TRIGGER files_fts_ai AFTER INSERT ON files BEGIN
+    INSERT INTO files_fts(rowid, name, title, artist) VALUES (new.id, new.name, new.title, new.artist);
+  END;
+  CREATE TRIGGER files_fts_ad AFTER DELETE ON files BEGIN
+    INSERT INTO files_fts(files_fts, rowid, name, title, artist) VALUES ('delete', old.id, old.name, old.title, old.artist);
+  END;
+  CREATE TRIGGER files_fts_au AFTER UPDATE OF name, title, artist ON files BEGIN
+    INSERT INTO files_fts(files_fts, rowid, name, title, artist) VALUES ('delete', old.id, old.name, old.title, old.artist);
+    INSERT INTO files_fts(rowid, name, title, artist) VALUES (new.id, new.name, new.title, new.artist);
+  END;
+  INSERT INTO files_fts(files_fts) VALUES ('rebuild');
+  `,
 ];
 
 const current = db.prepare('PRAGMA user_version').get().user_version;
