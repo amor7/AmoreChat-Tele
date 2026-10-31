@@ -21,6 +21,9 @@ export const DEFAULTS = {
   // Tele: who may use Telegram: all | none | allow (only the listed users) | deny (all but them).
   // The owner always may.
   tele_access: 'all',
+  // Mirrored channels: who may fetch a video or file from Telegram (same modes as tele_access; once
+  // fetched, every member of the channel has it). Default: only the listed users (and the owner).
+  mirror_files_access: 'allow',
   // Security alerts to the owner (Saved Messages); wrong passwords from one IP in 15 minutes that
   // count as an attack; ban such an IP by itself, and for how many minutes (0 = until unbanned).
   sec_alerts: '1',

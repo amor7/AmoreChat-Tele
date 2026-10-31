@@ -1,7 +1,7 @@
 {
   "name": "amorechat",
   "private": true,
-  "version": "1.0.15",
+  "version": "1.0.16",
   "description": "AmoreChat-Tele: self-hosted messenger + Telegram bridge",
   "workspaces": [
     "server",
@@ -12,6 +12,11 @@
     "dev:web": "npm run dev -w web",
     "build": "npm run build -w web",
     "start": "npm start -w server"
+  },
+  "overrides": {
+    "@fastify/static": {
+      "glob": "^14.0.3"
+    }
   },
   "engines": {
     "node": ">=24"

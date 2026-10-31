@@ -4,12 +4,13 @@ import { hasSitePerm } from '../util';
 import { Modal } from './Modals';
 import { Live } from './AdminRtc';
 import Health from './Health';
-import TeleAdmin from './TeleAdmin';
+import VpnAdmin, { TeleSection } from './TeleAdmin';
 import AdminSecurity from './AdminSecurity';
+import AdminUpdate from './AdminUpdate';
 import { Stats, Users } from './AdminPanelsA1';
 import { Invites, Chats, Backups } from './AdminPanelsA2';
 import { Settings, Reports, Audit } from './AdminPanelsB';
-import { HeartPulse, ChartColumn, Flag, Users as UsersIcon, Ticket, MessagesSquare, Radio, Settings as SettingsIcon, ScrollText, DatabaseBackup, Cable, ShieldAlert } from 'lucide-react';
+import { HeartPulse, ChartColumn, Flag, Users as UsersIcon, Ticket, MessagesSquare, Radio, Settings as SettingsIcon, ScrollText, DatabaseBackup, Cable, ShieldAlert, Send, Rocket } from 'lucide-react';
 
 const TABS = [
   ['health', 'سلامت سرور', 'view_audit', HeartPulse],
@@ -20,10 +21,12 @@ const TABS = [
   ['invites', 'کدهای دعوت', 'manage_invites', Ticket],
   ['chats', 'گروه‌ها', 'manage_chats', MessagesSquare],
   ['live', 'زنده', 'manage_chats', Radio],
-  ['tele', 'Tele / VPN', 'manage_settings', Cable],
+  ['tele', 'تلگرام', 'manage_settings', Send],
+  ['vpn', 'VPN', 'manage_settings', Cable],
   ['settings', 'تنظیمات', 'manage_settings', SettingsIcon],
   ['audit', 'گزارش فعالیت', 'view_audit', ScrollText],
   ['backup', 'پشتیبان', 'owner', DatabaseBackup],
+  ['update', 'آپدیت', 'owner', Rocket],
 ];
 
 export default function Admin({ onClose }) {
@@ -49,9 +52,11 @@ export default function Admin({ onClose }) {
       {tab === 'settings' && <Settings />}
       {tab === 'audit' && <Audit />}
       {tab === 'live' && <Live />}
-      {tab === 'tele' && <TeleAdmin />}
+      {tab === 'tele' && <TeleSection />}
+      {tab === 'vpn' && <VpnAdmin />}
       {tab === 'security' && <AdminSecurity />}
       {tab === 'backup' && <Backups />}
+      {tab === 'update' && <AdminUpdate />}
     </Modal>
   );
 }

@@ -21,7 +21,7 @@ const MSG_SELECT = `
     f.width AS f_w, f.height AS f_h, f.duration AS f_dur, f.status AS f_status,
     f.variants AS f_variants, f.thumb AS f_thumb, f.waveform AS f_wave, f.purged AS f_purged,
     ch.type AS chat_type, ch.title AS chat_title, ch.avatar_file_id AS chat_avatar, r.text AS r_text, r.type AS r_type, r.deleted AS r_deleted, ru.display_name AS r_sender,
-    tp.message_id AS tp_id, tp.w AS tp_w, tp.h AS tp_h, tp.size AS tp_size
+    tp.message_id AS tp_id, tp.w AS tp_w, tp.h AS tp_h, tp.size AS tp_size, tp.kind AS tp_kind, tp.name AS tp_name, tp.duration AS tp_dur
   FROM messages m
   LEFT JOIN users u ON u.id = m.sender_id
   LEFT JOIN files f ON f.id = m.file_id
@@ -103,7 +103,9 @@ export function serializeMessage(m, reactions = []) {
         }
       : null,
     // A mirrored Telegram photo not fetched yet: the first member to open it fetches it for everyone.
-    pendingPhoto: !deleted && m.tp_id ? { width: m.tp_w, height: m.tp_h, size: m.tp_size } : null,
+    pendingPhoto: !deleted && m.tp_id && m.tp_kind === 'photo' ? { width: m.tp_w, height: m.tp_h, size: m.tp_size } : null,
+    // A mirrored video or file: only users the admin allowed fetch it; then every member has it.
+    pendingFile: !deleted && m.tp_id && m.tp_kind !== 'photo' ? { kind: m.tp_kind, name: m.tp_name, size: m.tp_size, duration: m.tp_dur, width: m.tp_w, height: m.tp_h } : null,
     editedAt: m.edited_at,
     pinned: !!m.pinned,
     mentions: deleted || !m.mentions ? [] : parseJSON(m.mentions, []),

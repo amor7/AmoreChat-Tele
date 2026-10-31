@@ -30,13 +30,13 @@ function photoInfo(content) {
   return { type: 'photo', w: big?.w || 0, h: big?.h || 0, mini: content.photo.minithumbnail?.data || '', sizes };
 }
 // Voice message: length, the waveform Telegram sends with it (for the bars) and the file to fetch on request.
-function voiceInfo(content) {
+export function voiceInfo(content) {
   if (content?._ !== 'messageVoiceNote' || !content.voice_note) return null;
   const v = content.voice_note;
   return { type: 'voice', duration: v.duration || 0, mime: v.mime_type || '', size: v.voice?.size || v.voice?.expected_size || 0, remote: v.voice?.remote?.id || '', wave: v.waveform || '' };
 }
 // Files, videos, music and GIFs: name, size and the file to fetch on request (never on their own).
-function fileInfo(content) {
+export function fileInfo(content) {
   const pick = {
     messageDocument: [content?.document, content?.document?.document, 'fileTypeDocument'],
     messageVideo: [content?.video, content?.video?.video, 'fileTypeVideo'],
@@ -133,7 +133,7 @@ const kindOf = (content) => ({ messageText: 'text', messagePhoto: 'photo', messa
 
 // Display names of senders, per TDLib client (users and chats rarely change name).
 const names = new WeakMap();
-async function senderOf(client, sender) {
+export async function senderOf(client, sender) {
   if (!sender) return { id: '', name: '' };
   let cache = names.get(client);
   if (!cache) names.set(client, (cache = new Map()));

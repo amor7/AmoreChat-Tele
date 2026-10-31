@@ -1054,17 +1054,19 @@ async function uiChecks({ owner, alice, bob, pd, gd, meta, photoMsg, voiceMsg, s
     await clickText('.modal button.btn.primary', 'ارسال');
     await until('the bot gets the message from the menu', () => botMsgs.find((m) => textOf(m) === menuText), 30000);
 
-    log('UI: admin panel → Tele / VPN shows alerts and the users');
+    log('UI: admin panel → VPN shows alerts, Telegram shows the users');
     await open(owner, '#/', { width: 1280, height: 900 });
     await page.click('.menu-btn');
     await clickText('.sidebar .menu > button', 'پنل مدیریت');
-    await clickText('.modal .tabs button', 'Tele / VPN');
+    await clickText('.modal .tabs button', 'VPN');
     await waitText('.modal h4', 'هشدارها');
-    await waitText('.modal .tele-users', 'Alice');
-    await noBrokenText('admin panel, Tele / VPN');
+    await noBrokenText('admin panel, VPN');
     await shot('admin');
     await page.evaluate(() => document.querySelector('.modal .tele-alerts').scrollIntoView());
     await shot('admin-alerts');
+    await clickText('.modal .tabs button', 'تلگرام');
+    await waitText('.modal .tele-users', 'Alice');
+    await noBrokenText('admin panel, Telegram');
     await page.evaluate(() => document.querySelector('.modal .tele-users').scrollIntoView());
     await shot('admin-users');
     // Turning voice off for Alice from the panel works.
@@ -1169,6 +1171,14 @@ async function part3() {
   ok(await owner.call('PATCH', `/api/tele/dialogs/${channelDialog.id}`, { selected: true }), 'add the channel');
   const ownerAcc = ok(await owner.call('GET', '/api/admin/tele/accounts'), 'accounts').accounts.find((a) => a.username === 'owner');
   ok(await owner.call('PATCH', `/api/admin/tele/accounts/${ownerAcc.id}`, { allowMedia: true }), 'photos for the owner');
+  // "Check now" is limited per minute: wait out the limit.
+  const runNow = async () => {
+    for (;;) {
+      const x = await owner.call('POST', '/api/admin/tele/mirrors/run', {});
+      if (x.http !== 429) return x;
+      await sleep(5000);
+    }
+  };
   const postText = async (t) => ok(await owner.call('POST', `/api/tele/dialogs/${channelDialog.id}/messages`, { text: t }), 'post in the channel');
   const postPhoto = async (buf, caption) => {
     const x = await owner.call('POST', `/api/tele/dialogs/${channelDialog.id}/photo?caption=${encodeURIComponent(caption)}`, null, { form: photoForm(buf) });
@@ -1215,14 +1225,14 @@ async function part3() {
   await postText(`news two ${RUN}`);
   const appMsgs = async () => ok(await owner.call('GET', `/api/chats/${mirror.chatId}/messages?limit=100`), 'app channel').messages;
   await until('posts in the app channel', async () => {
-    await owner.call('POST', '/api/admin/tele/mirrors/run', {});
+    await runNow();
     const m = await appMsgs();
     return m.some((x) => x.text === `news two ${RUN}`);
   }, 90000);
   let m = (await appMsgs()).filter((x) => x.type !== 'system');
   assert.deepEqual(m.map((x) => x.text), [`news one ${RUN}`, `news photo ${RUN}`, `news two ${RUN}`], 'posts missing, twice or out of order');
   assert.ok(m.every((x) => x.forwardedFrom === `تلگرام · ${meta.channelTitle}`), 'source not shown');
-  ok(await owner.call('POST', '/api/admin/tele/mirrors/run', {}), 'run again');
+  ok(await runNow(), 'run again');
   assert.equal((await appMsgs()).filter((x) => x.type !== 'system').length, 3, 'posts copied twice');
 
   log('The photo is not fetched until someone opens it');
@@ -1257,8 +1267,8 @@ async function part3() {
   assert.ok(!m[1].pendingPhoto);
   const img = await download(alice, `/api/files/${m[1].file.id}`);
   assert.ok(img.http === 200 && /^image\//.test(img.type) && img.bytes.length > 100, `the photo file: ${img.http} ${img.type} ${img.bytes.length}`);
-  r = await alice.call('POST', `/api/mirror-photos/${m[1].id}`, {});
-  assert.equal(r.http, 404, 'fetched again');
+  r = ok(await alice.call('POST', `/api/mirror-photos/${m[1].id}`, {}), 'opened again');
+  assert.equal(r.message.file.id, p1.message.file.id, 'fetched again');
   console.log(`  (owner's Telegram traffic so far this month: ${await usageNow()} bytes)`);
 
   log('A new invite link: the old one stops working; members stay');
@@ -1294,21 +1304,69 @@ async function part3() {
   assert.ok((await discover(dave)).includes(mirror.chatId), 'not listed while public');
   ok(await dave.call('POST', `/api/chats/${mirror.chatId}/join`, {}), 'dave joins from explore');
 
+  log('Videos and files: only noted; fetched only by users the admin allowed, then open to every member');
+  ok(await owner.call('PATCH', `/api/admin/tele/accounts/${ownerAcc.id}`, { allowFiles: true }), 'files for the owner');
+  ok(await owner.call('PATCH', `/api/admin/tele/mirrors/${mirror.id}`, { withFiles: true }), 'mirror files');
+  r = await owner.call('POST', `/api/tele/dialogs/${channelDialog.id}/file?caption=${encodeURIComponent(`news file ${RUN}`)}`, null, { form: fileForm(Buffer.from(`file body ${RUN}`), 'text/plain', `news-${RUN}.txt`) });
+  assert.equal(r.http, 201, JSON.stringify(r));
+  const filePost = await until('the file post in the app channel', async () => {
+    await runNow();
+    return (await appMsgs()).find((x) => x.text === `news file ${RUN}`);
+  }, 90000);
+  assert.ok(filePost.pendingFile && !filePost.file, `file fetched already: ${JSON.stringify(filePost)}`);
+  assert.equal(filePost.pendingFile.name, `news-${RUN}.txt`);
+  assert.equal(filePost.pendingFile.kind, 'file');
+  assert.equal((await alice.call('GET', '/api/auth/me')).user.mirrorFiles, false);
+  r = await alice.call('POST', `/api/mirror-media/${filePost.id}`, {});
+  assert.equal(r.http, 403, 'fetched without permission');
+  r = ok(await owner.call('GET', '/api/admin/access/mirror-files'), 'file access');
+  ok(await owner.call('PATCH', '/api/admin/access/mirror-files', { add: [r.users.find((u) => u.username === 'alice').id] }), 'allow alice');
+  r = ok(await alice.call('POST', `/api/mirror-media/${filePost.id}`, {}), 'alice fetches the file');
+  assert.equal(r.message.type, 'file');
+  assert.equal(r.message.file.name, `news-${RUN}.txt`);
+  assert.ok(!r.message.pendingFile);
+  const doc = await download(dave, `/api/files/${r.message.file.id}?download=1`);
+  assert.equal(doc.http, 200, 'another member can not download it');
+  assert.equal(doc.bytes.toString(), `file body ${RUN}`);
+
+  log('A Telegram group: its messages appear in an app channel with the name of who wrote them');
+  r = ok(await owner.call('GET', '/api/admin/tele/mirrors/channels'), 'channels and groups');
+  assert.ok(r.channels.some((c) => Number(c.tgChatId) === meta.groupChatId && c.kind === 'group'), 'group not offered');
+  r = ok(await owner.call('POST', '/api/admin/tele/mirrors', { tgChatId: String(meta.groupChatId), importLast: 0, visibility: 'link' }), 'mirror the group');
+  const gm = r.mirror;
+  assert.equal(gm.kind, 'group');
+  const botMe = await bot.invoke({ _: 'getMe' });
+  const botName = [botMe.first_name, botMe.last_name].filter(Boolean).join(' ');
+  await bot.invoke({ _: 'sendMessage', chat_id: meta.groupChatId, input_message_content: { _: 'inputMessageText', text: { _: 'formattedText', text: `group news ${RUN}` } } });
+  const groupPost = await until('the group message in the app channel', async () => {
+    await runNow();
+    const x = ok(await owner.call('GET', `/api/chats/${gm.chatId}/messages?limit=50`), 'group channel');
+    return x.messages.find((y) => y.text === `group news ${RUN}`);
+  }, 90000);
+  assert.equal(groupPost.forwardedFrom, `تلگرام · ${gm.title} · ${botName}`.slice(0, 120), 'the writer is not shown');
+  ok(await owner.call('DELETE', `/api/admin/tele/mirrors/${gm.id}`), 'remove the group mirror');
+
   log('Paused: nothing is copied; resumed: it catches up');
   ok(await owner.call('PATCH', `/api/admin/tele/mirrors/${mirror.id}`, { enabled: false }), 'pause');
   await postText(`news three ${RUN}`);
   await sleep(3000);
-  ok(await owner.call('POST', '/api/admin/tele/mirrors/run', {}), 'run while paused');
+  ok(await runNow(), 'run while paused');
   assert.ok(!(await appMsgs()).some((x) => x.text === `news three ${RUN}`), 'copied while paused');
   ok(await owner.call('PATCH', `/api/admin/tele/mirrors/${mirror.id}`, { enabled: true }), 'resume');
   await until('caught up', async () => {
-    await owner.call('POST', '/api/admin/tele/mirrors/run', {});
+    await runNow();
     return (await appMsgs()).some((x) => x.text === `news three ${RUN}`);
   }, 60000);
   ok(await owner.call('DELETE', `/api/admin/tele/mirrors/${mirror.id}`), 'remove mirror');
   r = ok(await owner.call('GET', '/api/admin/tele/mirrors'), 'mirrors');
   assert.equal(r.mirrors.length, 0);
   assert.ok((await appMsgs()).length > 0, 'the app channel lost its posts');
+
+  log('Traffic per day: the owner\'s Telegram use shows up for today');
+  r = ok(await owner.call('GET', `/api/admin/tele/accounts/${ownerAcc.id}/usage`), 'usage history');
+  assert.equal(r.days.length, 30);
+  assert.equal(r.months.length, 6);
+  assert.ok(r.days.at(-1).bytes > 0, `nothing counted today: ${JSON.stringify(r.days.slice(-2))}`);
   await stopServer();
 }
 

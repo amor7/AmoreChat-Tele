@@ -1432,3 +1432,90 @@ body:has(.room-view, .call-view) .toast {
 .pending-photo:disabled {
   cursor: progress;
 }
+
+/* A mirrored video / file not fetched yet */
+.pending-file {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: min(340px, 72vw);
+  padding: 10px 12px;
+  border-radius: var(--radius);
+  background: var(--panel-2);
+  color: var(--muted);
+}
+.pending-file .grow {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.pending-file b {
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Telegram traffic of one user, per day and month */
+.usage-chart {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+}
+.usage-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+  height: 56px;
+  padding: 4px;
+  border-radius: 6px;
+  background: var(--panel-2);
+}
+.usage-bars span {
+  flex: 1;
+  min-width: 3px;
+  border-radius: 2px 2px 0 0;
+  background: var(--accent);
+}
+.usage-bars span.zero {
+  opacity: 0.25;
+}
+.usage-months {
+  line-height: 1.8;
+}
+
+/* Owner: update from the admin panel */
+.admin-update {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.update-steps {
+  margin: 0;
+  padding-inline-start: 20px;
+  line-height: 1.9;
+}
+.update-files .ok {
+  color: var(--ok, #2e7d32);
+}
+.update-files .danger {
+  color: var(--danger);
+}
+.update-files .dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--border);
+  margin: 0 3px;
+}
+.update-log {
+  max-height: 320px;
+  overflow: auto;
+  padding: 8px;
+  border-radius: 6px;
+  background: var(--panel-2);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}

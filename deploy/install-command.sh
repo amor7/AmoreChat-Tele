@@ -18,3 +18,31 @@ else
 fi
 SCRIPT
 chmod 755 /usr/local/bin/amorechat-update
+
+# Updates from the admin panel: the app writes data/update/request, systemd runs
+# deploy/panel-update.sh as root (see there). Only on servers with systemd.
+if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
+  mkdir -p "${DIR}/data/update"
+  chown 1000:1000 "${DIR}/data/update" 2>/dev/null || true
+  cat > /etc/systemd/system/amorechat-panel-update.service <<UNIT
+[Unit]
+Description=AmoreChat: update asked for in the admin panel
+
+[Service]
+Type=oneshot
+TimeoutStartSec=3600
+ExecStart=/bin/bash ${DIR}/deploy/panel-update.sh
+UNIT
+  cat > /etc/systemd/system/amorechat-panel-update.path <<UNIT
+[Unit]
+Description=AmoreChat: watch for updates asked for in the admin panel
+
+[Path]
+PathChanged=${DIR}/data/update/request
+
+[Install]
+WantedBy=multi-user.target
+UNIT
+  systemctl daemon-reload
+  systemctl enable --now amorechat-panel-update.path >/dev/null 2>&1 || echo "!! Could not enable updates from the admin panel (systemd)"
+fi

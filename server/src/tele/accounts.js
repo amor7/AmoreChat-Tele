@@ -2,7 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { get, all, run, now, DATA_DIR } from '../db.js';
-import { settingNumber, getSetting } from '../settings.js';
+import { settingNumber } from '../settings.js';
+import { ACCESS_MODES, accessMode, accessAllowed } from '../access.js';
 import { ensureEgress, egressStatus } from './egress.js';
 import { teleAlert } from './alerts.js';
 
@@ -66,6 +67,7 @@ setInterval(async () => {
       closeLive(id);
       continue;
     }
+    if (account) noteNearQuota(account);
     // A login left at the code/password step is dropped after half an hour.
     const limit = h.phase === 'ready' ? IDLE_MS : 30 * 60000;
     if (Date.now() - (h.lastUsed || 0) > limit) closeLive(id);
@@ -75,20 +77,9 @@ setInterval(async () => {
 // ---------- Who may use Telegram ----------
 // The setting tele_access: everyone, nobody, only the listed users, or everyone but them. The owner
 // always may. Closing it for someone keeps their Telegram session: it works again once reopened.
-export const ACCESS_MODES = ['all', 'none', 'allow', 'deny'];
-export function teleAccessMode() {
-  const m = getSetting('tele_access');
-  return ACCESS_MODES.includes(m) ? m : 'all';
-}
-export function teleAllowed(userOrId) {
-  const user = typeof userOrId === 'object' && userOrId ? userOrId : get('SELECT id, role FROM users WHERE id = ?', Number(userOrId));
-  if (!user) return false;
-  if (user.role === 'owner') return true;
-  const mode = teleAccessMode();
-  if (mode === 'all' || mode === 'none') return mode === 'all';
-  const listed = !!get('SELECT 1 FROM tele_access WHERE user_id = ?', user.id);
-  return mode === 'allow' ? listed : !listed;
-}
+export { ACCESS_MODES };
+export const teleAccessMode = () => accessMode('tele');
+export const teleAllowed = (userOrId) => accessAllowed('tele', userOrId);
 export function assertTeleAllowed(userOrId) {
   if (!teleAllowed(userOrId)) throw Object.assign(new Error('دسترسی شما به تلگرام را مدیر بسته است'), { statusCode: 403, expose: true, access: true });
 }
@@ -131,6 +122,11 @@ function flushUsage(accountId) {
          ON CONFLICT(account_id, month) DO UPDATE SET sent = sent + excluded.sent, received = received + excluded.received`,
         Number(accountId), thisMonth(), ds, dr,
       );
+      run(
+        `INSERT INTO tele_usage_daily (account_id, day, bytes) VALUES (?, ?, ?)
+         ON CONFLICT(account_id, day) DO UPDATE SET bytes = bytes + excluded.bytes`,
+        Number(accountId), new Date().toISOString().slice(0, 10), ds + dr,
+      );
     }
     return { sent, received, since: s.since_date ? s.since_date * 1000 : null };
   });
@@ -145,6 +141,25 @@ export function usageOf(accountId, month = thisMonth()) {
   const r = get('SELECT sent, received FROM tele_usage WHERE account_id = ? AND month = ?', Number(accountId), month);
   return { sent: r?.sent || 0, received: r?.received || 0, used: (r?.sent || 0) + (r?.received || 0) };
 }
+/** Traffic per day (the last `days`) and per month (the last `months`), oldest first. */
+export function usageHistory(accountId, { days = 30, months = 6 } = {}) {
+  const id = Number(accountId);
+  const byDay = new Map(all('SELECT day, bytes FROM tele_usage_daily WHERE account_id = ? AND day >= ?', id, new Date(Date.now() - days * 86400000).toISOString().slice(0, 10)).map((r) => [r.day, r.bytes]));
+  const out = { days: [], months: [] };
+  for (let i = days - 1; i >= 0; i--) {
+    const day = new Date(Date.now() - i * 86400000).toISOString().slice(0, 10);
+    out.days.push({ day, bytes: byDay.get(day) || 0 });
+  }
+  const d = new Date();
+  for (let i = months - 1; i >= 0; i--) {
+    const month = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth() - i, 1)).toISOString().slice(0, 7);
+    out.months.push({ month, bytes: usageOf(id, month).used });
+  }
+  return out;
+}
+// Old daily rows are not needed (the months keep the totals).
+setInterval(() => run('DELETE FROM tele_usage_daily WHERE day < ?', new Date(Date.now() - 100 * 86400000).toISOString().slice(0, 10)), 6 * 3600000).unref();
+
 /** The account's monthly cap in MB (its own, else the default); 0 = none. */
 export const quotaOf = (account) => Math.max(0, Number(account.quota_mb ?? settingNumber('tele_quota_mb')) || 0);
 export const overQuota = (account) => {
@@ -154,6 +169,17 @@ export const overQuota = (account) => {
 export function assertQuota(account) {
   if (!overQuota(account)) return;
   throw Object.assign(new Error(`سقف مصرف ماهانه تلگرام شما (${quotaOf(account)} مگابایت) تمام شده است؛ پیام‌های ذخیره‌شده دیده می‌شوند. برای افزایش سقف به مدیر خبر دهید.`), { statusCode: 429, expose: true, quota: true });
+}
+/** At 80% of the cap: one alert to the admins per account and month. */
+export const QUOTA_WARN = 0.8;
+function noteNearQuota(account) {
+  const q = quotaOf(account);
+  if (!q || account.quota_warned === thisMonth()) return;
+  const used = usageOf(account.id).used;
+  if (used < q * 1048576 * QUOTA_WARN || used >= q * 1048576) return;
+  run('UPDATE tele_accounts SET quota_warned = ? WHERE id = ?', thisMonth(), account.id);
+  const u = get('SELECT display_name, username FROM users WHERE id = ?', account.user_id);
+  teleAlert('quota80', `⚠️ ${u?.display_name || '?'} (@${u?.username || '?'}) ${Math.round((used / (q * 1048576)) * 100)}٪ سقف مصرف ماهانه تلگرام (${q} مگابایت) را مصرف کرده است.`);
 }
 // Once per account and month.
 function noteOverQuota(account) {
@@ -222,12 +248,14 @@ function sessionDir(accountId) {
   fs.mkdirSync(dir, { recursive: true, mode: 0o700 }); // the Telegram session (auth keys): this user only
   return dir;
 }
+/** Messaging anyone, searching and joining: when the admin allowed it; the owner always may. */
+export const exploreAllowed = (row) => !!row?.allow_explore || get('SELECT role FROM users WHERE id = ?', row?.user_id)?.role === 'owner';
 export function getAccountForUser(userId) { return get('SELECT * FROM tele_accounts WHERE user_id = ?', userId); }
 export function publicAccount(row) {
   if (!row) return null;
   const s = String(row.phone || '');
   const phone = s.length < 6 ? '***' : s.slice(0, 4) + '***' + s.slice(-2);
-  return { id: row.id, phone, tgUserId: row.tg_user_id, displayName: row.display_name, username: row.username, status: row.status, allowShared: !!row.allow_shared, allowMedia: !!row.allow_media, allowVoice: !!row.allow_voice, allowFiles: !!row.allow_files, allowExplore: !!row.allow_explore, createdAt: row.created_at, updatedAt: row.updated_at };
+  return { id: row.id, phone, tgUserId: row.tg_user_id, displayName: row.display_name, username: row.username, status: row.status, allowShared: !!row.allow_shared, allowMedia: !!row.allow_media, allowVoice: !!row.allow_voice, allowFiles: !!row.allow_files, allowExplore: exploreAllowed(row), createdAt: row.created_at, updatedAt: row.updated_at };
 }
 export function listDialogs(accountId) {
   return all('SELECT * FROM tele_dialogs WHERE account_id = ? ORDER BY last_at DESC, title', accountId).map((d) => ({

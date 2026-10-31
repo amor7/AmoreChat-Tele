@@ -58,6 +58,7 @@ export function messagePreview(m) {
   if (!m) return '';
   if (m.file?.purged) return 'فایل منقضی شده';
   if (m.pendingPhoto) return m.text || 'عکس';
+  if (m.pendingFile) return m.text || m.pendingFile.name || (m.pendingFile.kind === 'video' ? 'ویدیو' : 'فایل');
   switch (m.type) {
     case 'deleted':
       return 'پیام حذف شد';

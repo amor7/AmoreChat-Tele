@@ -431,6 +431,29 @@ const migrations = [
     size INTEGER
   );
   `,
+  // v16: mirrored videos and files (fetched on first open, only by users allowed to), Telegram groups
+  // as mirror sources, traffic per day, and the 80% cap warning.
+  `
+  ALTER TABLE tele_mirror_photos ADD COLUMN kind TEXT NOT NULL DEFAULT 'photo';
+  ALTER TABLE tele_mirror_photos ADD COLUMN file_type TEXT NOT NULL DEFAULT 'fileTypePhoto';
+  ALTER TABLE tele_mirror_photos ADD COLUMN name TEXT NOT NULL DEFAULT '';
+  ALTER TABLE tele_mirror_photos ADD COLUMN mime TEXT NOT NULL DEFAULT '';
+  ALTER TABLE tele_mirror_photos ADD COLUMN duration INTEGER;
+  ALTER TABLE tele_mirrors ADD COLUMN with_files INTEGER NOT NULL DEFAULT 0;
+  ALTER TABLE tele_mirrors ADD COLUMN kind TEXT NOT NULL DEFAULT 'channel';
+  CREATE TABLE mirror_file_access (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    by INTEGER,
+    at INTEGER NOT NULL
+  );
+  CREATE TABLE tele_usage_daily (
+    account_id INTEGER NOT NULL REFERENCES tele_accounts(id) ON DELETE CASCADE,
+    day TEXT NOT NULL,
+    bytes INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (account_id, day)
+  );
+  ALTER TABLE tele_accounts ADD COLUMN quota_warned TEXT NOT NULL DEFAULT '';
+  `,
 ];
 
 const current = db.prepare('PRAGMA user_version').get().user_version;

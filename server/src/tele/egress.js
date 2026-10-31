@@ -10,6 +10,7 @@ import { DATA_DIR } from '../db.js';
 import { getProxy, selectActiveProxy, getRoutePolicy, recordHealth, listProxies } from './proxies.js';
 import { outboundFromConfig } from './uri.js';
 import { pinProxyAddresses, setResolveCache } from './resolve.js';
+import { ovpnState, ovpnError, syncOvpn } from './ovpn.js';
 
 const EGRESS_DIR = path.join(DATA_DIR, 'tele-egress');
 const CONFIG_PATH = path.join(EGRESS_DIR, 'sing-box.json');
@@ -407,6 +408,12 @@ export async function probeViaEgress(proxyId) {
   if (!row) throw Object.assign(new Error('پروکسی پیدا نشد'), { statusCode: 404 });
   const bin = findSingBox();
   if (!bin) return recordHealth(row.id, { ok: false, error: 'sing-box نصب نیست' });
+  if (row.protocol === 'openvpn') {
+    // The tunnel is made by the ovpn service: wait for it a little (it was maybe just added).
+    syncOvpn();
+    for (let i = 0; i < 30 && !ovpnState(row.id).up; i++) await new Promise((r) => setTimeout(r, 1000));
+    if (!ovpnState(row.id).up) return recordHealth(row.id, { ok: false, error: ovpnError(row.id) });
+  }
   ensureDir();
   const file = path.join(EGRESS_DIR, `probe-${row.id}-${process.pid}.json`);
   let proc = null;

@@ -4,7 +4,7 @@
  * for accounts an admin allowed (each search and join goes through the server's VPN).
  */
 import { get, run, now } from '../db.js';
-import { getAccountForUser, liveClient, upsertDialog, listDialogs } from './accounts.js';
+import { getAccountForUser, liveClient, upsertDialog, listDialogs, exploreAllowed } from './accounts.js';
 import { ensureEgress } from './egress.js';
 import { contentText } from './messages.js';
 import { usernameOf } from './mirror.js';
@@ -22,7 +22,7 @@ const PHONE = /^\+?\d{8,15}$/;
 async function exploreClient(userId) {
   const account = getAccountForUser(userId);
   if (!account || account.status !== 'connected') throw bad(400, 'حساب تلگرام وصل نیست');
-  if (!account.allow_explore) throw bad(403, 'پیام به افراد تازه و جستجو و عضویت در کانال‌ها برای شما فعال نیست؛ از مدیر بخواهید');
+  if (!exploreAllowed(account)) throw bad(403, 'پیام به افراد تازه و جستجو و عضویت در کانال‌ها برای شما فعال نیست؛ از مدیر بخواهید');
   await ensureEgress().catch(() => {
     throw bad(503, 'تونل تلگرام وصل نیست');
   });

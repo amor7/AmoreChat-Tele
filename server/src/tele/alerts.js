@@ -9,7 +9,7 @@ import { ensureSavedChat, systemMessage } from '../chats.js';
 import { getTeleSetting, setTeleSetting, getRoutePolicy, onHealthChange } from './proxies.js';
 import { egressStatus } from './egress.js';
 
-export const ALERT_KINDS = ['down', 'up', 'proxy', 'quota'];
+export const ALERT_KINDS = ['down', 'up', 'proxy', 'quota80', 'quota'];
 
 export function getAlertSettings() {
   const kinds = String(getTeleSetting('tele_alert_events')).split(',').filter((k) => ALERT_KINDS.includes(k));
@@ -92,7 +92,7 @@ function check() {
   const remind = state.alerted && s.repeatMin > 0 && Date.now() - state.alertedAt >= s.repeatMin * 60000;
   if (waited && (!state.alerted || remind)) {
     // Only an outage someone was told about gets a "back" message.
-    if (teleAlert('down', `🔴 قطع است${eg.lastError ? `: ${eg.lastError}` : ''}. کاربران الان به تلگرام دسترسی ندارند؛ پروکسی‌ها را در «Tele / VPN» بررسی کنید.`)) {
+    if (teleAlert('down', `🔴 قطع است${eg.lastError ? `: ${eg.lastError}` : ''}. کاربران الان به تلگرام دسترسی ندارند؛ پروکسی‌ها را در پنل مدیریت ← «VPN» بررسی کنید.`)) {
       state.alerted = true;
       state.alertedAt = Date.now();
     }

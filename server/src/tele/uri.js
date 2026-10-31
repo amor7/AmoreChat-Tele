@@ -8,6 +8,9 @@
 const ALLOWED_TYPES = new Set(['socks', 'http', 'shadowsocks', 'vless', 'vmess', 'trojan', 'wireguard', 'hysteria', 'hysteria2', 'tuic', 'anytls', 'shadowtls', 'ssh']);
 
 const bad = (msg) => Object.assign(new Error(msg), { statusCode: 400 });
+// OpenVPN: a SOCKS port of the ovpn service (see ovpn.js); the tag is "proxy-<id>".
+let ovpnOutboundFn = null;
+export const setOvpnOutbound = (fn) => (ovpnOutboundFn = fn);
 
 /**
  * SOCKS/HTTP links as sellers often write them, rewritten to the standard user:pass@host:port:
@@ -311,8 +314,14 @@ export function outboundFromConfig(cfg, protocol, tag) {
     } catch {
       throw bad('JSON کانفیگ نامعتبر است');
     }
+    if (j.type === 'openvpn') {
+      if (!j.ovpn) throw bad('فایل OpenVPN خالی است');
+      const id = Number(String(tag).replace(/^proxy-/, '')) || 0;
+      return ovpnOutboundFn ? ovpnOutboundFn(id, tag) : { type: 'socks', tag, server: 'ovpn', server_port: 20000 + id, version: '5' };
+    }
     o = j.type === 'wireguard' ? parseWireGuard(s) : j;
   } else {
+    if (/^\s*(client|remote\s+\S+)/im.test(s) && /<ca>/i.test(s)) throw bad('این فایل OpenVPN است؛ در «افزودن» زبانه OpenVPN را بزنید');
     const p = protocol && protocol !== 'other' ? protocol : detectProtocol(s);
     if (p === 'wireguard' || /\[Interface\]/i.test(s)) o = parseWireGuard(s);
     else if (/^socks/i.test(s) || p === 'socks5' || p === 'socks4' || /^[a-z0-9.-]+:\d+[:@]/i.test(s)) {
