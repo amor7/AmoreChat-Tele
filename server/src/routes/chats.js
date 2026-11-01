@@ -70,6 +70,17 @@ function membersOf(chatId) {
   }));
 }
 
+function newInvite(chatId, userId, maxUses = null, expiresAt = null) {
+  const code = randomCode(8);
+  run('INSERT INTO chat_invites (code, chat_id, created_by, max_uses, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?)', code, chatId, userId, maxUses, expiresAt, now());
+  return get('SELECT * FROM chat_invites WHERE code = ?', code);
+}
+
+// A private chat is reached through its link, so it always starts with one.
+function ensureInvite(chatId, userId) {
+  if (!get('SELECT 1 AS x FROM chat_invites WHERE chat_id = ?', chatId)) newInvite(chatId, userId);
+}
+
 function inviteRow(code) {
   const inv = get('SELECT * FROM chat_invites WHERE code = ?', String(code));
   if (!inv) return null;
@@ -135,6 +146,7 @@ export default async function chatRoutes(app) {
       isPublic: !!isPublic,
     });
     if (name) run('UPDATE chats SET handle = ? WHERE id = ?', name, chatId);
+    if (!isPublic) ensureInvite(chatId, req.user.id);
     addMember(chatId, req.user.id, 'owner', { silent: true });
     systemMessage(chatId, `${req.user.display_name} ${TYPE_LABEL[type]} «${t}» را ساخت`);
     const ids = Array.isArray(memberIds) ? memberIds.slice(0, 500).map(Number) : [];
@@ -207,7 +219,10 @@ export default async function chatRoutes(app) {
     if (b.description !== undefined) run('UPDATE chats SET description = ? WHERE id = ?', String(b.description).slice(0, 500), chat.id);
     // A private chat is no longer one every new user joins by themselves.
     if (b.isPublic !== undefined && !chat.is_emergency) run('UPDATE chats SET is_public = ?, auto_join = auto_join * ? WHERE id = ?', b.isPublic ? 1 : 0, b.isPublic ? 1 : 0, chat.id);
-    if (b.isPublic === false) dropPrivateHandle(chat.id);
+    if (b.isPublic === false && !chat.is_emergency) {
+      dropPrivateHandle(chat.id);
+      ensureInvite(chat.id, req.user.id);
+    }
     if (b.handle !== undefined && isRoom(chat)) setChatHandle(req.user, chat.id, b.handle);
     if (b.slowMode !== undefined) run('UPDATE chats SET slow_mode = ? WHERE id = ?', Math.max(0, Math.min(3600, Number(b.slowMode) || 0)), chat.id);
     if (b.locked !== undefined) run('UPDATE chats SET locked = ? WHERE id = ?', b.locked ? 1 : 0, chat.id);
@@ -348,17 +363,16 @@ export default async function chatRoutes(app) {
     if (!isRoom(chat) || chat.is_emergency) fail(400, 'نامعتبر');
     if (!hasChatPerm(req.user, member, 'invite_links')) fail(403, 'دسترسی ندارید');
     const { maxUses, expiresInHours } = req.body || {};
-    const code = randomCode(8);
-    run(
-      'INSERT INTO chat_invites (code, chat_id, created_by, max_uses, expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-      code,
-      chat.id,
-      req.user.id,
-      Number(maxUses) > 0 ? Number(maxUses) : null,
-      Number(expiresInHours) > 0 ? now() + Number(expiresInHours) * 3600 * 1000 : null,
-      now(),
-    );
-    return { invite: get('SELECT * FROM chat_invites WHERE code = ?', code) };
+    return { invite: newInvite(chat.id, req.user.id, Number(maxUses) > 0 ? Number(maxUses) : null, Number(expiresInHours) > 0 ? now() + Number(expiresInHours) * 3600 * 1000 : null) };
+  });
+
+  // A leaked link: every old one stops working, and there is a new one.
+  app.post('/api/chats/:id/invites/reset', async (req) => {
+    const { chat, member } = requireChat(req, req.params.id, { allowModerator: true });
+    if (!isRoom(chat) || chat.is_emergency) fail(400, 'نامعتبر');
+    if (!hasChatPerm(req.user, member, 'invite_links')) fail(403, 'دسترسی ندارید');
+    run('DELETE FROM chat_invites WHERE chat_id = ?', chat.id);
+    return { invite: newInvite(chat.id, req.user.id) };
   });
 
   app.delete('/api/chats/:id/invites/:code', async (req) => {
