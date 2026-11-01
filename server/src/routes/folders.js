@@ -1,5 +1,5 @@
 import { get, all, run, now, parseJSON } from '../db.js';
-import { fail, getMember, chatSummary } from '../chats.js';
+import { fail, getMember, chatSummary, markRead } from '../chats.js';
 import { toUser } from '../realtime.js';
 
 // Pinned chats and chat folders (each user's own; like Telegram).
@@ -95,7 +95,7 @@ export default async function folderRoutes(app) {
     const chatId = Number(req.params.id);
     if (!getMember(chatId, req.user.id)) fail(403, 'شما عضو این گفتگو نیستید');
     const last = get('SELECT MAX(id) AS id FROM messages WHERE chat_id = ?', chatId).id || 0;
-    run('UPDATE chat_members SET last_read = MAX(last_read, ?) WHERE chat_id = ? AND user_id = ?', last, chatId, req.user.id);
+    markRead(chatId, req.user.id, last);
     const chat = chatSummary(chatId, req.user.id);
     toUser(req.user.id, 'chat:new', chat);
     return { chat };

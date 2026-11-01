@@ -1,7 +1,7 @@
 import { get, all, run, now, tx, parseJSON } from './db.js';
-import { toChat, toUser, joinChat, leaveChat, isOnline } from './realtime.js';
+import { toChat, toChatExcept, toUser, joinChat, leaveChat, isOnline } from './realtime.js';
 import { hasSitePerm } from './perms.js';
-import { notifyMessage } from './push.js';
+import { notifyMessage, pushTo } from './push.js';
 import { kickFromVoice } from './voice.js';
 
 export function fail(statusCode, message) {
@@ -156,6 +156,18 @@ export function withMine(messages, userId) {
 
 // Channels always hide their member list from regular members; groups when the admin turns it on.
 export const membersHidden = (chat) => chat.type === 'channel' || (chat.type === 'group' && !!chat.hide_members);
+
+// Read up to a message: the senders get their ticks, and my other devices drop the notification.
+export function markRead(chatId, userId, messageId) {
+  const member = getMember(chatId, userId);
+  if (!member || messageId <= member.last_read) return;
+  run('UPDATE chat_members SET last_read = ? WHERE chat_id = ? AND user_id = ?', messageId, chatId, userId);
+  // With a hidden member list, don't reveal who read: others only learn that someone did.
+  const chat = get('SELECT type, hide_members FROM chats WHERE id = ?', chatId);
+  if (membersHidden(chat)) toChatExcept(chatId, [userId], 'read', { chatId, userId: 0, messageId });
+  else toChat(chatId, 'read', { chatId, userId, messageId });
+  pushTo([userId], { type: 'read', chatId });
+}
 export const isChatStaff = (user, member) => hasSitePerm(user, 'manage_chats') || member?.role === 'owner' || member?.role === 'admin';
 
 export function loadMessage(id) {
