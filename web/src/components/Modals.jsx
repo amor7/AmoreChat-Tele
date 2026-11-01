@@ -83,7 +83,7 @@ function Discover({ onClose }) {
   const [listAll, setListAll] = useState(true);
   const [q, setQ] = useState('');
   const st = useStore.getState;
-  // The full list (if the admin allows it), or a search by at least 3 letters of the name.
+  // The full list (if the admin allows it), or a search by at least 3 letters of the id.
   useEffect(() => {
     const term = q.trim();
     if (term && term.length < 3) return;
@@ -112,11 +112,11 @@ function Discover({ onClose }) {
 
   return (
     <Modal title="کاوش گروه‌ها و کانال‌های عمومی" onClose={onClose}>
-      <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="جستجوی نام گروه یا کانال (حداقل ۳ حرف)" autoFocus />
+      <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="شناسه گروه یا کانال، مثل varzesh3 (حداقل ۳ حرف)" dir="auto" autoFocus />
       {short && <p className="muted">حداقل ۳ حرف بنویسید.</p>}
       {!short && !chats && <p className="muted">…</p>}
       {!short && chats?.length === 0 && (
-        <p className="muted">{q.trim() ? 'گروه یا کانال عمومی با این نام پیدا نشد.' : listAll ? 'گروه یا کانال عمومی دیگری وجود ندارد.' : 'نام گروه یا کانالی را که دنبالش هستید جستجو کنید، یا با لینک دعوت عضو شوید.'}</p>
+        <p className="muted">{q.trim() ? 'گروه یا کانال عمومی با این شناسه پیدا نشد.' : listAll ? 'گروه یا کانال عمومی دیگری وجود ندارد.' : 'شناسه گروه یا کانالی را که دنبالش هستید بنویسید، یا با لینک دعوت عضو شوید.'}</p>
       )}
       <ul className="user-list">
         {!short && chats?.map((c) => (
@@ -125,8 +125,9 @@ function Discover({ onClose }) {
             <span className="grow">
               <b>
                 {c.type === 'channel' ? <Megaphone size={15} /> : c.type === 'voice' ? <Volume2 size={15} /> : <Users size={15} />}{' '}
-                {c.title}
+                {c.title} {c.fromTelegram && <span className="tag">کپی از تلگرام</span>}
               </b>
+              {c.handle && <small dir="ltr">@{c.handle}</small>}
               <small>
                 {toFa(c.memberCount)} {c.type === 'channel' ? 'مشترک' : 'عضو'} {c.description && `— ${c.description}`}
               </small>

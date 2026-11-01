@@ -21,6 +21,8 @@ jobs:
         run: bash server/test/watchdog.test.sh
       - name: Proxy links and WireGuard files
         run: DATA_DIR=/tmp/hs-uri node server/test/uri.test.mjs
+      - name: Names of channels copied from Telegram
+        run: DATA_DIR=/tmp/hs-handles node server/test/handles.test.mjs
       - name: /ca page fingerprint
         run: node server/test/ca-fingerprint.mjs
       - name: HTTPS certificate expiry warning

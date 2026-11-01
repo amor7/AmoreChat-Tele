@@ -17,6 +17,7 @@ import { liveClient, overQuota } from './accounts.js';
 import { ensureEgress } from './egress.js';
 import { contentText, mediaMaxBytes, fileMaxBytes, fileInfo, voiceInfo, senderOf } from './messages.js';
 import { accessAllowed } from '../access.js';
+import { assignMirrorHandle } from '../handles.js';
 
 const bad = (code, m) => Object.assign(new Error(m), { statusCode: code, expose: true });
 
@@ -58,13 +59,13 @@ export function renewInvite(chatId, by) {
 }
 
 const publicMirror = (m) => ({
-  id: m.id, tgChatId: m.tg_chat_id, title: m.title, chatId: m.chat_id, chatTitle: m.chat_title || '',
+  id: m.id, tgChatId: m.tg_chat_id, title: m.title, chatId: m.chat_id, chatTitle: m.chat_title || '', handle: m.handle || '',
   kind: m.kind || 'channel', withPhotos: !!m.with_photos, withFiles: !!m.with_files, enabled: !!m.enabled, lastError: m.last_error, lastRunAt: m.last_run_at,
   visibility: visibilityOf(m), inviteCode: !m.is_public ? linkInvite(m.chat_id) : null,
   members: get('SELECT COUNT(*) AS n FROM chat_members WHERE chat_id = ?', m.chat_id).n,
 });
 export const listMirrors = (accountId) =>
-  all('SELECT m.*, c.title AS chat_title, c.is_public, c.auto_join FROM tele_mirrors m LEFT JOIN chats c ON c.id = m.chat_id WHERE m.account_id = ? ORDER BY m.id', accountId).map(publicMirror);
+  all('SELECT m.*, c.title AS chat_title, c.handle, c.is_public, c.auto_join FROM tele_mirrors m LEFT JOIN chats c ON c.id = m.chat_id WHERE m.account_id = ? ORDER BY m.id', accountId).map(publicMirror);
 
 const isChannel = (chat) => chat?.type?._ === 'chatTypeSupergroup' && chat.type.is_channel;
 // What can be mirrored: a channel, or a group (its messages show the sender).
@@ -78,6 +79,13 @@ async function usernameOfChat(client, chat) {
   if (chat.type?._ !== 'chatTypeSupergroup') return '';
   const sg = await client.invoke({ _: 'getSupergroup', supergroup_id: chat.type.supergroup_id }).catch(() => null);
   return sg?.usernames?.active_usernames?.[0] || '';
+}
+
+// For channels added before they had an @id.
+async function nameMirror(client, m) {
+  if (/^[0-9]/.test(get('SELECT handle FROM chats WHERE id = ?', m.chat_id)?.handle || '')) return;
+  const chat = await client.invoke({ _: 'getChat', chat_id: Number(m.tg_chat_id) }).catch(() => null);
+  if (chat) assignMirrorHandle(m.chat_id, await usernameOfChat(client, chat), m.tg_chat_id);
 }
 
 /**
@@ -256,6 +264,7 @@ export async function runMirrors({ only = null } = {}) {
         await ensureEgress();
         const client = await liveClient(account);
         if (!client) throw new Error('اتصال به تلگرام برقرار نیست');
+        await nameMirror(client, m);
         posted += await runMirror(m, owner, client);
         run("UPDATE tele_mirrors SET last_error = '', last_run_at = ? WHERE id = ?", now(), m.id);
       } catch (e) {
@@ -306,6 +315,7 @@ export async function createMirror(user, { tgChatId, chatId = null, newTitle = '
     target = get('SELECT * FROM chats WHERE id = ?', id);
   }
   setVisibility(target.id, visibility, user.id);
+  assignMirrorHandle(target.id, await usernameOfChat(client, tgChat), tgId);
   // Start after the newest post, minus the ones to copy now.
   const recent = await fetchNew(client, Number(tgId), 0, Math.max(n, 1));
   const start = n > 0 && recent.length ? recent[Math.max(0, recent.length - n)].id - 1 : recent.at(-1)?.id || 0;

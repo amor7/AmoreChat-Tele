@@ -204,7 +204,8 @@ const SUMMARY_SELECT = `
     (SELECT COUNT(*) FROM messages m WHERE m.chat_id = c.id AND m.id > cm.last_read AND m.deleted = 0
        AND m.mentions IS NOT NULL AND EXISTS (SELECT 1 FROM json_each(m.mentions) j WHERE j.value = cm.user_id)) AS unread_mentions,
     (SELECT MAX(id) FROM messages m WHERE m.chat_id = c.id AND m.deleted = 0) AS last_msg_id,
-    (SELECT MAX(o.last_read) FROM chat_members o WHERE o.chat_id = c.id AND o.user_id != cm.user_id) AS others_read
+    (SELECT MAX(o.last_read) FROM chat_members o WHERE o.chat_id = c.id AND o.user_id != cm.user_id) AS others_read,
+    EXISTS (SELECT 1 FROM tele_mirrors t WHERE t.chat_id = c.id) AS from_telegram
   FROM chats c JOIN chat_members cm ON cm.chat_id = c.id AND cm.user_id = ?`;
 
 function formatSummary(c, userId) {
@@ -215,6 +216,8 @@ function formatSummary(c, userId) {
     description: c.description,
     avatar: c.avatar_file_id,
     isPublic: !!c.is_public,
+    handle: c.handle || '',
+    fromTelegram: !!c.from_telegram,
     isEmergency: !!c.is_emergency,
     slowMode: c.slow_mode,
     locked: !!c.locked,

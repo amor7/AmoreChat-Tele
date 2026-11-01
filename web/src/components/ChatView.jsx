@@ -336,7 +336,7 @@ function ChatHeader({ chat }) {
         <Avatar id={chat.id} name={chat.title} file={chat.avatar} saved={chat.type === 'saved'} size={40} />
         <div>
           <div className="title">
-            {chat.title} {chat.autoDelete > 0 && <Timer size={14} className="inline-icon" aria-label="حذف خودکار فعال است" />}
+            {chat.title} {chat.fromTelegram && <span className="tag">تلگرام</span>} {chat.autoDelete > 0 && <Timer size={14} className="inline-icon" aria-label="حذف خودکار فعال است" />}
             {isChatMuted(chat) && <BellOff size={14} className="inline-icon muted-icon" aria-label="بی‌صدا" />}
           </div>
           <div className={`subtitle ${typers.length || (chat.type === 'dm' && online) ? 'accent' : ''}`}>{subtitle}</div>

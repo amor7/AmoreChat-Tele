@@ -168,14 +168,14 @@ export function Chats({ onClose }) {
   const [data, load] = useLoad('/admin/chats');
   const [kind, setKind] = useState('all');
   const [q, setQ] = useState('');
-  const list = (data?.chats || []).filter((c) => (kind === 'all' || c.type === kind) && (!q || c.title.toLowerCase().includes(q.toLowerCase())));
+  const list = (data?.chats || []).filter((c) => (kind === 'all' || c.type === kind) && (!q || `${c.title} ${c.handle} ${c.ownerName} ${c.ownerUsername}`.toLowerCase().includes(q.toLowerCase().replace(/^@/, ''))));
   const open = (c) => {
     onClose();
     useStore.getState().openModal('chatInfo', { chatId: c.id });
   };
   return (
     <>
-      <input placeholder="جستجوی گروه یا کانال…" value={q} onChange={(e) => setQ(e.target.value)} />
+      <input placeholder="جستجوی نام، شناسه یا مالک…" value={q} onChange={(e) => setQ(e.target.value)} />
       <div className="chips admin-kinds">
         {CHAT_KINDS.map(([k, label]) => (
           <button key={k} className={`chip-btn ${kind === k ? 'active' : ''}`} onClick={() => setKind(k)}>
@@ -190,8 +190,12 @@ export function Chats({ onClose }) {
             <span className="grow">
               <b>
                 {c.type === 'channel' ? <Megaphone size={15} /> : c.type === 'voice' ? <Volume2 size={15} /> : <UsersIcon size={15} />}{' '}
-                {c.title}
+                {c.title} {c.fromTelegram && <span className="tag">کپی از تلگرام</span>}
               </b>
+              <small>
+                مالک: {c.ownerName ? `${c.ownerName} (@${c.ownerUsername})` : 'ندارد'}
+                {c.handle && ` · @${c.handle}`}
+              </small>
               <small>
                 {toFa(c.memberCount)} عضو · {toFa(c.messageCount)} پیام · {c.isPublic ? 'عمومی' : 'خصوصی'}
                 {!c.isMember && ' · شما عضو نیستید'}

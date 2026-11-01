@@ -428,15 +428,16 @@ for (let i = 0; i < 25; i++) if ((await pc.call('GET', `/api/users/search?q=x${i
 assert.ok(refused >= 4, `lookups limited (${refused} refused)`);
 const auditRows = (await owner.call('GET', '/api/admin/audit?limit=50')).entries || (await owner.call('GET', '/api/admin/audit')).entries || [];
 assert.ok(JSON.stringify(auditRows).includes('lookup.flood'), 'flood written to the activity log');
-// Public groups/channels: by at least 3 letters; the full list can be turned off.
-await chOwner.call('POST', '/api/chats', { type: 'group', title: 'Searchable Club', isPublic: true });
+// Public groups/channels: by at least 3 letters of the id; the full list can be turned off.
+await chOwner.call('POST', '/api/chats', { type: 'group', title: 'Searchable Club', isPublic: true, handle: 'searchable_club' });
 const disc = async (q) => await pa.call('GET', `/api/chats/discover${q ? `?q=${encodeURIComponent(q)}` : ''}`);
 assert.deepEqual((await disc('Se')).chats, [], 'two letters are not enough');
 assert.ok((await disc('Searchable')).chats.some((c) => c.title === 'Searchable Club'));
 assert.ok((await disc('')).chats.some((c) => c.title === 'Searchable Club'), 'full list while allowed');
 await owner.call('PATCH', '/api/admin/settings', { discover_list: '0' });
 assert.deepEqual((await disc('')).chats, [], 'no full list when turned off');
-assert.ok((await disc('Searchable')).chats.length >= 1, 'still found by name');
+assert.ok((await disc('Searchable')).chats.length >= 1, 'still found by id');
+assert.deepEqual((await disc('Club')).chats, [], 'not by name');
 await owner.call('PATCH', '/api/admin/settings', { discover_list: '1' });
 
 // ---- Stream frame rate: owner 60, others the site default (30) unless raised ----

@@ -22,6 +22,7 @@ import { isOnline } from '../realtime.js';
 import { mediaReady } from '../media.js';
 import { spendLookup, isUserStaff, searchAcquaintances, knowsUser } from '../lookup.js';
 import { rtcEnabled } from '../livekit.js';
+import { handleTaken } from '../handles.js';
 
 const VERSION = JSON.parse(readFileSync(new URL('../../../package.json', import.meta.url), 'utf8')).version;
 
@@ -129,7 +130,7 @@ export default async function authRoutes(app) {
       inv = checkInvite(invite);
       if (!inv) fail(403, firstUser ? 'کد راه‌اندازی نامعتبر است (در لاگ سرور چاپ شده)' : 'کد دعوت نامعتبر یا منقضی است');
     }
-    if (get('SELECT 1 FROM users WHERE username = ?', username)) fail(409, 'این نام کاربری قبلاً گرفته شده');
+    if (handleTaken(username)) fail(409, 'این نام کاربری قبلاً گرفته شده');
 
     const hash = await hashPassword(password);
     const userId = tx(() => {

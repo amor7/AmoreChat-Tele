@@ -755,7 +755,7 @@ function TeleMirrors() {
             {data.mirrors.map((m) => (
               <li key={m.id} className="row-item tele-mirror">
                 <span className="grow">
-                  {m.kind === 'group' && <span className="tag">گروه</span>} <b>{m.title}</b> ← {m.chatTitle || '—'}
+                  {m.kind === 'group' && <span className="tag">گروه</span>} {m.handle && <span className="tag" dir="ltr">@{m.handle}</span>} <b>{m.title}</b> ← {m.chatTitle || '—'}
                   {!m.enabled && <span className="tag">متوقف</span>}
                   <br />
                   <small className="muted">

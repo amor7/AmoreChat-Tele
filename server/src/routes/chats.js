@@ -1,3 +1,4 @@
+import { checkHandle, setChatHandle, dropPrivateHandle } from '../handles.js';
 import { get, all, run, now, parseJSON } from '../db.js';
 import { getSetting } from '../settings.js';
 import { hasSitePerm, hasChatPerm, cleanPerms, CHAT_PERMS } from '../perms.js';
@@ -86,41 +87,45 @@ function joinAllowed(chatId, userId) {
 export default async function chatRoutes(app) {
   app.get('/api/chats', async (req) => ({ chats: listChats(req.user.id) }));
 
-  // Public groups and channels: searched by at least 3 letters of the name; the full list only
-  // when the admin allows it (setting discover_list).
+  // Public groups and channels: found by the start of their @id, at least 3 letters (never by
+  // name, which anyone can copy); "varzesh3" also finds 1varzesh3. The full list only when the
+  // admin allows it (setting discover_list).
   app.get('/api/chats/discover', async (req) => {
-    const q = String(req.query.q || '').trim();
+    const q = String(req.query.q || '').trim().replace(/^@/, '');
     const listAll = getSetting('discover_list') !== '0';
     if (q && q.length < 3) return { chats: [], listAll, minLength: 3 };
     if (!q && !listAll) return { chats: [], listAll, minLength: 3 };
     if (q) spendLookup(req.user, 'discover');
-    const like = `%${q.replace(/[%_\\]/g, (c) => '\\' + c)}%`;
+    const like = `${q.replace(/[%_\\]/g, (c) => '\\' + c)}%`;
     return {
       listAll,
       minLength: 3,
       chats: all(
-        `SELECT c.id, c.type, c.title, c.description, c.avatar_file_id AS avatar,
+        `SELECT c.id, c.type, c.title, c.description, c.avatar_file_id AS avatar, c.handle,
+           EXISTS (SELECT 1 FROM tele_mirrors t WHERE t.chat_id = c.id) AS fromTelegram,
            (SELECT COUNT(*) FROM chat_members x WHERE x.chat_id = c.id) AS memberCount
          FROM chats c
          WHERE c.is_public = 1 AND c.type IN ('group', 'channel', 'voice')
-           AND NOT EXISTS (SELECT 1 FROM chat_members m WHERE m.chat_id = c.id AND m.user_id = ?)
-           AND (? = '' OR c.title LIKE ? ESCAPE '\\')
+           AND NOT EXISTS (SELECT 1 FROM chat_members m WHERE m.chat_id = c.id AND m.user_id = ?3)
+           AND (?1 = '' OR c.handle LIKE ?2 ESCAPE '\\' OR c.handle LIKE '1' || ?2 ESCAPE '\\')
          ORDER BY memberCount DESC LIMIT 100`,
-        req.user.id,
         q,
         like,
-      ),
+        req.user.id,
+      ).map((c) => ({ ...c, handle: c.handle || '', fromTelegram: !!c.fromTelegram })),
     };
   });
 
   app.post('/api/chats', async (req) => {
-    const { type, title, description = '', memberIds = [], isPublic = false } = req.body || {};
+    const { type, title, description = '', memberIds = [], isPublic = false, handle = '' } = req.body || {};
     if (!TYPE_LABEL[type]) fail(400, 'نوع گفتگو نامعتبر است');
     if (getSetting('allow_user_groups') !== '1' && req.user.role === 'user') {
       fail(403, 'ساخت گروه و کانال فقط برای مدیران فعال است');
     }
     const t = String(title || '').trim().slice(0, 100);
     if (!t) fail(400, 'عنوان را وارد کنید');
+    if (handle && !isPublic) fail(400, 'فقط گروه و کانال عمومی شناسه دارد');
+    const name = handle ? checkHandle(req.user, handle) : null;
 
     const chatId = createChat({
       type,
@@ -129,6 +134,7 @@ export default async function chatRoutes(app) {
       createdBy: req.user.id,
       isPublic: !!isPublic,
     });
+    if (name) run('UPDATE chats SET handle = ? WHERE id = ?', name, chatId);
     addMember(chatId, req.user.id, 'owner', { silent: true });
     systemMessage(chatId, `${req.user.display_name} ${TYPE_LABEL[type]} «${t}» را ساخت`);
     const ids = Array.isArray(memberIds) ? memberIds.slice(0, 500).map(Number) : [];
@@ -201,6 +207,8 @@ export default async function chatRoutes(app) {
     if (b.description !== undefined) run('UPDATE chats SET description = ? WHERE id = ?', String(b.description).slice(0, 500), chat.id);
     // A private chat is no longer one every new user joins by themselves.
     if (b.isPublic !== undefined && !chat.is_emergency) run('UPDATE chats SET is_public = ?, auto_join = auto_join * ? WHERE id = ?', b.isPublic ? 1 : 0, b.isPublic ? 1 : 0, chat.id);
+    if (b.isPublic === false) dropPrivateHandle(chat.id);
+    if (b.handle !== undefined && isRoom(chat)) setChatHandle(req.user, chat.id, b.handle);
     if (b.slowMode !== undefined) run('UPDATE chats SET slow_mode = ? WHERE id = ?', Math.max(0, Math.min(3600, Number(b.slowMode) || 0)), chat.id);
     if (b.locked !== undefined) run('UPDATE chats SET locked = ? WHERE id = ?', b.locked ? 1 : 0, chat.id);
     if (b.voiceStage !== undefined && chat.type === 'group') run('UPDATE chats SET voice_stage = ? WHERE id = ?', b.voiceStage ? 1 : 0, chat.id);
