@@ -31,6 +31,15 @@ export function deleteMessage(m, { by = null } = {}) {
   toChat(m.chat_id, 'message:delete', { id: m.id, chatId: m.chat_id, kept });
 }
 
+// Gone from the disk: the messages that show it say so.
+export function purgeAndTell(fileId) {
+  if (!purgeFile(fileId)) return false;
+  for (const m of all('SELECT id, chat_id FROM messages WHERE file_id = ? AND deleted = 0', fileId)) {
+    toChat(m.chat_id, 'message:edit', loadMessage(m.id));
+  }
+  return true;
+}
+
 function sweepKeptDeleted() {
   const days = settingNumber('deleted_keep_days') || 30;
   for (const d of all('SELECT message_id, file_id FROM deleted_messages WHERE at < ? LIMIT 500', now() - days * 86400000)) {
@@ -57,12 +66,7 @@ function sweepOldMedia() {
      LIMIT 500`,
     cutoff,
   );
-  for (const { id } of old) {
-    if (!purgeFile(id)) continue;
-    for (const m of all('SELECT id, chat_id FROM messages WHERE file_id = ? AND deleted = 0', id)) {
-      toChat(m.chat_id, 'message:edit', loadMessage(m.id));
-    }
-  }
+  for (const { id } of old) purgeAndTell(id);
 }
 
 export function startSweeper(log) {

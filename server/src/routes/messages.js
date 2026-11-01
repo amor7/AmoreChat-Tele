@@ -3,6 +3,7 @@ import { hasSitePerm, hasChatPerm, canPostInChannel } from '../perms.js';
 import { toChat, toAll } from '../realtime.js';
 import { fail, getMember, loadMessage, loadMessages, loadMessagesByIds, postMessage, systemMessage, audit, findMentions, withMine, membersHidden, markRead } from '../chats.js';
 import { requireChat } from './chats.js';
+import { assertAllowed } from '../limits.js';
 import { deleteMessage } from '../sweeper.js';
 
 const MAX_TEXT = 4000;
@@ -11,6 +12,7 @@ const TYPE_KINDS = { image: ['image'], video: ['video'], voice: ['audio'], file:
 
 export function assertCanPost(user, chat, member) {
   if (!member) fail(403, 'شما عضو این گفتگو نیستید');
+  assertAllowed(user, 'send');
   if (chat.is_emergency) {
     if (member.role !== 'owner' && !hasSitePerm(user, 'broadcast')) fail(403, 'فقط مدیران می‌توانند در این کانال پیام بگذارند');
     return;
@@ -109,6 +111,8 @@ export default async function messageRoutes(app) {
     const from = m.forwarded_from || src.sender?.displayName || '';
     const ids = Array.isArray(req.body?.chatIds) ? [...new Set(req.body.chatIds.map(Number))].slice(0, 20) : [];
     const sent = [];
+    assertAllowed(req.user, 'send');
+    if (m.file_id) assertAllowed(req.user, 'media');
     for (const chatId of ids) {
       const target = getMember(chatId, req.user.id);
       if (!target) continue;

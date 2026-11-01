@@ -46,6 +46,12 @@ jobs:
           for i in $(seq 1 30); do curl -sf http://localhost:3104/healthz && break; sleep 1; done
           CODE=$(grep -oP 'SETUP CODE: \K\S+' server-acc.log)
           node server/test/account.mjs http://127.0.0.1:3104 "$CODE"
+      - name: Storage management and restrictions
+        run: |
+          DATA_DIR=/tmp/hs-sto PORT=3119 node server/src/index.js > server-sto.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf http://localhost:3119/healthz && break; sleep 1; done
+          CODE=$(grep -oP 'SETUP CODE: \K\S+' server-sto.log)
+          node server/test/storage.mjs http://127.0.0.1:3119 "$CODE"
       - name: Penetration test (access control, CSRF, IDOR, injection, traversal, XSS, sessions, brute force, IP bans)
         run: |
           DATA_DIR=/tmp/hs-pen PORT=3105 node server/src/index.js > server-pen.log 2>&1 &

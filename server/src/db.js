@@ -490,6 +490,10 @@ const migrations = [
   END;
   INSERT INTO files_fts(files_fts) VALUES ('rebuild');
   `,
+  // v19: temporary restrictions on a user ({ send, media, call: until, reason })
+  `
+  ALTER TABLE users ADD COLUMN restrictions TEXT NOT NULL DEFAULT '{}';
+  `,
 ];
 
 const current = db.prepare('PRAGMA user_version').get().user_version;

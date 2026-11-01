@@ -1904,3 +1904,99 @@ input.music-bar-seek:hover::-moz-range-thumb {
     display: none;
   }
 }
+
+/* ---------- Storage management ---------- */
+.storage-cleanup,
+.storage-actions,
+.storage-tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 10px 0;
+}
+.storage-tags .tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 0;
+  cursor: pointer;
+}
+.storage-bars,
+.storage-files {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.storage-bars button {
+  display: block;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.storage-bars button:hover,
+.storage-bars button.active {
+  background: var(--hover, rgba(127, 127, 127, 0.12));
+}
+.storage-bar-label {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 4px;
+  min-width: 0;
+}
+.storage-bar-label b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.storage-bar-label small {
+  flex: none;
+}
+.storage-bar {
+  display: block;
+  height: 6px;
+  border-radius: 3px;
+  background: rgba(127, 127, 127, 0.18);
+  overflow: hidden;
+}
+.storage-bar i {
+  display: block;
+  height: 100%;
+  min-width: 2px;
+  border-radius: 3px;
+  background: var(--accent, #6366f1);
+}
+.storage-filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 8px;
+}
+.storage-files li {
+  padding: 8px 0;
+  border-bottom: 1px solid rgba(127, 127, 127, 0.15);
+}
+.storage-files .check {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  min-width: 0;
+}
+.storage-files .grow {
+  min-width: 0;
+  flex: 1;
+}
+.storage-files b,
+.storage-files small {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.perm-box details small {
+  display: block;
+}

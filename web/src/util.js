@@ -85,6 +85,15 @@ export const SITE_PERM_LABELS = {
   view_audit: 'مشاهده گزارش فعالیت و آمار',
   broadcast: 'ارسال در کانال اطلاع‌رسانی',
   handle_reports: 'رسیدگی به پیام‌های گزارش‌شده',
+  manage_storage: 'مدیریت فضا و حذف فایل‌ها',
+};
+
+// Ready sets of permissions for a new admin.
+export const ADMIN_PRESETS = {
+  'ناظر محتوا': ['manage_chats', 'handle_reports'],
+  پشتیبان: ['manage_users', 'manage_invites', 'handle_reports'],
+  'مدیر فضا': ['manage_storage', 'view_audit'],
+  'مدیر کامل': Object.keys(SITE_PERM_LABELS),
 };
 
 // Per-device preferences (not critical, so storage failures are ignored).
