@@ -2000,3 +2000,239 @@ input.music-bar-seek:hover::-moz-range-thumb {
 .perm-box details small {
   display: block;
 }
+
+/* ---------- Telegram and VPN tabs ---------- */
+.tele-seg {
+  display: flex;
+  gap: 4px;
+  margin: 12px 0;
+  padding: 4px;
+  border-radius: 12px;
+  background: var(--panel-2);
+}
+.tele-seg button {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 6px;
+  border: 0;
+  border-radius: 9px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 0.9em;
+  cursor: pointer;
+}
+.tele-seg button.active {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+}
+.tele-hero {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.tele-hero small,
+.tele-card summary small {
+  display: block;
+  color: var(--muted, inherit);
+  opacity: 0.8;
+}
+.tele-dot {
+  flex: none;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: rgba(127, 127, 127, 0.5);
+}
+.tele-dot.on,
+.tele-hero.ok .tele-dot {
+  background: var(--ok);
+}
+.tele-dot.off,
+.tele-hero.bad .tele-dot {
+  background: var(--danger);
+}
+.tele-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 10px 0;
+}
+.tele-actions .btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.tele-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 10px 0;
+  padding: 0;
+  list-style: none;
+}
+.tele-card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+}
+.tele-card > summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  cursor: pointer;
+  list-style: none;
+}
+.tele-card > summary::-webkit-details-marker {
+  display: none;
+}
+.tele-card[open] > summary {
+  border-bottom: 1px solid var(--border);
+}
+.tele-card > summary .grow {
+  flex: 1;
+  min-width: 0;
+}
+.tele-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+}
+.tele-perms {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+}
+.tele-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 14px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.tele-group h4 {
+  margin: 0;
+}
+.tele-group > summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.tele-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.tele-steps li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.tele-steps li.done {
+  color: var(--ok);
+}
+.tele-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  cursor: pointer;
+}
+.tele-issue {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--danger);
+  border-radius: 12px;
+  background: none;
+  color: var(--danger);
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.tele-issue .grow {
+  flex: 1;
+}
+.tele-fine {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 12px 0 0;
+  color: var(--ok);
+}
+.tele-top {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.tele-top li {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 8px;
+}
+.tele-top .tele-usage-bar {
+  grid-column: 1 / -1;
+}
+.tele-more {
+  position: relative;
+  display: inline-flex;
+}
+.tele-more-back {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  border: 0;
+  background: none;
+}
+.tele-more-menu {
+  position: absolute;
+  top: 100%;
+  inset-inline-end: 0;
+  z-index: 41;
+  min-width: 220px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+}
+.tele-more-menu button {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 9px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  cursor: pointer;
+}
+.tele-more-menu button:hover {
+  background: var(--panel-2);
+}
+.tele-more-menu button.danger {
+  color: var(--danger);
+}
