@@ -5,7 +5,7 @@ import cookie from '@fastify/cookie';
 import multipart from '@fastify/multipart';
 import fastifyStatic from '@fastify/static';
 import rateLimit from '@fastify/rate-limit';
-import { db, get, all, run, now, UPLOAD_DIR } from './db.js';
+import { db, get, all, run, now, DATA_DIR, UPLOAD_DIR } from './db.js';
 import { startSweeper } from './sweeper.js';
 import { mediaReady, onMediaUpdate, resumePendingMedia } from './media.js';
 import { toChat } from './realtime.js';

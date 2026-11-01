@@ -4,6 +4,8 @@ import android.app.Service;
 import android.content.Context;
 import android.content.Intent;
 import android.content.pm.ServiceInfo;
+import android.net.ConnectivityManager;
+import android.net.Network;
 import android.os.Build;
 import android.os.IBinder;
 
@@ -37,6 +39,7 @@ public class NotifyService extends Service {
     private final Map<String, Listener> listeners = new ConcurrentHashMap<>();
     private volatile boolean running;
     private String shownStatus;
+    private ConnectivityManager.NetworkCallback networkWatch;
 
     static void start(Context c) {
         if (Prefs.server(c) == null || !Prefs.background(c)) return;
@@ -69,6 +72,24 @@ public class NotifyService extends Service {
             ServiceCompat.startForeground(this, Notifs.ID_SERVICE, Notifs.service(this, "در حال اتصال…"), type);
         } catch (Exception e) {
             stopSelf();
+        }
+        watchNetwork();
+    }
+
+    /** A new network: the old connections are dead, so reconnect now instead of after the backoff. */
+    private void watchNetwork() {
+        ConnectivityManager.NetworkCallback watch = new ConnectivityManager.NetworkCallback() {
+            @Override
+            public void onAvailable(Network network) {
+                for (Listener l : listeners.values()) l.reconnect();
+                MainActivity.networkBack();
+            }
+        };
+        try {
+            getSystemService(ConnectivityManager.class).registerDefaultNetworkCallback(watch);
+            networkWatch = watch;
+        } catch (Exception ignored) {
+            // Without it the backoff still reconnects, only later.
         }
     }
 
@@ -161,6 +182,8 @@ public class NotifyService extends Service {
                 try {
                     HttpURLConnection c = Net.open(NotifyService.this, url + "/api/notify/stream", "GET");
                     c.setRequestProperty("Accept", "text/event-stream");
+                    String last = Prefs.lastEvent(NotifyService.this, url);
+                    if (last != null) c.setRequestProperty("Last-Event-ID", last);
                     c.setReadTimeout(75000); // the server pings every 25 s
                     conn = c;
                     int code = c.getResponseCode();
@@ -183,6 +206,7 @@ public class NotifyService extends Service {
                     String line;
                     while (running && !stopped && (line = r.readLine()) != null) {
                         if (line.startsWith("data:")) handle(url, line.substring(5).trim());
+                        else if (line.startsWith("id:")) Prefs.setLastEvent(NotifyService.this, url, line.substring(3).trim());
                     }
                 } catch (javax.net.ssl.SSLException e) {
                     setStatus(url, "خطای گواهی امنیتی (SSL) سرور؛ تلاش دوباره…", false);
@@ -261,6 +285,7 @@ public class NotifyService extends Service {
 
     @Override
     public void onDestroy() {
+        if (networkWatch != null) getSystemService(ConnectivityManager.class).unregisterNetworkCallback(networkWatch);
         running = false;
         connected = false;
         for (Listener l : listeners.values()) l.halt();

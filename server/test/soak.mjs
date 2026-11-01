@@ -399,8 +399,10 @@ const admin = {
 async function waitApi(u, chat, text, timeout = 20000) {
   const end = Date.now() + timeout;
   for (;;) {
+    // Two pages: a burst in the group can push it past the last hundred.
     const r = await u.api.call('GET', `/api/chats/${chat}/messages?limit=100`);
-    const n = (r.messages || []).filter((m) => m.text === text).length;
+    const older = r.messages?.length ? await u.api.call('GET', `/api/chats/${chat}/messages?limit=100&before=${r.messages[0].id}`) : {};
+    const n = [...(older.messages || []), ...(r.messages || [])].filter((m) => m.text === text).length;
     if (n) return n;
     if (Date.now() > end) throw new Error(`message not delivered within ${timeout / 1000}s`);
     await sleep(700);

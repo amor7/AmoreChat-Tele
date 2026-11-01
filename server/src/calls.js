@@ -53,6 +53,13 @@ export function startCall(callerId, calleeId, video) {
   return call;
 }
 
+// For a phone that connects while its call is ringing.
+export function ringingFor(userId) {
+  const call = userCall(userId);
+  if (call?.state !== 'ringing' || call.calleeId !== userId) return null;
+  return { type: 'call', callId: call.id, name: publicCall(call).caller.displayName, video: call.video };
+}
+
 export function acceptCall(call) {
   clearTimeout(call.timer);
   call.state = 'active';

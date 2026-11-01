@@ -40,6 +40,7 @@ function shot() {
 function issue(severity, area, text) {
   const key = `${area}|${String(text).replace(/\d{2,}/g, 'N').slice(0, 200)}`;
   const i = issues.get(key);
+  log(`!! ${area}: ${String(text).slice(0, 120)}`); // each time, to match with the server's log
   if (i) return void i.count++;
   issues.set(key, { severity, area, text: String(text).slice(0, 1200), count: 1, shot: shot() });
   log(`!! [${severity}] ${area}: ${String(text).slice(0, 200)}`);

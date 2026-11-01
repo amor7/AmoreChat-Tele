@@ -15,7 +15,14 @@ export function connectSocket() {
   let connectedBefore = false;
   socket = io({ transports: ['websocket', 'polling'] });
 
+  let connectedAt = 0;
+  // A connection from before the outage can look alive for a minute: start a new one, which also catches up.
+  window.addEventListener('online', () => {
+    if (Date.now() - connectedAt > 5000) socket?.disconnect().connect();
+  });
+
   socket.on('connect', () => {
+    connectedAt = Date.now();
     useStore.setState({ connected: true, ping: null });
     flushOutbox();
     startPing();

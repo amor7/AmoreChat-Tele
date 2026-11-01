@@ -27,10 +27,12 @@ jobs:
         run: cd server && node test/cert-alert.mjs
       - name: Smoke test
         run: |
+          mkdir -p /tmp/hs/watchdog && echo 'test note' > /tmp/hs/watchdog/note
           DATA_DIR=/tmp/hs PORT=3100 SWEEP_MS=500 node server/src/index.js > server.log 2>&1 &
           for i in $(seq 1 30); do curl -sf http://localhost:3100/healthz && break; sleep 1; done
           CODE=$(grep -oP 'SETUP CODE: \K\S+' server.log)
           SWEEP_MS=500 node server/test/smoke.mjs http://localhost:3100 "$CODE"
+          test ! -e /tmp/hs/watchdog/note # the server read the watchdog's note
       - name: Voice/call API test
         run: |
           export LIVEKIT_API_KEY=amorechat LIVEKIT_API_SECRET=ci-secret-0123456789abcdefghijklmnopqrstuv LIVEKIT_URL=http://127.0.0.1:7999
