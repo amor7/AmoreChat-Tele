@@ -268,7 +268,7 @@ export default function ChatView({ chatId }) {
           canPin={canPin}
           canDelete={menu.m.sender?.id === me.id || canDeleteOthers}
           canReport={menu.m.sender?.id !== me.id && chat.type !== 'saved' && !(chat.type === 'channel' && (chat.myRole === 'owner' || chat.myRole === 'admin'))}
-          canReaders={(chat.type === 'group' || chat.type === 'channel') && (menu.m.sender?.id === me.id || chat.myRole === 'owner' || chat.myRole === 'admin')}
+          canReaders={chat.type === 'group' && (menu.m.sender?.id === me.id || chat.myRole === 'owner' || chat.myRole === 'admin')}
           onAction={(a, extra) => act(a, menu.m, extra)}
           onClose={() => setMenu(null)}
         />

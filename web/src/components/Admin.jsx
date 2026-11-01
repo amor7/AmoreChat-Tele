@@ -8,10 +8,11 @@ import VpnAdmin, { TeleSection } from './TeleAdmin';
 import AdminSecurity from './AdminSecurity';
 import AdminUpdate from './AdminUpdate';
 import AdminStorage from './AdminStorage';
+import AdminHandles from './AdminHandles';
 import { Stats, Users } from './AdminPanelsA1';
 import { Invites, Chats, Backups } from './AdminPanelsA2';
 import { Settings, Reports, Audit } from './AdminPanelsB';
-import { HeartPulse, ChartColumn, Flag, Users as UsersIcon, Ticket, MessagesSquare, Radio, Settings as SettingsIcon, ScrollText, DatabaseBackup, Cable, ShieldAlert, Send, Rocket, HardDrive } from 'lucide-react';
+import { HeartPulse, ChartColumn, Flag, Users as UsersIcon, Ticket, MessagesSquare, Radio, Settings as SettingsIcon, ScrollText, DatabaseBackup, Cable, ShieldAlert, Send, Rocket, HardDrive, AtSign } from 'lucide-react';
 
 const TABS = [
   ['health', 'سلامت سرور', 'view_audit', HeartPulse],
@@ -27,6 +28,7 @@ const TABS = [
   ['settings', 'تنظیمات', 'manage_settings', SettingsIcon],
   ['audit', 'گزارش فعالیت', 'view_audit', ScrollText],
   ['storage', 'مدیریت فضا', 'manage_storage', HardDrive],
+  ['handles', 'شناسه‌ها', 'owner', AtSign],
   ['backup', 'پشتیبان', 'owner', DatabaseBackup],
   ['update', 'آپدیت', 'owner', Rocket],
 ];
@@ -61,6 +63,7 @@ export default function Admin({ onClose }) {
           }
         />
       )}
+      {tab === 'handles' && <AdminHandles />}
       {tab === 'storage' && <AdminStorage key={storageUser?.id} start={storageUser} />}
       {tab === 'invites' && <Invites />}
       {tab === 'chats' && <Chats onClose={onClose} />}

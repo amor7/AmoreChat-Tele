@@ -195,6 +195,67 @@ function JoinInvite({ code, onClose }) {
   );
 }
 
+// What @name is, from a link or a mention.
+function OpenHandle({ name, onClose }) {
+  const [found, setFound] = useState(null);
+  const [error, setError] = useState('');
+  const st = useStore.getState;
+
+  useEffect(() => {
+    api('GET', `/handles/${encodeURIComponent(name)}`)
+      .then(setFound)
+      .catch((e) => setError(e.message));
+  }, [name]);
+
+  const close = () => {
+    history.replaceState(null, '', '/');
+    onClose();
+  };
+  const go = (chat) => {
+    st().upsertChat(chat);
+    history.replaceState(null, '', '/');
+    onClose();
+    location.hash = `#/chat/${chat.id}`;
+  };
+  const run = (fn) => fn().then(({ chat }) => go(chat)).catch((e) => setError(e.message));
+
+  const { chat, user } = found || {};
+  const info = chat || user;
+  const title = chat ? chat.title : user?.displayName;
+  return (
+    <Modal title={`200e@${name}200e`} onClose={close} size="small">
+      {error && <div className="error">{error}</div>}
+      {info && (
+        <div className="center">
+          <Avatar id={info.id} name={title} file={info.avatar} size={72} />
+          <h3>{title}</h3>
+          {chat && (
+            <p className="muted">
+              {chat.type === 'channel' ? 'کانال' : 'گروه'} · {toFa(chat.memberCount)} {chat.type === 'channel' ? 'مشترک' : 'عضو'}
+            </p>
+          )}
+          {chat?.description && <p>{chat.description}</p>}
+          {user && (
+            <button className="btn primary" onClick={() => run(() => api('POST', '/chats/dm', { userId: user.id }))}>
+              پیام
+            </button>
+          )}
+          {chat &&
+            (chat.isMember ? (
+              <button className="btn primary" onClick={() => go(chat)}>
+                باز کردن
+              </button>
+            ) : (
+              <button className="btn primary" onClick={() => run(() => api('POST', `/chats/${chat.id}/join`))}>
+                عضویت
+              </button>
+            ))}
+        </div>
+      )}
+    </Modal>
+  );
+}
+
 function Forward({ message, onClose }) {
   const me = useStore((s) => s.me);
   const chats = useStore((s) => s.chats);
@@ -360,6 +421,8 @@ export default function Modals() {
       return <AppUpdateNotes onClose={close} />;
     case 'shareTarget':
       return <ShareTarget files={modal.files} text={modal.text} onClose={close} />;
+    case 'handle':
+      return <OpenHandle name={modal.name} onClose={close} />;
     case 'readers':
       return <Readers message={modal.message} onClose={close} />;
     case 'search':

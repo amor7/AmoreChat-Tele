@@ -36,6 +36,16 @@ assert.equal(assignMirrorHandle(d, '', '-100126'), '1tg100126');
 assert.throws(() => checkHandle(user, '1abc'), /مالک سرور/);
 assert.equal(checkHandle(owner, '@1abc'), '1abc');
 
+// A listed name: nobody takes it, but a channel of that name adopts it.
+assert.throws(() => checkHandle(user, 'google'), /گرفته شده/);
+assert.ok(handleTaken('DigiKala'));
+const e = channel();
+assert.equal(assignMirrorHandle(e, 'digikala', '-100127'), '1digikala');
+assert.ok(handleTaken('digikala'), 'kept for the channel now');
+assert.ok(!handleTaken('digikala', e));
+// The owner may use one.
+assert.equal(checkHandle(owner, 'microsoft'), 'microsoft');
+
 // A deleted channel frees its names.
 run('DELETE FROM chats WHERE id = ?', a);
 assert.ok(!handleTaken('varzesh3'));
