@@ -1,3 +1,4 @@
+import { RESERVED_NAMES } from './reserved-names.js';
 import { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -503,6 +504,15 @@ const migrations = [
     chat_id INTEGER NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
     created_at INTEGER NOT NULL
   );
+  `,
+  // v21: names nobody can take; the owner edits the list afterwards
+  `
+  CREATE TABLE reserved_names (
+    handle TEXT PRIMARY KEY COLLATE NOCASE,
+    note TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL
+  );
+  ${RESERVED_NAMES.map((n) => `INSERT OR IGNORE INTO reserved_names (handle, created_at) VALUES ('${n}', ${Date.now()});`).join('\n')}
   `,
 ];
 

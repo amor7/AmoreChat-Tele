@@ -17,6 +17,9 @@ import { saveBoot, loadBoot, startOutbox } from './offline';
 import { useAppUpdateCheck } from './components/AndroidApp';
 
 function parseHash() {
+  // A shared link: /@name, or #/@name from inside the app.
+  const at = location.pathname.match(/^\/@(\w+)\/?$/) || location.hash.match(/^#\/@(\w+)$/);
+  if (at) return { kind: 'handle', value: at[1] };
   const [, kind, value] = location.hash.match(/^#\/(\w+)\/(.+)$/) || [];
   return { kind, value };
 }
@@ -107,6 +110,7 @@ function Main() {
       } else {
         useStore.setState({ activeChatId: null });
         if (kind === 'join') st.openModal('join', { code: value });
+        if (kind === 'handle') st.openModal('handle', { name: value });
       }
     };
     onHash();

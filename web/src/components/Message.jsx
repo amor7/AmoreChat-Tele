@@ -31,9 +31,9 @@ function Mentions({ text, big }) {
   const parts = text.split(MENTION_RE);
   return parts.map((p, i) =>
     i % 2 ? (
-      <span key={i} className="mention" dir="ltr">
+      <a key={i} className="mention" dir="ltr" href={`#/${p}`}>
         {p}
-      </span>
+      </a>
     ) : (
       <RichText key={i} text={p} size={22} big={big} />
     ),

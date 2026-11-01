@@ -12,7 +12,8 @@ export function handleTaken(handle, chatId = 0) {
   return !!get(
     `SELECT 1 AS x WHERE EXISTS (SELECT 1 FROM users WHERE username = ?1)
        OR EXISTS (SELECT 1 FROM chats WHERE handle = ?1 AND id != ?2)
-       OR EXISTS (SELECT 1 FROM reserved_handles WHERE handle = ?1 AND chat_id != ?2)`,
+       OR EXISTS (SELECT 1 FROM reserved_handles WHERE handle = ?1 AND chat_id != ?2)
+       OR EXISTS (SELECT 1 FROM reserved_names WHERE handle = ?1)`,
     handle,
     chatId,
   );
@@ -27,6 +28,8 @@ export function checkHandle(user, value, chatId = 0) {
   } else if (!USERNAME_RE.test(h)) {
     fail(400, 'شناسه باید ۳ تا ۳۲ حرف انگلیسی، عدد یا _ باشد و با حرف شروع شود');
   }
+  // The owner may use a name from the list on their own channel: it leaves the list.
+  if (user.role === 'owner') run('DELETE FROM reserved_names WHERE handle = ?', h);
   if (handleTaken(h, chatId)) fail(409, 'این شناسه قبلاً گرفته شده است');
   return h;
 }
@@ -58,6 +61,7 @@ export function dropPrivateHandle(chatId) {
 export function assignMirrorHandle(chatId, username, tgChatId) {
   const current = get('SELECT handle FROM chats WHERE id = ?', chatId)?.handle || '';
   if (isOwnerOnly(current)) return current;
+  if (username) run('DELETE FROM reserved_names WHERE handle = ?', username);
   const base = username || `tg${String(tgChatId).replace(/\D/g, '')}`;
   let handle = `1${base}`.slice(0, 33);
   for (let n = 2; handleTaken(handle, chatId); n++) handle = `${n}${base}`.slice(0, 33);

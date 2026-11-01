@@ -251,7 +251,7 @@ function useMentions(chat, text, inputRef) {
   const caret = el?.selectionStart ?? text.length;
   const m = /(^|\s)@([A-Za-z0-9_]{0,32})$/.exec(text.slice(0, caret));
   const query = m && closed !== text ? m[2].toLowerCase() : null;
-  const enabled = chat.type === 'group' || chat.type === 'channel' || chat.type === 'voice';
+  const enabled = chat.type === 'group' || chat.type === 'voice';
   const me = useStore((s) => s.me);
 
   useEffect(() => {

@@ -130,7 +130,7 @@ export default async function authRoutes(app) {
       inv = checkInvite(invite);
       if (!inv) fail(403, firstUser ? 'کد راه‌اندازی نامعتبر است (در لاگ سرور چاپ شده)' : 'کد دعوت نامعتبر یا منقضی است');
     }
-    if (handleTaken(username)) fail(409, 'این نام کاربری قبلاً گرفته شده');
+    if (hasAnyUser() && handleTaken(username)) fail(409, 'این نام کاربری قبلاً گرفته شده');
 
     const hash = await hashPassword(password);
     const userId = tx(() => {

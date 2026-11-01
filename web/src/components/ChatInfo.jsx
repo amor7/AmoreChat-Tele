@@ -162,8 +162,19 @@ function InfoHeader({ chat, canEdit }) {
       <div>
         <b>{chat.title}</b>
         {chat.handle && (
-          <div className="muted" dir="ltr">
-            @{chat.handle}
+          <div className="muted">
+            <span dir="ltr">@{chat.handle}</span>{' '}
+            <button
+              className="btn sm"
+              onClick={async () => (await copyText(`${location.origin}/@${chat.handle}`)) && useStore.getState().showToast('لینک کپی شد')}
+            >
+              کپی لینک
+            </button>
+          </div>
+        )}
+        {chat.originalHandle && (
+          <div className="muted">
+            شناسه اصلی: <span dir="ltr">@{chat.originalHandle}</span>
           </div>
         )}
         {chat.fromTelegram && <div className="muted">کپی کانال اصلی در تلگرام است، نه کانال خود AmoreChat</div>}

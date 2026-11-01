@@ -186,4 +186,38 @@ assert.equal((await sara.call('POST', `/api/join/${first.code}`, {})).status, 40
 assert.equal((await sara.call('POST', `/api/join/${fresh.invite.code}`, {})).status, 200);
 assert.equal((await sara.call('POST', `/api/chats/${secret.id}/invites/reset`, {})).status, 403, 'a member can not');
 
+// Links and listed names.
+r = await sara.call('GET', '/api/handles/my_channel');
+assert.equal(r.chat?.id, room.chat.id, JSON.stringify(r));
+assert.equal((await sara.call('GET', '/api/handles/ali')).user.id, aliId);
+assert.equal((await sara.call('GET', '/api/handles/no_such_name')).status, 404);
+assert.equal((await sara.call('GET', '/api/admin/handles')).status, 403);
+assert.equal((await sara.call('POST', '/api/admin/handles/google/gift', { username: 'sara' })).status, 403);
+assert.equal((await client().call('POST', '/api/auth/register', { username: 'google', password: PASS, displayName: 'G', invite: code })).status, 409);
+let names = await owner.call('GET', '/api/admin/handles?q=goo');
+assert.ok(names.total > 400, 'the list is there');
+assert.ok(names.names.some((n) => n.handle === 'google'));
+assert.equal((await owner.call('POST', '/api/admin/handles', { handle: 'my_brand' })).status, 200);
+assert.equal((await ali.call('POST', '/api/chats', { type: 'group', title: 'x', isPublic: true, handle: 'my_brand' })).status, 409);
+assert.equal((await owner.call('DELETE', '/api/admin/handles/my_brand')).status, 200);
+assert.equal((await ali.call('POST', '/api/chats', { type: 'group', title: 'x', isPublic: true, handle: 'my_brand' })).status, 200, 'free again');
+// A gift replaces the username; the old one is free.
+r = await owner.call('POST', '/api/admin/handles/google/gift', { username: 'sara' });
+assert.equal(r.status, 200, JSON.stringify(r));
+assert.equal((await sara.call('GET', '/api/auth/me')).user.username, 'google', 'stays signed in');
+const again = client();
+assert.equal((await again.call('POST', '/api/auth/login', { username: 'google', password: PASS })).status, 200);
+assert.equal((await again.call('POST', '/api/auth/login', { username: 'sara', password: PASS })).status >= 400, true);
+assert.equal((await owner.call('POST', '/api/admin/handles/google/gift', { username: 'ali' })).status, 404, 'not twice');
+
+// A channel: no list of who saw a post, and no calling people out.
+const seen = (await ali.call('POST', `/api/chats/${room.chat.id}/messages`, { text: '@ali_x hello' })).message;
+assert.equal((await ali.call('GET', `/api/messages/${seen.id}/readers`)).status, 403);
+await sara.call('POST', `/api/chats/${room.chat.id}/join`, {});
+const called = (await ali.call('POST', `/api/chats/${room.chat.id}/messages`, { text: '@google look' })).message;
+assert.deepEqual(called.mentions, [], 'no mention in a channel');
+const team = (await ali.call('POST', '/api/chats', { type: 'group', title: 'Team', memberIds: [saraId] })).chat;
+const hey = (await ali.call('POST', `/api/chats/${team.id}/messages`, { text: '@google look' })).message;
+assert.deepEqual(hey.mentions, [saraId], 'a mention in a group');
+
 console.log('STORAGE TEST PASSED');

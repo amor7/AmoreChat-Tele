@@ -135,6 +135,9 @@ export function Reports() {
 export const ACTION_LABELS = {
   'user.register': 'ثبت‌نام',
   'user.restrict': 'محدودیت موقت کاربر',
+  'handle.reserve': 'رزرو شناسه',
+  'handle.release': 'آزاد کردن شناسه',
+  'handle.gift': 'هدیه شناسه به کاربر',
   'storage.delete': 'حذف فایل از مدیریت فضا',
   'storage.compact': 'فشرده‌سازی دیتابیس',
   'user.role': 'تغییر نقش کاربر',

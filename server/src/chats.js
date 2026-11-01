@@ -119,9 +119,11 @@ export function serializeMessage(m, reactions = []) {
   };
 }
 
-// Members named as @username in the text, plus the author of the replied-to message
+// Members named as @username in the text (groups), plus the author of the replied-to message
 // (like Telegram). These users are notified even when they muted the chat.
 export function findMentions(chatId, text, replyTo = null, senderId = null) {
+  // Nobody calls out to a channel's subscribers.
+  if (get('SELECT type FROM chats WHERE id = ?', chatId)?.type === 'channel') return [];
   const names = [...new Set([...String(text || '').matchAll(/(?:^|[^\w@.])@([A-Za-z][A-Za-z0-9_]{2,31})/g)].map((x) => x[1].toLowerCase()))].slice(0, 50);
   const ids = new Set();
   if (names.length) {
@@ -205,7 +207,8 @@ const SUMMARY_SELECT = `
        AND m.mentions IS NOT NULL AND EXISTS (SELECT 1 FROM json_each(m.mentions) j WHERE j.value = cm.user_id)) AS unread_mentions,
     (SELECT MAX(id) FROM messages m WHERE m.chat_id = c.id AND m.deleted = 0) AS last_msg_id,
     (SELECT MAX(o.last_read) FROM chat_members o WHERE o.chat_id = c.id AND o.user_id != cm.user_id) AS others_read,
-    EXISTS (SELECT 1 FROM tele_mirrors t WHERE t.chat_id = c.id) AS from_telegram
+    EXISTS (SELECT 1 FROM tele_mirrors t WHERE t.chat_id = c.id) AS from_telegram,
+    (SELECT r.handle FROM reserved_handles r WHERE r.chat_id = c.id LIMIT 1) AS original_handle
   FROM chats c JOIN chat_members cm ON cm.chat_id = c.id AND cm.user_id = ?`;
 
 function formatSummary(c, userId) {
@@ -218,6 +221,7 @@ function formatSummary(c, userId) {
     isPublic: !!c.is_public,
     handle: c.handle || '',
     fromTelegram: !!c.from_telegram,
+    originalHandle: c.original_handle || '',
     isEmergency: !!c.is_emergency,
     slowMode: c.slow_mode,
     locked: !!c.locked,

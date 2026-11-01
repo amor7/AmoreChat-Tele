@@ -241,9 +241,10 @@ export default async function messageRoutes(app) {
     return { ok: true };
   });
 
-  // "Seen by": members whose read pointer passed this message (groups and channels).
+  // "Seen by": members whose read pointer passed this message (groups only: a channel may have thousands).
   app.get('/api/messages/:id/readers', async (req) => {
     const { m: msg, chat, member } = requireMessage(req, req.params.id);
+    if (chat.type === 'channel') fail(403, 'کانال این فهرست را ندارد');
     const staff = member && (member.role === 'owner' || member.role === 'admin');
     // With a hidden member list only admins may see who read (it would reveal members).
     if (!staff && (msg.sender_id !== req.user.id || membersHidden(chat))) fail(403, 'فقط فرستنده یا مدیران می‌توانند ببینند');
