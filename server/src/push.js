@@ -1,4 +1,5 @@
 import { get, all, now, parseJSON } from './db.js';
+import { loadMessage } from './chats.js';
 
 // Notification stream for the Android app (server-sent events). The app keeps one light
 // connection open in the background, so notifications arrive without Google's push service,
@@ -15,8 +16,11 @@ export function addStream(userId, sessionId, res) {
   };
 }
 
+// `id` is what the app sends back as Last-Event-ID when it reconnects.
+export const frame = (event) => `${event.messageId ? `id: ${event.messageId}\n` : ''}data: ${JSON.stringify(event)}\n\n`;
+
 export function pushTo(userIds, event) {
-  const data = `data: ${JSON.stringify(event)}\n\n`;
+  const data = frame(event);
   for (const id of userIds) for (const s of streams.get(id) || []) s.res.write(data);
 }
 
@@ -49,39 +53,77 @@ function preview(m) {
   }
 }
 
-// Called for every new message: tells the members' phones, respecting per-chat mute
-// (an @mention or a reply to you still gets through).
+// The notification for one member, or null when they shouldn't get one (per-chat mute;
+// an @mention or a reply to you still gets through).
+function eventFor(msg, chat, member, senderId) {
+  if (msg.type === 'call') {
+    // Only the person who missed the call hears about it.
+    const c = parseJSON(msg.text, {});
+    if (c.status !== 'missed' || member.user_id === senderId) return null;
+  } else if (member.user_id === senderId) return null;
+  const mentioned = (msg.mentions || []).includes(member.user_id);
+  if (member.notify_muted_until && member.notify_muted_until > now() && !mentioned) return null;
+  const name = msg.sender?.displayName || '';
+  const title = chat.type === 'dm' ? name : chat.type === 'saved' ? 'پیام‌های ذخیره‌شده' : chat.title;
+  const body = chat.type === 'group' && name ? `${name}: ${preview(msg)}` : preview(msg);
+  return {
+    type: 'message',
+    chatId: chat.id,
+    messageId: msg.id,
+    title,
+    body,
+    mentioned,
+    // For a conversation-style notification with the sender's picture (app 0.8+).
+    text: preview(msg),
+    senderId: msg.sender?.id || 0,
+    senderName: name,
+    senderAvatar: msg.sender?.avatar || null,
+    chatAvatar: chat.type === 'dm' ? msg.sender?.avatar || null : chat.avatar_file_id || null,
+    group: chat.type === 'group' || chat.type === 'channel',
+  };
+}
+
+const chatOf = (id) => get('SELECT id, type, title, avatar_file_id FROM chats WHERE id = ?', id);
+
+// Called for every new message: tells the members' phones.
 export function notifyMessage(msg, senderId) {
   if (!streams.size || msg.type === 'system') return;
-  const chat = get('SELECT id, type, title, avatar_file_id FROM chats WHERE id = ?', msg.chatId);
+  const chat = chatOf(msg.chatId);
   if (!chat) return;
   const members = all('SELECT user_id, notify_muted_until FROM chat_members WHERE chat_id = ?', chat.id);
   for (const m of members) {
     if (!streams.has(m.user_id)) continue;
-    if (msg.type === 'call') {
-      // Only the person who missed the call hears about it.
-      const c = parseJSON(msg.text, {});
-      if (c.status !== 'missed' || m.user_id === senderId) continue;
-    } else if (m.user_id === senderId) continue;
-    const mentioned = (msg.mentions || []).includes(m.user_id);
-    if (m.notify_muted_until && m.notify_muted_until > now() && !mentioned) continue;
-    const name = msg.sender?.displayName || '';
-    const title = chat.type === 'dm' ? name : chat.type === 'saved' ? 'پیام‌های ذخیره‌شده' : chat.title;
-    const body = chat.type === 'group' && name ? `${name}: ${preview(msg)}` : preview(msg);
-    pushTo([m.user_id], {
-      type: 'message',
-      chatId: chat.id,
-      messageId: msg.id,
-      title,
-      body,
-      mentioned,
-      // For a conversation-style notification with the sender's picture (app 0.8+).
-      text: preview(msg),
-      senderId: msg.sender?.id || 0,
-      senderName: name,
-      senderAvatar: msg.sender?.avatar || null,
-      chatAvatar: chat.type === 'dm' ? msg.sender?.avatar || null : chat.avatar_file_id || null,
-      group: chat.type === 'group' || chat.type === 'channel',
-    });
+    const event = eventFor(msg, chat, m, senderId);
+    if (event) pushTo([m.user_id], event);
   }
 }
+
+const MISSED_MAX = 30;
+const MISSED_AGE = 24 * 3600 * 1000;
+
+// A phone that lost its stream for a moment: unread messages newer than the last one it saw,
+// oldest first. Nothing about what is already read, or from long ago (the app shows those).
+export function missedEvents(userId, afterId) {
+  const rows = all(
+    `SELECT m.id, cm.notify_muted_until FROM messages m
+       JOIN chat_members cm ON cm.chat_id = m.chat_id AND cm.user_id = ?
+      WHERE m.id > ? AND m.id > cm.last_read AND m.deleted = 0 AND m.type != 'system'
+        AND m.created_at > ? AND IFNULL(m.sender_id, 0) != ?
+      ORDER BY m.id DESC LIMIT ?`,
+    userId,
+    afterId,
+    now() - MISSED_AGE,
+    userId,
+    MISSED_MAX,
+  );
+  const events = [];
+  for (const r of rows.reverse()) {
+    const msg = loadMessage(r.id);
+    const chat = msg && chatOf(msg.chatId);
+    const event = chat && eventFor(msg, chat, { user_id: userId, notify_muted_until: r.notify_muted_until }, msg.sender?.id);
+    if (event) events.push(event);
+  }
+  return events;
+}
+
+export const lastMessageId = () => get('SELECT MAX(id) AS id FROM messages').id || 0;

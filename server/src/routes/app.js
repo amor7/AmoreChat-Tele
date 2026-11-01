@@ -2,7 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { addStream } from '../push.js';
+import { addStream, frame, missedEvents, lastMessageId } from '../push.js';
+import { ringingFor } from '../calls.js';
 import { getSetting } from '../settings.js';
 
 // The Android app: its notification stream, and the APK download page at /app
@@ -117,6 +118,12 @@ export default async function appRoutes(app) {
     });
     res.write(': connected\n\n');
     const remove = addStream(req.user.id, req.user.session_id, res);
+    // In one go with addStream, so that no message falls between the two.
+    const after = Number(req.headers['last-event-id']);
+    if (after > 0) for (const event of missedEvents(req.user.id, after)) res.write(frame(event));
+    res.write(`id: ${lastMessageId()}\ndata: {"type":"sync"}\n\n`);
+    const ringing = ringingFor(req.user.id);
+    if (ringing) res.write(frame(ringing));
     const ping = setInterval(() => res.write(': ping\n\n'), 25_000);
     const done = () => {
       clearInterval(ping);

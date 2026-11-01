@@ -355,6 +355,8 @@ export async function startCall(peer, video) {
   if (st().call) return st().showToast('یک تماس در جریان است');
   needSecure();
   const { call } = await api('POST', '/calls', { userId: peer.id, video });
+  // Declined before this answer got here: its "ended" event has already passed.
+  if (endedEarly.has(call.id)) return st().showToast(END_TEXT[endedEarly.get(call.id)] || END_TEXT.ended);
   useStore.setState({ call: { ...call, role: 'caller', peer, state: 'ringing' } });
   startRing('outgoing');
   try {
@@ -365,6 +367,7 @@ export async function startCall(peer, video) {
     useStore.setState({ call: null });
     throw e;
   }
+  if (st().call?.id !== call.id) await leave();
 }
 
 export async function acceptCall() {
@@ -375,6 +378,7 @@ export async function acceptCall() {
   const { call: info } = await api('POST', `/calls/${call.id}/accept`);
   useStore.setState({ call: { ...call, state: 'active' } });
   await connect({ kind: 'call', callId: call.id, title: call.peer.displayName, canSpeak: true, canStream: st().me.limits?.canStream, streamQuality: st().me.limits?.streamQuality, streamFps: st().me.limits?.streamFps }, info.token, { video: call.video });
+  if (st().call?.id !== call.id) await leave();
 }
 
 export async function declineCall() {
@@ -393,6 +397,7 @@ export async function hangUp() {
   await leave();
 }
 
+const endedEarly = new Map(); // call id -> reason, for the few calls ended before we knew their id
 const END_TEXT = { missed: 'تماس بی‌پاسخ ماند', declined: 'تماس رد شد', cancelled: 'تماس لغو شد', ended: 'تماس پایان یافت', busy: 'مخاطب مشغول است' };
 
 // Socket events (wired from socket.js).
@@ -423,7 +428,11 @@ export const callEvents = {
     }
   },
   async ended({ id, reason }) {
-    if (st().call?.id !== id) return;
+    if (st().call?.id !== id) {
+      endedEarly.set(id, reason);
+      if (endedEarly.size > 20) endedEarly.delete(endedEarly.keys().next().value);
+      return;
+    }
     stopRing();
     useStore.setState({ call: null });
     if (st().rtc?.callId === id) await leave();

@@ -168,6 +168,12 @@ public class MainActivity extends Activity {
     }
 
     /** A notification arrived for some server: let the page refresh the server switcher badges. */
+    /** The page's own "online" event isn't reliable in a WebView. */
+    static void networkBack() {
+        MainActivity a = current.get();
+        if (a != null) a.runOnUiThread(() -> a.web.evaluateJavascript("window.dispatchEvent(new Event('online'))", null));
+    }
+
     static void notifyUnreadChanged() {
         MainActivity a = current.get();
         if (a == null) return;

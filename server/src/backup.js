@@ -89,6 +89,8 @@ export function scheduleBackups(log) {
   const latest = fs.existsSync(BACKUP_DIR) ? fs.readdirSync(BACKUP_DIR).sort().at(-1) : null;
   const latestAge = latest ? Date.now() - fs.statSync(path.join(BACKUP_DIR, latest)).mtimeMs : Infinity;
   const run = async () => {
+    // A new install, nobody registered yet: nothing to keep, and nothing wrong.
+    if (!db.prepare('SELECT 1 FROM users LIMIT 1').get()) return;
     const { raiseAlert, resolveAlert } = await import('./health.js');
     try {
       const f = await backupNow();

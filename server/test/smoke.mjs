@@ -281,5 +281,34 @@ if (config.videoProcessing && haveFf) {
   console.log('(skipped video processing checks: ffmpeg not available)');
 }
 
+// Notifications missed while the phone's stream was down come when it reconnects.
+{
+  async function stream(after) {
+    const signal = AbortSignal.timeout(1500);
+    const headers = { cookie: bob.cookie(), 'x-requested-with': 'amorechat', ...(after ? { 'last-event-id': String(after) } : {}) };
+    const res = await fetch(BASE + '/api/notify/stream', { headers, signal });
+    assert.equal(res.status, 200);
+    let text = '';
+    try {
+      for await (const part of res.body) text += Buffer.from(part).toString();
+    } catch {
+      // the timeout: all that was going to come has come
+    }
+    return text;
+  }
+  const chat = (await owner.call('POST', '/api/chats/dm', { userId: bobId })).chat.id;
+  const first = await stream();
+  assert.ok(!first.includes('"type":"message"'), 'a first connection replays nothing');
+  const seen = Number(first.match(/^id: (\d+)$/m)[1]);
+  const sent = await owner.call('POST', `/api/chats/${chat}/messages`, { text: 'وقتی نبودی' });
+  const back = await stream(seen);
+  assert.equal(back.split('وقتی نبودی').length - 1, 2, 'the missed message comes once (body and text)');
+  assert.equal(Number([...back.matchAll(/^id: (\d+)$/gm)].at(-1)[1]), sent.message.id);
+  assert.ok(!(await stream(sent.message.id)).includes('"type":"message"'), 'nothing twice');
+  await bob.call('POST', `/api/chats/${chat}/read`, { messageId: sent.message.id });
+  assert.ok(!(await stream(seen)).includes('"type":"message"'), 'nothing already read');
+  console.log('notification catch-up checks passed');
+}
+
 sock.close();
 console.log('SMOKE TEST PASSED');

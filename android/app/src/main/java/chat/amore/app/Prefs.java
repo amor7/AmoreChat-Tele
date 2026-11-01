@@ -164,6 +164,15 @@ final class Prefs {
         return p(c).getBoolean("asked", false);
     }
 
+    /** The last notification event seen from a server: where the stream continues after a drop. */
+    static String lastEvent(Context c, String url) {
+        return p(c).getString("lastEvent:" + url, null);
+    }
+
+    static void setLastEvent(Context c, String url, String id) {
+        p(c).edit().putString("lastEvent:" + url, id).apply();
+    }
+
     static void setAskedPermissions(Context c) {
         p(c).edit().putBoolean("asked", true).apply();
     }

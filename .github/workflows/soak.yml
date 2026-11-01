@@ -1,0 +1,108 @@
+name: soak
+# Hours of simulated users (server/test/soak.mjs), to find bugs: not part of normal CI.
+# Started by pushing to the test/soak branch, or by hand from the Actions tab.
+on:
+  push:
+    branches: [test/soak]
+  workflow_dispatch:
+    inputs:
+      hours:
+        description: 'Hours (at most 5.5: GitHub stops a job at 6)'
+        default: '2'
+env:
+  HOURS: ${{ inputs.hours || '2' }}
+
+jobs:
+  web:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    env:
+      LIVEKIT_API_KEY: amorechat
+      LIVEKIT_API_SECRET: ci-secret-0123456789abcdefghijklmnopqrstuv
+      DATA_DIR: /tmp/soak
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Start LiveKit and the app
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+          sed 's#http://app:3000#http://127.0.0.1:3101#' deploy/livekit.yaml > /tmp/livekit.yaml
+          docker run -d --name livekit --network host -v /tmp/livekit.yaml:/etc/livekit.yaml:ro \
+            -e "LIVEKIT_KEYS=amorechat: $LIVEKIT_API_SECRET" \
+            livekit/livekit-server:v1.13.7 --config /etc/livekit.yaml --node-ip 127.0.0.1
+          LIVEKIT_URL=http://127.0.0.1:7880 PORT=3101 nohup node server/src/index.js > server.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf http://localhost:3101/healthz && break; sleep 1; done
+          npm install --no-save puppeteer@25.11.0
+      - name: Ten users for hours
+        run: |
+          CODE=$(grep -oP 'SETUP CODE: \K\S+' server.log)
+          SERVER_LOG=$PWD/server.log USERS=10 node server/test/soak.mjs http://localhost:3101 "$CODE"
+      - name: Report
+        if: always()
+        run: cat soak-out/report.md >> "$GITHUB_STEP_SUMMARY" || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: soak-web
+          path: |
+            soak-out/report.*
+            soak-out/issue-*.png
+            server.log
+
+  android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 355
+    env:
+      LIVEKIT_API_KEY: amorechat
+      LIVEKIT_API_SECRET: ci-secret-0123456789abcdefghijklmnopqrstuv
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+      - run: gradle -p android --no-daemon assembleDebug
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci && npm run build
+      - name: Start AmoreChat
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq ffmpeg
+          LIVEKIT_URL=http://127.0.0.1:7880 DATA_DIR=/tmp/soak-a PORT=3100 nohup node server/src/index.js > server-android.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf http://localhost:3100/healthz && break; sleep 1; done
+          echo "SETUP_CODE=$(grep -oP 'SETUP CODE: \K\S+' server-android.log)" >> "$GITHUB_ENV"
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: The app for hours
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 34
+          target: google_apis
+          arch: x86_64
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
+          script: node server/test/soak-android.mjs "$SETUP_CODE" android/app/build/outputs/apk/debug/app-debug.apk
+      - name: Report
+        if: always()
+        run: cat soak-android/report.md >> "$GITHUB_STEP_SUMMARY" || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: soak-android
+          path: |
+            soak-android/report.md
+            soak-android/*.png
+            server-android.log
