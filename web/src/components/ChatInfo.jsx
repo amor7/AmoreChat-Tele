@@ -62,7 +62,7 @@ export default function ChatInfo({ chatId, onClose }) {
 
       <NotifyMute chat={chat} />
       {can('edit_info') && <EditChat chat={chat} />}
-      {can('invite_links') && !chat.isEmergency && <InviteLinks chatId={chat.id} />}
+      {can('invite_links') && !chat.isEmergency && <InviteLinks chatId={chat.id} isPublic={chat.isPublic} />}
 
       <h4>
         {chat.type === 'channel' ? 'مشترکان' : 'اعضا'} ({toFa(chat.memberCount)})
@@ -269,7 +269,7 @@ function EditChat({ chat }) {
   );
 }
 
-function InviteLinks({ chatId }) {
+function InviteLinks({ chatId, isPublic }) {
   const showToast = useStore((s) => s.showToast);
   const [invites, setInvites] = useState(null);
   const [opts, setOpts] = useState({ maxUses: '', expiresInHours: '' });
@@ -293,8 +293,19 @@ function InviteLinks({ chatId }) {
     }
   }
 
+  async function reset() {
+    if (!confirm('همه لینک‌های فعلی از کار می‌افتند و یک لینک جدید ساخته می‌شود. ادامه می‌دهید؟')) return;
+    try {
+      const { invite } = await api('POST', `/chats/${chatId}/invites/reset`, {});
+      (await copyText(link(invite.code))) && showToast('لینک جدید ساخته و کپی شد');
+      load();
+    } catch (e) {
+      showToast(e.message);
+    }
+  }
+
   return (
-    <details className="boxed">
+    <details className="boxed" open={!isPublic}>
       <summary className="with-icon">
         <Link size={16} /> لینک‌های دعوت
       </summary>
@@ -305,6 +316,11 @@ function InviteLinks({ chatId }) {
           ساخت لینک
         </button>
       </div>
+      {invites?.length > 0 && (
+        <button className="btn sm" onClick={reset}>
+          ریست لینک (لغو همه و ساخت لینک جدید)
+        </button>
+      )}
       <ul className="user-list">
         {invites?.map((i) => (
           <li key={i.code} className="row-item">

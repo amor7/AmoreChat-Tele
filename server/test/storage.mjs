@@ -173,4 +173,17 @@ const rooms = (await owner.call('GET', `/api/admin/users/${aliId}/overview`)).ro
 assert.equal(rooms[0].role, 'owner');
 assert.equal(rooms[0].handle, 'my_channel');
 
+// A private channel is reached through its link, which can be reset.
+const secret = (await ali.call('POST', '/api/chats', { type: 'channel', title: 'Secret' })).chat;
+const links = async () => (await ali.call('GET', `/api/chats/${secret.id}/invites`)).invites;
+const [first] = await links();
+assert.ok(first?.code, 'a private channel starts with a link');
+assert.equal((await sara.call('GET', `/api/join/${first.code}`)).status, 200);
+const fresh = await ali.call('POST', `/api/chats/${secret.id}/invites/reset`, {});
+assert.equal(fresh.status, 200, JSON.stringify(fresh));
+assert.equal((await links()).length, 1);
+assert.equal((await sara.call('POST', `/api/join/${first.code}`, {})).status, 404, 'the old link is dead');
+assert.equal((await sara.call('POST', `/api/join/${fresh.invite.code}`, {})).status, 200);
+assert.equal((await sara.call('POST', `/api/chats/${secret.id}/invites/reset`, {})).status, 403, 'a member can not');
+
 console.log('STORAGE TEST PASSED');
