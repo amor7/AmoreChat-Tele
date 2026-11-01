@@ -308,6 +308,14 @@ if (config.videoProcessing && haveFf) {
   await bob.call('POST', `/api/chats/${chat}/read`, { messageId: sent.message.id });
   assert.ok(!(await stream(seen)).includes('"type":"message"'), 'nothing already read');
   console.log('notification catch-up checks passed');
+
+  // "Read" on a notification (read-all): the sender gets the two ticks.
+  const reads = [];
+  sock.on('read', (d) => reads.push(d));
+  const mine = await bob.call('POST', `/api/chats/${chat}/messages`, { text: 'خوانده شد؟' });
+  await owner.call('POST', `/api/chats/${chat}/read-all`, {});
+  for (let i = 0; i < 20 && !reads.length; i++) await new Promise((ok) => setTimeout(ok, 100));
+  assert.equal(reads[0]?.messageId, mine.message.id, 'read-all tells the sender');
 }
 
 sock.close();

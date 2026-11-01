@@ -1,10 +1,9 @@
 import { get, all, run, now } from '../db.js';
 import { hasSitePerm, hasChatPerm, canPostInChannel } from '../perms.js';
-import { toChat, toAll, toChatExcept } from '../realtime.js';
-import { fail, getMember, loadMessage, loadMessages, loadMessagesByIds, postMessage, systemMessage, audit, findMentions, withMine, membersHidden } from '../chats.js';
+import { toChat, toAll } from '../realtime.js';
+import { fail, getMember, loadMessage, loadMessages, loadMessagesByIds, postMessage, systemMessage, audit, findMentions, withMine, membersHidden, markRead } from '../chats.js';
 import { requireChat } from './chats.js';
 import { deleteMessage } from '../sweeper.js';
-import { pushTo } from '../push.js';
 
 const MAX_TEXT = 4000;
 // Which file kinds each message type accepts.
@@ -278,18 +277,8 @@ export default async function messageRoutes(app) {
 
   app.post('/api/chats/:id/read', async (req) => {
     const chatId = Number(req.params.id);
-    const member = getMember(chatId, req.user.id);
-    if (!member) fail(403, 'شما عضو این گفتگو نیستید');
-    const messageId = Number(req.body?.messageId) || 0;
-    if (messageId > member.last_read) {
-      run('UPDATE chat_members SET last_read = ? WHERE chat_id = ? AND user_id = ?', messageId, chatId, req.user.id);
-      // With a hidden member list, don't reveal who read: others only learn that someone did.
-      const chat = get('SELECT type, hide_members FROM chats WHERE id = ?', chatId);
-      if (membersHidden(chat)) toChatExcept(chatId, [req.user.id], 'read', { chatId, userId: 0, messageId });
-      else toChat(chatId, 'read', { chatId, userId: req.user.id, messageId });
-      // Read on one device: clear the notification on my phone.
-      pushTo([req.user.id], { type: 'read', chatId });
-    }
+    if (!getMember(chatId, req.user.id)) fail(403, 'شما عضو این گفتگو نیستید');
+    markRead(chatId, req.user.id, Number(req.body?.messageId) || 0);
     return { ok: true };
   });
 }
