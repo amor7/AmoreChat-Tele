@@ -7,10 +7,11 @@ import Health from './Health';
 import VpnAdmin, { TeleSection } from './TeleAdmin';
 import AdminSecurity from './AdminSecurity';
 import AdminUpdate from './AdminUpdate';
+import AdminStorage from './AdminStorage';
 import { Stats, Users } from './AdminPanelsA1';
 import { Invites, Chats, Backups } from './AdminPanelsA2';
 import { Settings, Reports, Audit } from './AdminPanelsB';
-import { HeartPulse, ChartColumn, Flag, Users as UsersIcon, Ticket, MessagesSquare, Radio, Settings as SettingsIcon, ScrollText, DatabaseBackup, Cable, ShieldAlert, Send, Rocket } from 'lucide-react';
+import { HeartPulse, ChartColumn, Flag, Users as UsersIcon, Ticket, MessagesSquare, Radio, Settings as SettingsIcon, ScrollText, DatabaseBackup, Cable, ShieldAlert, Send, Rocket, HardDrive } from 'lucide-react';
 
 const TABS = [
   ['health', 'سلامت سرور', 'view_audit', HeartPulse],
@@ -25,6 +26,7 @@ const TABS = [
   ['vpn', 'VPN', 'manage_settings', Cable],
   ['settings', 'تنظیمات', 'manage_settings', SettingsIcon],
   ['audit', 'گزارش فعالیت', 'view_audit', ScrollText],
+  ['storage', 'مدیریت فضا', 'manage_storage', HardDrive],
   ['backup', 'پشتیبان', 'owner', DatabaseBackup],
   ['update', 'آپدیت', 'owner', Rocket],
 ];
@@ -33,6 +35,7 @@ export default function Admin({ onClose }) {
   const me = useStore((s) => s.me);
   const tabs = TABS.filter(([, , perm]) => (perm === 'owner' ? me.role === 'owner' : hasSitePerm(me, perm)));
   const [tab, setTab] = useState(tabs[0]?.[0]);
+  const [storageUser, setStorageUser] = useState(null);
 
   return (
     <Modal title="پنل مدیریت" onClose={onClose} size="large">
@@ -46,7 +49,19 @@ export default function Admin({ onClose }) {
       {tab === 'health' && <Health />}
       {tab === 'stats' && <Stats />}
       {tab === 'reports' && <Reports />}
-      {tab === 'users' && <Users />}
+      {tab === 'users' && (
+        <Users
+          onStorage={
+            hasSitePerm(me, 'manage_storage')
+              ? (u) => {
+                  setStorageUser({ id: u.id, name: u.displayName });
+                  setTab('storage');
+                }
+              : null
+          }
+        />
+      )}
+      {tab === 'storage' && <AdminStorage key={storageUser?.id} start={storageUser} />}
       {tab === 'invites' && <Invites />}
       {tab === 'chats' && <Chats onClose={onClose} />}
       {tab === 'settings' && <Settings />}

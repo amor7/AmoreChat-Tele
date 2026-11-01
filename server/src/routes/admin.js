@@ -8,7 +8,8 @@ import { hashPassword, randomCode, publicUser } from '../auth.js';
 import { online, isOnline, disconnectUser } from '../realtime.js';
 import { fail, audit, loadMessage } from '../chats.js';
 import { ffmpegAvailable } from '../media.js';
-import { effectiveLimits, cleanLimits } from '../limits.js';
+import { effectiveLimits, cleanLimits, RESTRICT_KINDS, restrictionUntil } from '../limits.js';
+import { filesOf } from './storage.js';
 import { deleteMessage } from '../sweeper.js';
 import { kickEverywhere } from '../voice.js';
 import { series, recentAlerts, sample, netIsHostWide } from '../health.js';
@@ -52,6 +53,7 @@ export default async function adminRoutes(app) {
         limits: effectiveLimits(u),
         banned: !!u.banned,
         twoFactor: !!u.totp_enabled,
+        restricted: RESTRICT_KINDS.some((k) => restrictionUntil(u, k)),
         locked: !!(u.locked_until && u.locked_until > now()),
         createdAt: u.created_at,
         online: isOnline(u.id),
@@ -95,6 +97,54 @@ export default async function adminRoutes(app) {
     run('UPDATE users SET limits = ? WHERE id = ?', JSON.stringify(overrides), u.id);
     audit(req.user.id, 'user.limits', u.id, overrides);
     return { overrides, limits: effectiveLimits(get('SELECT * FROM users WHERE id = ?', u.id)) };
+  });
+
+  // Everything about one user in one place.
+  app.get('/api/admin/users/:id/overview', async (req) => {
+    need(req, 'manage_users');
+    const u = targetUser(req.params.id);
+    if (u.id !== req.user.id) assertOutranks(req.user, u);
+    const stored = parseJSON(u.restrictions, {});
+    const restrictions = {};
+    for (const k of RESTRICT_KINDS) if (restrictionUntil(u, k)) restrictions[k] = stored[k];
+    return {
+      messages: get('SELECT COUNT(*) AS n FROM messages WHERE sender_id = ? AND deleted = 0', u.id).n,
+      lastMessageAt: get('SELECT MAX(created_at) AS t FROM messages WHERE sender_id = ?', u.id).t,
+      chats: get('SELECT COUNT(*) AS n FROM chat_members WHERE user_id = ?', u.id).n,
+      files: filesOf(u.id),
+      sessions: all('SELECT user_agent, ip, last_seen FROM sessions WHERE user_id = ? ORDER BY last_seen DESC LIMIT 10', u.id).map((s) => ({
+        userAgent: s.user_agent,
+        ip: s.ip,
+        lastSeen: s.last_seen,
+      })),
+      reports: get('SELECT COUNT(*) AS n FROM reports r JOIN messages m ON m.id = r.message_id WHERE m.sender_id = ?', u.id).n,
+      history: all(
+        `SELECT a.action, a.created_at, x.display_name AS actor FROM audit_log a LEFT JOIN users x ON x.id = a.actor_id
+          WHERE a.target = ? ORDER BY a.id DESC LIMIT 10`,
+        String(u.id),
+      ).map((a) => ({ action: a.action, at: a.created_at, actor: a.actor })),
+      restrictions,
+      reason: Object.keys(restrictions).length ? stored.reason || '' : '',
+    };
+  });
+
+  // Hours per kind; 0 lifts it, a kind left out stays as it is.
+  app.post('/api/admin/users/:id/restrict', async (req) => {
+    need(req, 'manage_users');
+    const u = targetUser(req.params.id);
+    assertOutranks(req.user, u);
+    const b = req.body || {};
+    const next = parseJSON(u.restrictions, {});
+    for (const k of RESTRICT_KINDS) {
+      if (b[k] === undefined) continue;
+      const hours = Math.min(8760, Math.max(0, Number(b[k]) || 0));
+      if (hours) next[k] = now() + hours * 3600000;
+      else delete next[k];
+    }
+    if (b.reason !== undefined) next.reason = String(b.reason).trim().slice(0, 200);
+    run('UPDATE users SET restrictions = ? WHERE id = ?', JSON.stringify(next), u.id);
+    audit(req.user.id, 'user.restrict', u.id, next);
+    return { ok: true };
   });
 
   app.post('/api/admin/users/:id/reset-password', async (req) => {

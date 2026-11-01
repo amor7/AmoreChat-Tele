@@ -132,8 +132,11 @@ export function Reports() {
   );
 }
 
-const ACTION_LABELS = {
+export const ACTION_LABELS = {
   'user.register': 'ثبت‌نام',
+  'user.restrict': 'محدودیت موقت کاربر',
+  'storage.delete': 'حذف فایل از مدیریت فضا',
+  'storage.compact': 'فشرده‌سازی دیتابیس',
   'user.role': 'تغییر نقش کاربر',
   'user.ban': 'مسدود کردن کاربر',
   'user.unban': 'رفع مسدودیت کاربر',

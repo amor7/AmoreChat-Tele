@@ -9,6 +9,7 @@ export const SITE_PERMS = [
   'view_audit', // read the audit log and server stats
   'broadcast', // post in the emergency announcement channel
   'handle_reports', // review reported messages
+  'manage_storage', // see what fills the disk, delete files
 ];
 
 // Per-chat permissions a chat owner can grant to chat admins.

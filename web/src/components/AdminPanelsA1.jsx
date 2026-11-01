@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import { useStore } from '../store';
-import { hasSitePerm, SITE_PERM_LABELS, ROLE_LABELS, formatDateTime, formatSize, formatLastSeen, toFa } from '../util';
+import { hasSitePerm, SITE_PERM_LABELS, ADMIN_PRESETS, ROLE_LABELS, formatDateTime, formatSize, formatLastSeen, toFa } from '../util';
 import Avatar from './Avatar';
 import { LimitsEditor } from './AdminRtc';
 import { TriangleAlert, SlidersHorizontal } from 'lucide-react';
+import { ACTION_LABELS } from './AdminPanelsB';
 
 export function useLoad(url) {
   const showToast = useStore((s) => s.showToast);
@@ -65,7 +66,96 @@ export function Stats() {
   );
 }
 
-export function Users() {
+const STORAGE_LABELS = { image: 'عکس', video: 'ویدیو', music: 'موزیک', voice: 'صوتی', app: 'برنامه', archive: 'فشرده', document: 'سند', other: 'متفرقه' };
+const RESTRICT_LABELS = { send: 'ارسال پیام', media: 'ارسال فایل', call: 'تماس و استریم' };
+const RESTRICT_HOURS = [
+  [1, '۱ ساعت'],
+  [24, '۱ روز'],
+  [168, '۱ هفته'],
+  [720, '۱ ماه'],
+];
+
+function UserOverview({ u, canRestrict, run, onStorage }) {
+  const [o, load] = useLoad(`/admin/users/${u.id}/overview`);
+  const [hours, setHours] = useState(24);
+  const [reason, setReason] = useState('');
+  if (!o) return <small className="muted">…</small>;
+  const bytes = o.files.reduce((n, c) => n + c.bytes, 0);
+  const active = Object.keys(o.restrictions);
+  const restrict = (body, ok) => run(() => api('POST', `/admin/users/${u.id}/restrict`, body), ok).then(load);
+  return (
+    <div className="perm-box">
+      <b>نمای کلی</b>
+      <small className="muted">
+        {toFa(o.messages)} پیام · {toFa(o.chats)} گفتگو · {toFa(o.reports)} گزارش از پیام‌هایش
+        {o.lastMessageAt ? ` · آخرین پیام: ${formatDateTime(o.lastMessageAt)}` : ''}
+      </small>
+      <small className="muted">
+        {formatSize(bytes)} فایل{o.files.length > 0 && `: ${o.files.map((c) => `${STORAGE_LABELS[c.category]} ${formatSize(c.bytes)}`).join('، ')}`}
+      </small>
+      {onStorage && o.files.length > 0 && (
+        <button className="btn sm" onClick={() => onStorage(u)}>
+          مدیریت فایل‌های این کاربر
+        </button>
+      )}
+      {o.sessions.length > 0 && (
+        <details>
+          <summary>دستگاه‌ها ({toFa(o.sessions.length)})</summary>
+          {o.sessions.map((s, i) => (
+            <small key={i} className="muted" dir="auto">
+              {s.userAgent?.slice(0, 60)} · {s.ip} · {formatDateTime(s.lastSeen)}
+            </small>
+          ))}
+        </details>
+      )}
+      {o.history.length > 0 && (
+        <details>
+          <summary>سابقه مدیریتی ({toFa(o.history.length)})</summary>
+          {o.history.map((h, i) => (
+            <small key={i} className="muted">
+              {h.actor || 'سیستم'}: {ACTION_LABELS[h.action] || h.action} · {formatDateTime(h.at)}
+            </small>
+          ))}
+        </details>
+      )}
+      {canRestrict && (
+        <>
+          <b>محدودیت موقت</b>
+          {active.map((k) => (
+            <div key={k} className="inline-form">
+              <small className="grow">
+                {RESTRICT_LABELS[k]} تا {formatDateTime(o.restrictions[k])}
+              </small>
+              <button className="btn sm" onClick={() => restrict({ [k]: 0 }, 'برداشته شد')}>
+                برداشتن
+              </button>
+            </div>
+          ))}
+          {o.reason && <small className="muted">دلیل: {o.reason}</small>}
+          <div className="inline-form">
+            <select value={hours} onChange={(e) => setHours(Number(e.target.value))}>
+              {RESTRICT_HOURS.map(([h, label]) => (
+                <option key={h} value={h}>
+                  {label}
+                </option>
+              ))}
+            </select>
+            <input placeholder="دلیل (به کاربر نشان داده می‌شود)" value={reason} onChange={(e) => setReason(e.target.value)} />
+          </div>
+          <div className="inline-form">
+            {Object.entries(RESTRICT_LABELS).map(([k, label]) => (
+              <button key={k} className="btn sm" onClick={() => restrict({ [k]: hours, reason }, 'محدود شد')}>
+                {label}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+export function Users({ onStorage }) {
   const me = useStore((s) => s.me);
   const showToast = useStore((s) => s.showToast);
   const [q, setQ] = useState('');
@@ -104,6 +194,7 @@ export function Users() {
                 <b>
                   {u.displayName} {u.banned && <span className="tag danger">مسدود</span>}
                   {u.locked && <span className="tag danger">قفل موقت</span>}
+                  {u.restricted && <span className="tag danger">محدود</span>}
                   {u.twoFactor && <span className="tag">ورود دومرحله‌ای</span>}
                   {Object.keys(u.overrides || {}).length > 0 && <span className="tag">محدودیت سفارشی</span>}
                 </b>
@@ -111,7 +202,7 @@ export function Users() {
               </span>
               {u.role !== 'user' && <span className="role-badge">{ROLE_LABELS[u.role]}</span>}
             </button>
-            {open === u.id && <UserActions u={u} me={me} run={run} />}
+            {open === u.id && <UserActions u={u} me={me} run={run} onStorage={onStorage} />}
           </li>
         ))}
       </ul>
@@ -119,7 +210,7 @@ export function Users() {
   );
 }
 
-export function UserActions({ u, me, run }) {
+export function UserActions({ u, me, run, onStorage }) {
   const [perms, setPerms] = useState(u.adminPerms);
   const canManage = u.role === 'user' || (u.role === 'admin' && me.role === 'owner');
   const self = u.id === me.id;
@@ -128,9 +219,17 @@ export function UserActions({ u, me, run }) {
       <small className="muted">
         عضویت: {formatDateTime(u.createdAt)} · {u.online ? 'آنلاین' : formatLastSeen(u.lastSeen)}
       </small>
+      {(canManage || self) && <UserOverview u={u} canRestrict={canManage && !self} run={run} onStorage={onStorage} />}
       {me.role === 'owner' && !self && (
         <div className="perm-box">
           <b>{u.role === 'admin' ? 'دسترسی‌های ادمین سرور' : 'ارتقا به ادمین سرور با دسترسی‌های:'}</b>
+          <div className="inline-form">
+            {Object.entries(ADMIN_PRESETS).map(([name, list]) => (
+              <button key={name} className="btn sm" onClick={() => setPerms(list)}>
+                {name}
+              </button>
+            ))}
+          </div>
           {Object.entries(SITE_PERM_LABELS).map(([p, label]) => (
             <label key={p} className="check">
               <input type="checkbox" checked={perms.includes(p)} onChange={(e) => setPerms(e.target.checked ? [...perms, p] : perms.filter((x) => x !== p))} />

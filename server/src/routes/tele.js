@@ -1,3 +1,4 @@
+import { assertAllowed } from '../limits.js';
 import { hasSitePerm } from '../perms.js';
 import { fail, audit } from '../chats.js';
 import { listProxies, getProxy, createProxy, updateProxy, deleteProxy, getRoutePolicy, setRoutePolicy, publicProxy, PROTOCOL_HINTS, ROUTE_MODES } from '../tele/proxies.js';
@@ -311,6 +312,7 @@ export default async function teleRoutes(app) {
     const who = row.direction === 'out' ? '' : row.sender_name && row.sender_name !== dialog.title ? ` · ${row.sender_name}` : '';
     const from = `تلگرام · ${dialog.title || 'گفتگو'}${who}`.slice(0, 120);
     const sent = [];
+    assertAllowed(req.user, 'send');
     for (const chat of targets) {
       postMessage({ chatId: chat.id, senderId: req.user.id, type, text: String(text || '').slice(0, 4000), fileId, forwardedFrom: from });
       sent.push(chat.id);

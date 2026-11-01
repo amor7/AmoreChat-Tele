@@ -1,5 +1,6 @@
-import { parseJSON } from './db.js';
+import { parseJSON, now } from './db.js';
 import { getSetting, settingNumber } from './settings.js';
+import { fail } from './chats.js';
 
 export const STREAM_QUALITIES = [480, 720, 1080];
 export const STREAM_FPS = [30, 60];
@@ -22,6 +23,22 @@ export function cleanLimits(input) {
   return out;
 }
 
+// Temporary restrictions an admin sets: they end by themselves.
+const RESTRICTED = { send: 'ارسال پیام', media: 'ارسال فایل', call: 'تماس و استریم' };
+export const RESTRICT_KINDS = Object.keys(RESTRICTED);
+export function restrictionUntil(user, kind) {
+  if (user.role === 'owner') return 0;
+  const until = parseJSON(user.restrictions, {})[kind];
+  return until > now() ? until : 0;
+}
+export function assertAllowed(user, kind) {
+  const until = restrictionUntil(user, kind);
+  if (!until) return;
+  const when = new Date(until).toLocaleString('fa-IR', { dateStyle: 'short', timeStyle: 'short', timeZone: 'Asia/Tehran' });
+  const { reason } = parseJSON(user.restrictions, {});
+  fail(403, `${RESTRICTED[kind]} برای شما تا ${when} محدود شده است${reason ? ` (${reason})` : ''}`);
+}
+
 // What this user may actually do: owner is unrestricted, everyone else gets
 // their overrides on top of the site defaults.
 export function effectiveLimits(user) {
@@ -32,8 +49,8 @@ export function effectiveLimits(user) {
   return {
     uploadMb: o.upload_mb ?? settingNumber('max_upload_mb'),
     quotaMb: o.quota_mb ?? settingNumber('user_quota_mb'),
-    canCall: o.can_call ?? getSetting('default_can_call') === '1',
-    canStream: o.can_stream ?? getSetting('default_can_stream') === '1',
+    canCall: !restrictionUntil(user, 'call') && (o.can_call ?? getSetting('default_can_call') === '1'),
+    canStream: !restrictionUntil(user, 'call') && (o.can_stream ?? getSetting('default_can_stream') === '1'),
     streamQuality: o.stream_quality ?? settingNumber('max_stream_quality'),
     streamFps: o.stream_fps ?? (settingNumber('max_stream_fps') || 30),
   };

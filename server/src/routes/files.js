@@ -3,7 +3,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { pipeline } from 'node:stream/promises';
 import { get, all, run, now, parseJSON, UPLOAD_DIR, DATA_DIR } from '../db.js';
-import { effectiveLimits } from '../limits.js';
+import { effectiveLimits, assertAllowed } from '../limits.js';
 import { fail } from '../chats.js';
 import { hasSitePerm } from '../perms.js';
 import { mediaReady, processVoice, processMusic, queueVideo, fileVariants } from '../media.js';
@@ -41,6 +41,7 @@ const num = (v) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : nu
 export const newRel = () => path.posix.join(new Date().toISOString().slice(0, 7), crypto.randomBytes(16).toString('hex'));
 
 function checkLimits(user, size = 0) {
+  assertAllowed(user, 'media');
   const limits = effectiveLimits(user);
   if (size > limits.uploadMb * 1024 * 1024) fail(413, `حداکثر حجم فایل برای شما ${limits.uploadMb} مگابایت است`);
   if (limits.quotaMb > 0) {
