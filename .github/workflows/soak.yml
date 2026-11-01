@@ -8,9 +8,9 @@ on:
     inputs:
       hours:
         description: 'Hours (at most 5.5: GitHub stops a job at 6)'
-        default: '5'
+        default: '2'
 env:
-  HOURS: ${{ inputs.hours || '5' }}
+  HOURS: ${{ inputs.hours || '2' }}
 
 jobs:
   web:
