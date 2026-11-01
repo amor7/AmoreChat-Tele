@@ -68,6 +68,7 @@ export function Stats() {
 
 const STORAGE_LABELS = { image: 'عکس', video: 'ویدیو', music: 'موزیک', voice: 'صوتی', app: 'برنامه', archive: 'فشرده', document: 'سند', other: 'متفرقه' };
 const RESTRICT_LABELS = { send: 'ارسال پیام', media: 'ارسال فایل', call: 'تماس و استریم' };
+const ROOM_LABELS = { channel: 'کانال', group: 'گروه', voice: 'کانال صوتی' };
 const RESTRICT_HOURS = [
   [1, '۱ ساعت'],
   [24, '۱ روز'],
@@ -82,6 +83,7 @@ function UserOverview({ u, canRestrict, run, onStorage }) {
   if (!o) return <small className="muted">…</small>;
   const bytes = o.files.reduce((n, c) => n + c.bytes, 0);
   const active = Object.keys(o.restrictions);
+  const owned = o.rooms.filter((r) => r.role === 'owner').length;
   const restrict = (body, ok) => run(() => api('POST', `/admin/users/${u.id}/restrict`, body), ok).then(load);
   return (
     <div className="perm-box">
@@ -104,6 +106,19 @@ function UserOverview({ u, canRestrict, run, onStorage }) {
           {o.sessions.map((s, i) => (
             <small key={i} className="muted" dir="auto">
               {s.userAgent?.slice(0, 60)} · {s.ip} · {formatDateTime(s.lastSeen)}
+            </small>
+          ))}
+        </details>
+      )}
+      {o.rooms.length > 0 && (
+        <details open>
+          <summary>
+            کانال‌ها و گروه‌ها: مالک {toFa(owned)}، ادمین {toFa(o.rooms.length - owned)}
+          </summary>
+          {o.rooms.map((r) => (
+            <small key={r.id} className="muted">
+              {r.title}
+              {r.handle && ` (@${r.handle})`} · {ROOM_LABELS[r.type]} · {r.role === 'owner' ? 'مالک' : 'ادمین'} · {toFa(r.memberCount)} عضو
             </small>
           ))}
         </details>

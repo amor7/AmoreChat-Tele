@@ -112,6 +112,14 @@ export default async function adminRoutes(app) {
       lastMessageAt: get('SELECT MAX(created_at) AS t FROM messages WHERE sender_id = ?', u.id).t,
       chats: get('SELECT COUNT(*) AS n FROM chat_members WHERE user_id = ?', u.id).n,
       files: filesOf(u.id),
+      // The channels and groups registered to them.
+      rooms: all(
+        `SELECT c.id, c.type, c.title, c.handle, cm.role, (SELECT COUNT(*) FROM chat_members x WHERE x.chat_id = c.id) AS memberCount
+           FROM chat_members cm JOIN chats c ON c.id = cm.chat_id
+          WHERE cm.user_id = ? AND cm.role IN ('owner', 'admin') AND c.type IN ('group', 'channel', 'voice')
+          ORDER BY cm.role = 'owner' DESC, memberCount DESC LIMIT 200`,
+        u.id,
+      ),
       sessions: all('SELECT user_agent, ip, last_seen FROM sessions WHERE user_id = ? ORDER BY last_seen DESC LIMIT 10', u.id).map((s) => ({
         userAgent: s.user_agent,
         ip: s.ip,
@@ -342,13 +350,18 @@ export default async function adminRoutes(app) {
     need(req, 'manage_chats');
     return {
       chats: all(
-        `SELECT c.id, c.type, c.title, c.is_public AS isPublic, c.is_emergency AS isEmergency, c.created_at AS createdAt,
+        `SELECT c.id, c.type, c.title, c.handle, c.is_public AS isPublic, c.is_emergency AS isEmergency, c.created_at AS createdAt,
+           o.id AS ownerId, o.display_name AS ownerName, o.username AS ownerUsername,
+           EXISTS (SELECT 1 FROM tele_mirrors t WHERE t.chat_id = c.id) AS fromTelegram,
            (SELECT COUNT(*) FROM chat_members x WHERE x.chat_id = c.id) AS memberCount,
            (SELECT COUNT(*) FROM messages m WHERE m.chat_id = c.id) AS messageCount
            , EXISTS (SELECT 1 FROM chat_members me WHERE me.chat_id = c.id AND me.user_id = ?) AS isMember
-         FROM chats c WHERE c.type IN ('group', 'channel', 'voice') ORDER BY c.id DESC LIMIT 1000`,
+         FROM chats c
+         LEFT JOIN chat_members om ON om.chat_id = c.id AND om.role = 'owner'
+         LEFT JOIN users o ON o.id = om.user_id
+         WHERE c.type IN ('group', 'channel', 'voice') GROUP BY c.id ORDER BY c.id DESC LIMIT 1000`,
         req.user.id,
-      ).map((c) => ({ ...c, isMember: !!c.isMember, isPublic: !!c.isPublic, isEmergency: !!c.isEmergency })),
+      ).map((c) => ({ ...c, handle: c.handle || '', fromTelegram: !!c.fromTelegram, isMember: !!c.isMember, isPublic: !!c.isPublic, isEmergency: !!c.isEmergency })),
     };
   });
 }

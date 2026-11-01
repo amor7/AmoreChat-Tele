@@ -148,4 +148,29 @@ assert.equal((await sara.call('GET', '/api/auth/me')).user.limits.canCall, true)
 // Not upwards.
 assert.equal((await owner.call('POST', `/api/admin/users/${ownerId}/restrict`, { send: 1 })).status, 403);
 
+// Chat ids and who owns what.
+const room = await ali.call('POST', '/api/chats', { type: 'channel', title: 'Hidden Title', isPublic: true, handle: '@my_channel' });
+assert.equal(room.status, 200, JSON.stringify(room));
+assert.equal(room.chat.handle, 'my_channel');
+assert.equal((await ali.call('POST', '/api/chats', { type: 'group', title: 'x', handle: 'closed_one' })).status, 400, 'only public chats have one');
+assert.equal((await ali.call('POST', '/api/chats', { type: 'group', title: 'x', isPublic: true, handle: 'MY_CHANNEL' })).status, 409, 'whatever the case');
+assert.equal((await ali.call('POST', '/api/chats', { type: 'group', title: 'x', isPublic: true, handle: 'sara' })).status, 409, 'shared with usernames');
+assert.equal((await ali.call('POST', '/api/chats', { type: 'group', title: 'x', isPublic: true, handle: '1news' })).status, 400, 'digits are for the owner');
+r = await client().call('POST', '/api/auth/register', { username: 'my_channel', password: PASS, displayName: 'Copy', invite: code });
+assert.equal(r.status, 409, 'and a new user can not take it');
+const found = async (q) => (await sara.call('GET', `/api/chats/discover?q=${q}`)).chats.map((c) => c.id);
+assert.ok((await found('my_c')).includes(room.chat.id), 'by the start of the id');
+assert.ok((await found('%40my_c')).includes(room.chat.id), 'with an @');
+assert.ok(!(await found('Hidden')).includes(room.chat.id), 'not by name');
+assert.ok(!(await found('channel')).includes(room.chat.id), 'not by the middle of the id');
+r = await ali.call('PATCH', `/api/chats/${room.chat.id}`, { isPublic: false });
+assert.equal((await ali.call('GET', `/api/chats/${room.chat.id}`)).chat.handle, '', 'a private chat gives it back');
+await ali.call('PATCH', `/api/chats/${room.chat.id}`, { isPublic: true, handle: 'my_channel' });
+const listed = (await owner.call('GET', '/api/admin/chats')).chats.find((c) => c.id === room.chat.id);
+assert.equal(listed.ownerName, 'Ali');
+assert.equal(listed.handle, 'my_channel');
+const rooms = (await owner.call('GET', `/api/admin/users/${aliId}/overview`)).rooms;
+assert.equal(rooms[0].role, 'owner');
+assert.equal(rooms[0].handle, 'my_channel');
+
 console.log('STORAGE TEST PASSED');

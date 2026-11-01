@@ -105,7 +105,7 @@ export default function AdminStorage({ start }) {
     ['دیتابیس', formatSize(s.dbBytes)],
     ['بکاپ‌ها', formatSize(s.backupsBytes)],
     ['رشد روزانه (هفته اخیر)', formatSize(s.perDay)],
-    ['پر شدن دیسک', s.daysLeft == null ? '—' : `حدود ${toFa(s.daysLeft)} روز دیگر`],
+    ['تخمین پر شدن دیسک', s.daysLeft == null ? '—' : `حدود ${toFa(s.daysLeft)} روز دیگر`],
   ];
 
   return (

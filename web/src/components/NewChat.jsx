@@ -12,7 +12,7 @@ export default function NewChat({ onClose }) {
   const st = useStore.getState;
   const canCreate = me.role !== 'user' || config.allowUserGroups !== false;
   const [tab, setTab] = useState('dm');
-  const [form, setForm] = useState({ title: '', description: '', isPublic: false });
+  const [form, setForm] = useState({ title: '', description: '', isPublic: false, handle: '' });
   const [members, setMembers] = useState([]);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
@@ -33,7 +33,7 @@ export default function NewChat({ onClose }) {
     setBusy(true);
     setError('');
     try {
-      const { chat } = await api('POST', '/chats', { type: tab, ...form, memberIds: members.map((m) => m.id) });
+      const { chat } = await api('POST', '/chats', { type: tab, ...form, handle: form.isPublic ? form.handle : '', memberIds: members.map((m) => m.id) });
       st().upsertChat(chat);
       if (tab === 'voice') st().loadVoice().catch(() => {});
       onClose();
@@ -89,6 +89,12 @@ export default function NewChat({ onClose }) {
             <input type="checkbox" checked={form.isPublic} onChange={(e) => setForm({ ...form, isPublic: e.target.checked })} />
             {tab === 'voice' ? 'عمومی (برای همه کاربران در لیست کانال‌های صوتی نمایش داده شود)' : 'عمومی (همه می‌توانند پیدا کنند و عضو شوند)'}
           </label>
+          {form.isPublic && (
+            <label>
+              شناسه (برای پیدا شدن در جستجو)
+              <input value={form.handle} onChange={(e) => setForm({ ...form, handle: e.target.value })} dir="ltr" placeholder="my_channel" maxLength={32} />
+            </label>
+          )}
           <div className="chips">
             {members.map((m) => (
               <span key={m.id} className="chip">

@@ -1241,7 +1241,7 @@ async function part3() {
   const usageNow = async () => ok(await owner.call('GET', '/api/admin/tele/accounts'), 'accounts').accounts.find((a) => a.username === 'owner').used;
 
   log('Link only: not found in "explore", no joining without the link; with the link, anyone joins');
-  const discover = async (who) => ok(await who.call('GET', `/api/chats/discover?q=${encodeURIComponent(mirror.chatTitle.slice(-8))}`), 'discover').chats.map((c) => c.id);
+  const discover = async (who) => ok(await who.call('GET', `/api/chats/discover?q=${encodeURIComponent(mirror.handle)}`), 'discover').chats.map((c) => c.id);
   assert.ok(!(await discover(alice)).includes(mirror.chatId), 'a link-only channel is listed');
   r = await alice.call('POST', `/api/chats/${mirror.chatId}/join`, {});
   assert.ok(r.http >= 400, 'joined a link-only channel without the link');

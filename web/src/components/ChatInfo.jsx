@@ -161,6 +161,12 @@ function InfoHeader({ chat, canEdit }) {
       <input ref={fileRef} type="file" accept="image/*" hidden onChange={onAvatar} />
       <div>
         <b>{chat.title}</b>
+        {chat.handle && (
+          <div className="muted" dir="ltr">
+            @{chat.handle}
+          </div>
+        )}
+        {chat.fromTelegram && <div className="muted">کپی کانال اصلی در تلگرام است، نه کانال خود AmoreChat</div>}
         <div className="muted">
           {chat.type === 'channel' ? 'کانال' : 'گروه'} {chat.isPublic ? 'عمومی' : 'خصوصی'} · {toFa(chat.memberCount)} {chat.type === 'channel' ? 'مشترک' : 'عضو'}
         </div>
@@ -177,6 +183,7 @@ function EditChat({ chat }) {
     title: chat.title,
     description: chat.description,
     isPublic: chat.isPublic,
+    handle: chat.handle || '',
     slowMode: chat.slowMode,
     locked: chat.locked,
     autoDelete: chat.autoDelete || 0,
@@ -216,6 +223,12 @@ function EditChat({ chat }) {
         <label className="check">
           <input type="checkbox" checked={f.isPublic} onChange={(e) => setF({ ...f, isPublic: e.target.checked })} />
           عمومی (در بخش کاوش نمایش داده شود)
+        </label>
+      )}
+      {!chat.isEmergency && (f.isPublic || chat.fromTelegram) && (
+        <label>
+          شناسه (برای پیدا شدن در جستجو)
+          <input value={f.handle} onChange={(e) => setF({ ...f, handle: e.target.value })} dir="ltr" placeholder="my_channel" maxLength={33} />
         </label>
       )}
       {!chat.isEmergency && <AutoDeleteSelect value={f.autoDelete} onChange={(v) => setF({ ...f, autoDelete: v })} />}

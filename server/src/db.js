@@ -494,6 +494,16 @@ const migrations = [
   `
   ALTER TABLE users ADD COLUMN restrictions TEXT NOT NULL DEFAULT '{}';
   `,
+  // v20: the @id of channels and groups; names kept for channels copied from Telegram
+  `
+  ALTER TABLE chats ADD COLUMN handle TEXT COLLATE NOCASE;
+  CREATE UNIQUE INDEX chats_handle ON chats (handle) WHERE handle IS NOT NULL;
+  CREATE TABLE reserved_handles (
+    handle TEXT PRIMARY KEY COLLATE NOCASE,
+    chat_id INTEGER NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+    created_at INTEGER NOT NULL
+  );
+  `,
 ];
 
 const current = db.prepare('PRAGMA user_version').get().user_version;
