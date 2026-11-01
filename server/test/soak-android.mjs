@@ -234,6 +234,10 @@ const acts = {
     await until(() => !notifications().includes('Long Song'), 'music notification gone');
   },
   async incomingCall() {
+    // With the app in front the call shows in the page; the notification is for a closed app.
+    await foreground();
+    adb('shell input keyevent KEYCODE_HOME');
+    await sleep(2000);
     const r = ok(await owner('POST', '/api/calls', { userId: appId, video: false }), 'call');
     await until(() => notifications().includes('تماس صوتی ورودی'), 'call notification', 45000);
     ok(await owner('POST', `/api/calls/${r.call.id}/end`, {}), 'end call');
