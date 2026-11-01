@@ -210,7 +210,9 @@ async function openStream(cl) {
         while ((i = buf.indexOf('\n\n')) >= 0) {
           const block = buf.slice(0, i);
           buf = buf.slice(i + 2);
-          if (block.startsWith('data:')) events.push(JSON.parse(block.slice(5)));
+          const data = block.split('\n').find((l) => l.startsWith('data:'));
+          const event = data && JSON.parse(data.slice(5));
+          if (event && event.type !== 'sync') events.push(event);
         }
       }
     } catch {
