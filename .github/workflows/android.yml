@@ -66,10 +66,18 @@ jobs:
           fi
           ls -lh android-dist
       - uses: actions/upload-artifact@v4
+        if: ${{ !inputs.version }}
         with:
           retention-days: 3
           name: android-apk
           path: android-dist/
+      # A release hands the APK to its next job through the cache, which doesn't count against
+      # the artifact storage quota (a full quota once stopped a release).
+      - uses: actions/cache/save@v4
+        if: ${{ inputs.version }}
+        with:
+          path: android-dist/
+          key: release-apk-${{ github.run_id }}-${{ github.run_attempt }}
 
   # The debug APK on a real Android emulator against a real AmoreChat server:
   # sign-in in the WebView, background notifications without Google, ringing call.
