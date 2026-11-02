@@ -76,6 +76,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always() && steps.keys.outputs.ok
         with:
+          retention-days: 3
           name: tele-screenshots
           path: tele-ui-*.png
           if-no-files-found: ignore

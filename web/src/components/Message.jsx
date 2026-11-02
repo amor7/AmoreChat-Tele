@@ -12,7 +12,7 @@ import { MusicMessage } from './Music';
 
 const URL_RE = /(https?:\/\/[^\s<]+[^\s<.,;:!?)\]'"،؛])/g;
 
-// Links become anchors; emoji become Fluent images (large when the message is only 1-3 emoji).
+// Links become anchors; emoji become Noto images (large when the message is only 1-3 emoji).
 function Linkify({ text, big }) {
   const parts = text.split(URL_RE);
   return parts.map((p, i) =>

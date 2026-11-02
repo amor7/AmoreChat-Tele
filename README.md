@@ -238,6 +238,6 @@ npm run dev:web      # port 5173
 
 فهرست تغییرات: [CHANGELOG.md](CHANGELOG.md) · همه نسخه‌ها: [Releases](https://github.com/amor7/AmoreChat-Tele/releases)
 
-ایموجی: Microsoft Fluent Emoji (MIT) · آیکون: Lucide (ISC)
+ایموجی: Google Noto Emoji (Apache 2.0) · آیکون: Lucide (ISC)
 
 </div>
