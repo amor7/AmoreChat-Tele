@@ -16,6 +16,15 @@ const HOURS = Number(process.env.HOURS || 1);
 const USERS = Number(process.env.USERS || 10);
 const OUT = path.resolve(process.env.OUT || 'soak-out');
 const SERVER_LOG = process.env.SERVER_LOG || '';
+// With a bad network (netem.sh), the phase it is in: problems are counted per phase.
+const PHASE_FILE = process.env.PHASE_FILE || '';
+const netPhase = () => {
+  try {
+    return PHASE_FILE ? fs.readFileSync(PHASE_FILE, 'utf8').trim() : '';
+  } catch {
+    return '';
+  }
+};
 const PASS = 'Str0ng-Pass-77';
 const END = Date.now() + HOURS * 3600e3;
 const started = Date.now();
@@ -28,10 +37,12 @@ const log = (...a) => console.log(`[${((Date.now() - started) / 60000).toFixed(1
 
 // ---------- Findings ----------
 const issues = new Map();
-const stats = { actions: {}, failed: {}, api: [], samples: [] };
+const stats = { actions: {}, failed: {}, api: [], samples: [], phases: {} };
 let shots = 0;
 const normal = (s) => String(s).replace(/https?:\/\/\S+/g, (u) => u.replace(/\/\d+/g, '/N').replace(/\?.*/, '')).replace(/\d{2,}/g, 'N').slice(0, 300);
 async function issue(severity, area, text, page) {
+  const ph = netPhase();
+  if (ph) text = `${text} {net: ${ph}}`;
   const key = `${area}|${normal(text)}`;
   const i = issues.get(key);
   if (i) {
@@ -65,6 +76,9 @@ function report() {
     '|---|---|---|',
     ...rows,
     '',
+    ...(Object.keys(stats.phases).length
+      ? ['## By network phase', '| phase | actions | failed |', '|---|---|---|', ...Object.entries(stats.phases).map(([k, v]) => `| ${k} | ${v.done} | ${v.failed} |`), '']
+      : []),
     '## Server over time',
     '| min | server MB | chrome MB | disk MB | errors in log |',
     '|---|---|---|---|---|',
@@ -154,6 +168,9 @@ const lobby = ok(await owner.api.call('POST', '/api/chats', { type: 'voice', tit
 for (const u of users) {
   if (u !== owner) ok(await u.api.call('POST', `/api/chats/${lobby}/join`, {}), 'join lobby').http;
 }
+// Found by its @id and by its direct link; a private group reached only through its invite link.
+const news = ok(await owner.api.call('POST', '/api/chats', { type: 'channel', title: 'خبر', isPublic: true, handle: 'soak_news' }), 'news channel').chat.id;
+const secret = ok(await owner.api.call('POST', '/api/chats', { type: 'group', title: 'خصوصی' }), 'private group').chat.id;
 const dms = new Map();
 async function dmOf(a, b) {
   const key = [a.name, b.name].sort().join('-');
@@ -354,6 +371,17 @@ const light = {
     const seen = await waitApi(pick(others(u)), group, text, 60000);
     if (seen !== 1) throw new Error(`queued message delivered ${seen} times`);
   },
+  async openByLink(u) {
+    // The direct link, the way someone opens it from a message elsewhere: a full page load.
+    await u.page.goto(`${BASE}/@soak_news`, { waitUntil: 'domcontentloaded' });
+    await wait(u.page, () => document.querySelector('.modal .btn.primary'), null, 'channel from its link');
+    await u.page.$eval('.modal .btn.primary', (b) => b.click());
+    await wait(u.page, (id) => location.hash === `#/chat/${id}`, news, 'channel opens from its link');
+    const found = (await u.api.call('GET', '/api/chats/discover?q=soak_n')).chats || [];
+    const mine = ok(await u.api.call('GET', '/api/chats'), 'chats').chats.some((c) => c.id === news);
+    if (!mine && !found.some((c) => c.id === news)) throw new Error('channel not found by its id');
+    ok(await u.api.call('POST', `/api/chats/${news}/leave`, {}), 'leave');
+  },
   async wander(u) {
     await u.page.reload({ waitUntil: 'domcontentloaded' });
     await wait(u.page, () => document.querySelector('.sidebar, .chat-pane'), null, 'app after reload');
@@ -385,6 +413,33 @@ const admin = {
     const b = ok(await owner.api.call('POST', '/api/admin/backups', {}), 'backup');
     const c = ok(await owner.api.call('POST', `/api/admin/backups/${b.name}/check`, {}), 'backup check');
     if (!c.check.ok) throw new Error(`backup not healthy: ${c.check.error}`);
+  },
+  async inviteReset() {
+    const v = pick(users.slice(1, -1));
+    const old = ok(await owner.api.call('GET', `/api/chats/${secret}/invites`), 'invites').invites[0]?.code;
+    const fresh = ok(await owner.api.call('POST', `/api/chats/${secret}/invites/reset`, {}), 'reset').invite.code;
+    if (old && (await v.api.call('POST', `/api/join/${old}`, {})).http !== 404) throw new Error('an old invite link still works after a reset');
+    ok(await v.api.call('POST', `/api/join/${fresh}`, {}), 'join with the new link');
+    ok(await v.api.call('POST', `/api/chats/${secret}/leave`, {}), 'leave');
+  },
+  async storageDelete() {
+    // The biggest file someone sent to the group goes; members see it gone.
+    const s = ok(await owner.api.call('GET', `/api/admin/storage/files?chatId=${group}&limit=5`), 'storage list');
+    const f = s.files.find((x) => !x.avatar);
+    if (!f) throw new Error('SKIP');
+    const r = ok(await owner.api.call('POST', '/api/admin/storage/delete', { ids: [f.id] }), 'storage delete');
+    if (r.deleted !== 1) throw new Error(`storage delete removed ${r.deleted}`);
+    const v = pick(users.slice(1));
+    const msgs = ok(await v.api.call('GET', `/api/chats/${group}/messages?limit=100`), 'messages').messages;
+    const m = msgs.find((x) => x.file?.id === f.id);
+    if (m && !m.file.purged) throw new Error('a deleted file still shows as there');
+  },
+  async restrictSend() {
+    const v = users.at(-1);
+    ok(await owner.api.call('POST', `/api/admin/users/${v.id}/restrict`, { send: 0.01, reason: 'soak' }), 'restrict');
+    if ((await v.api.call('POST', `/api/chats/${group}/messages`, { text: 'blocked' })).http !== 403) throw new Error('a restricted user could still send');
+    await sleep(40000);
+    ok(await v.api.call('POST', `/api/chats/${group}/messages`, { text: `free ${word()}` }), 'the restriction ended by itself');
   },
   async banUnban() {
     const v = users.at(-1);
@@ -501,11 +556,15 @@ async function run(name, fn, involved, recover = true) {
 }
 async function runLocked(name, fn, involved, recover) {
   stats.actions[name] = (stats.actions[name] || 0) + 1;
+  const ph = netPhase();
+  const tally = ph ? (stats.phases[ph] ||= { done: 0, failed: 0 }) : { done: 0, failed: 0 };
+  tally.done++;
   try {
     await Promise.race([fn(), sleep(240000).then(() => Promise.reject(new Error('action took over 4 minutes')))]);
   } catch (e) {
     if (e.message === 'SKIP') return;
     stats.failed[name] = (stats.failed[name] || 0) + 1;
+    tally.failed++;
     const u = involved[0];
     const at = await u?.page.evaluate(() => location.hash.replace(/\d+/g, 'N')).catch(() => '?');
     await issue(/did not answer|delivered|differs|crash/.test(e.message) ? 'high' : 'medium', name, `${e.message} [${u?.phone ? 'phone' : 'desktop'} ${at}]`, u?.page);
@@ -523,7 +582,7 @@ async function adminLoop() {
   while (Date.now() < END) {
     await sleep(240000 + rnd(240000));
     const name = pick(Object.keys(admin));
-    const who = name === 'banUnban' ? users.at(-1) : owner;
+    const who = name === 'banUnban' || name === 'restrictSend' ? users.at(-1) : owner;
     await run(name, admin[name], [who]);
   }
 }
