@@ -134,11 +134,11 @@ select:focus {
   color: var(--accent);
 }
 
-/* ---------- Fluent emoji ---------- */
+/* ---------- Noto emoji ---------- */
 .emoji {
   display: inline-block;
   vertical-align: -0.28em;
-  background-image: url('/emoji/fluent.webp');
+  background-image: url('/emoji/noto.webp');
   background-repeat: no-repeat;
   margin: 0 1px;
 }

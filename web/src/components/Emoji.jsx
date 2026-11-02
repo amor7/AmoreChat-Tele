@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { create } from 'zustand';
-import { Clock, Smile, Heart, Hand, Users, Leaf, Utensils, Trophy, Plane, Lamp, Shapes } from 'lucide-react';
+import { Clock, Smile, Heart, Hand, Users, Leaf, Utensils, Trophy, Plane, Lamp, Shapes, Flag } from 'lucide-react';
 
-// Microsoft Fluent Emoji (MIT), pre-rendered into one sprite: /emoji/fluent.webp + fluent.json.
+// Google Noto Emoji (Apache 2.0), pre-rendered into one sprite: /emoji/noto.webp + noto.json (scripts/emoji-sprite.py).
 const strip = (s) => s.replace(/️/g, '');
 const useEmojiData = create(() => ({ index: null, list: [], cols: 1, rows: 1 }));
 
 let loading = null;
 export function loadEmoji() {
-  loading ||= fetch('/emoji/fluent.json')
+  loading ||= fetch('/emoji/noto.json')
     .then((r) => r.json())
     .then((d) => {
       const index = new Map(d.emoji.map(([ch], i) => [strip(ch), i]));
@@ -69,7 +69,7 @@ export function useEmojiText(text) {
   }, [text, index]);
 }
 
-// Text with Fluent emoji images in place of emoji characters.
+// Text with emoji images in place of emoji characters.
 export function RichText({ text, size = 20, big = false, children }) {
   const { parts, onlyEmoji } = useEmojiText(text);
   const s = big && onlyEmoji ? (onlyEmoji === 1 ? 72 : 52) : size;
@@ -103,6 +103,7 @@ const GROUP_META = {
   travel: ['سفر', Plane],
   objects: ['اشیا', Lamp],
   symbols: ['نمادها', Shapes],
+  flags: ['پرچم‌ها', Flag],
 };
 const RECENT_KEY = 'ac_recent_emoji';
 
