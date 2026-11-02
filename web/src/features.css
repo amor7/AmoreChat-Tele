@@ -2236,3 +2236,107 @@ input.music-bar-seek:hover::-moz-range-thumb {
 .tele-more-menu button.danger {
   color: var(--danger);
 }
+
+/* ---------- Telegram page ---------- */
+.tele-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.tele-brand {
+  gap: 8px;
+}
+.tele-brand b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tele-logo {
+  display: grid;
+  place-items: center;
+  width: 76px;
+  height: 76px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--accent), var(--accent-2));
+  color: #fff;
+  box-shadow: 0 10px 28px rgba(99, 102, 241, 0.35);
+}
+.tele-login {
+  gap: 12px;
+}
+.tele-login h2 {
+  margin: 4px 0 0;
+}
+.tele-login-steps {
+  display: flex;
+  gap: 18px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: 13px;
+  color: var(--muted);
+}
+.tele-login-steps li {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.tele-login-steps span {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  font-size: 12px;
+}
+.tele-login-steps .now {
+  color: inherit;
+  font-weight: 600;
+}
+.tele-login-steps .now span {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+.tele-login-steps .done span {
+  border-color: var(--ok);
+  background: var(--ok);
+  color: #fff;
+}
+.tele-block {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: min(340px, 100%);
+  padding: 10px 12px;
+  border: 1px solid var(--danger);
+  border-radius: 12px;
+  color: var(--danger);
+  font-size: 14px;
+  text-align: start;
+}
+.tele-perks {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(340px, 100%);
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+  color: var(--muted);
+  font-size: 14px;
+  text-align: start;
+}
+.tele-perks li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.tele-code {
+  font-size: 22px;
+  letter-spacing: 0.35em;
+  text-align: center;
+}
