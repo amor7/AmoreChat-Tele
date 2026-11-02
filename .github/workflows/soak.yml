@@ -48,6 +48,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
+          retention-days: 3
           name: soak-web
           path: |
             soak-out/report.*
@@ -101,6 +102,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
+          retention-days: 3
           name: soak-android
           path: |
             soak-android/report.md

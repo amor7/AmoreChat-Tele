@@ -58,6 +58,7 @@ jobs:
           cat SHA256SUMS
       - uses: actions/upload-artifact@v4
         with:
+          retention-days: 1
           name: amorechat-offline
           path: |
             *.tar.gz
