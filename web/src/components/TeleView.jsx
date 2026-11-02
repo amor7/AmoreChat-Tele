@@ -386,18 +386,25 @@ function TeleStatus({ status }) {
 // The less common actions of a header, behind one button.
 function TeleMore({ children }) {
   const [open, setOpen] = useState(false);
+  // A tap anywhere closes it, the menu's own buttons included.
+  useEffect(() => {
+    if (!open) return;
+    const close = () => setOpen(false);
+    const t = setTimeout(() => document.addEventListener('click', close));
+    return () => {
+      clearTimeout(t);
+      document.removeEventListener('click', close);
+    };
+  }, [open]);
   return (
     <span className="tele-more">
       <button className="icon-btn" aria-label="بیشتر" aria-expanded={open} title="بیشتر" onClick={() => setOpen(!open)}>
         <MoreVertical size={20} />
       </button>
       {open && (
-        <>
-          <button className="tele-more-back" aria-label="بستن" onClick={() => setOpen(false)} />
-          <div className="tele-more-menu" role="menu" onClick={() => setOpen(false)}>
-            {children}
-          </div>
-        </>
+        <div className="tele-more-menu" role="menu">
+          {children}
+        </div>
       )}
     </span>
   );

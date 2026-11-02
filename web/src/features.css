@@ -450,7 +450,7 @@
   }
 }
 .tile-menu {
-  min-width: 220px;
+  min-width: min(220px, calc(100vw - 24px));
   max-height: 70vh;
   overflow-y: auto;
   z-index: 5;
@@ -2197,19 +2197,18 @@ input.music-bar-seek:hover::-moz-range-thumb {
   position: relative;
   display: inline-flex;
 }
-.tele-more-back {
-  position: fixed;
-  inset: 0;
-  z-index: 40;
-  border: 0;
-  background: none;
+/* The header's blurred background makes its own layer: lift it over the messages and the list. */
+.tele-chat .chat-head,
+.tele-side .sidebar-head {
+  position: relative;
+  z-index: 30;
 }
 .tele-more-menu {
   position: absolute;
   top: 100%;
   inset-inline-end: 0;
   z-index: 41;
-  min-width: 220px;
+  min-width: min(220px, calc(100vw - 24px));
   padding: 6px;
   border: 1px solid var(--border);
   border-radius: 12px;
