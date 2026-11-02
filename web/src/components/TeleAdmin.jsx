@@ -3,12 +3,27 @@ import { api } from '../api';
 import { useStore } from '../store';
 import { toFa, faDigits, formatDateTime } from '../util';
 import TeleAddProxy from './TeleProxyForm';
-import { Cable, RefreshCw, Trash2, Activity, Power, BellRing, BarChart3, Newspaper, Copy, UserCheck, FileDown, LineChart } from 'lucide-react';
+import { RefreshCw, Trash2, Activity, Power, BellRing, BarChart3, Copy, UserCheck, FileDown, LineChart, Plus, CircleCheck, Circle, TriangleAlert, ChevronLeft } from 'lucide-react';
+
+// Sub-pages of the Telegram and VPN tabs, so each shows one thing at a time.
+function Segments({ items, value, onChange }) {
+  return (
+    <div className="tele-seg" role="tablist">
+      {items.map(([key, label]) => (
+        <button key={key} role="tab" aria-selected={value === key} className={value === key ? 'active' : ''} onClick={() => onChange(key)}>
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 export default function VpnAdmin() {
   const showToast = useStore((s) => s.showToast);
   const [data, setData] = useState(null);
   const [probing, setProbing] = useState(null); // proxy id, or 'all'
+  const [page, setPage] = useState('proxies');
+  const [adding, setAdding] = useState(false);
 
   const load = () =>
     api('GET', '/admin/tele/proxies')
@@ -71,66 +86,189 @@ export default function VpnAdmin() {
   const active = proxies.find((p) => p.id === egress.proxyId);
   const health = egress.health || {};
 
+  const healthy = proxies.filter((p) => p.enabled && p.lastStatus === 'healthy').length;
+  const restart = async () => {
+    try {
+      await api('POST', '/admin/tele/egress/restart');
+      await load();
+      showToast('تونل ری‌استارت شد');
+    } catch (e) {
+      showToast(e.message);
+      await load();
+    }
+  };
+
   return (
     <div className="tele-admin">
-      <p className="hint with-icon">
-        <Cable size={15} /> فقط ترافیک بخش Tele از این پروکسی‌ها عبور می‌کند. چت داخلی همیشه روی شبکه داخلی می‌ماند. اگر همه پروکسی‌ها قطع باشند، تلگرام صف می‌شود و هرگز مستقیم وصل نمی‌شود.
-      </p>
+      <div className={`tele-hero ${egress.running ? 'ok' : 'bad'}`}>
+        <span className="tele-dot" />
+        <span className="grow">
+          <b>{egress.running ? 'تونل تلگرام وصل است' : 'تونل تلگرام خاموش است'}</b>
+          <small>
+            {egress.running && active ? `از طریق «${active.name}»` : policy.enabled ? 'پروکسی سالمی پیدا نشده' : 'مسیر تلگرام در تنظیمات خاموش است'} · {toFa(healthy)} از {toFa(proxies.length)} پروکسی سالم
+          </small>
+        </span>
+        <button type="button" className="btn sm" onClick={restart}>
+          <Power size={14} /> ری‌استارت
+        </button>
+      </div>
+      {egress.lastError && <small className="tele-warn">{egress.lastError}</small>}
+      {egress.running && egress.tunnelError && <small className="tele-warn">آخرین خطای تونل: {egress.tunnelError}</small>}
 
-      <div className="perm-box">
-        <b>سیاست مسیریابی</b>
-        <label className="check">
-          <input type="checkbox" checked={!!policy.enabled} onChange={(e) => savePolicy({ enabled: e.target.checked })} />
-          فعال‌سازی Tele egress
-        </label>
-        <div className="inline-form" style={{ marginTop: 8 }}>
-          <select value={policy.mode || 'priority'} onChange={(e) => savePolicy({ mode: e.target.value })}>
-            <option value="priority">اولویت (اولین سالم)</option>
-            <option value="best">بهترین تأخیر</option>
-            <option value="random">تصادفی بین سالم‌ها</option>
-            <option value="manual">دستی</option>
-          </select>
-          {policy.mode === 'manual' && (
-            <select value={policy.activeProxyId || ''} onChange={(e) => savePolicy({ activeProxyId: e.target.value ? Number(e.target.value) : null })}>
-              <option value="">— انتخاب —</option>
-              {proxies.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name} ({p.protocol})
-                </option>
-              ))}
-            </select>
+      <Segments
+        value={page}
+        onChange={setPage}
+        items={[
+          ['proxies', `پروکسی‌ها (${toFa(proxies.length)})`],
+          ['settings', 'تنظیمات'],
+          ['alerts', 'هشدارها'],
+        ]}
+      />
+
+      {page === 'proxies' && (
+        <>
+          <div className="tele-actions">
+            <button type="button" className="btn sm primary" onClick={() => setAdding(!adding)}>
+              <Plus size={14} /> افزودن پروکسی
+            </button>
+            <button type="button" className="btn sm" disabled={probing != null} onClick={() => probe('all')}>
+              <Activity size={14} /> {probing === 'all' ? 'در حال تست…' : 'تست همه'}
+            </button>
+            <button type="button" className="btn sm" onClick={load}>
+              <RefreshCw size={14} /> به‌روزرسانی
+            </button>
+          </div>
+          {adding && (
+            <TeleAddProxy
+              onAdded={() => {
+                setAdding(false);
+                load();
+              }}
+            />
           )}
-          <button
-            type="button"
-            className="btn sm"
-            onClick={async () => {
-              try {
-                await api('POST', '/admin/tele/egress/restart');
-                await load();
-                showToast('تونل ری‌استارت شد');
-              } catch (e) {
-                showToast(e.message);
-                await load();
-              }
-            }}
-          >
-            <Power size={14} /> ری‌استارت تونل
-          </button>
-        </div>
-        <small className="muted">
-          تونل: {egress.running ? `در حال اجرا${active ? ` با «${active.name}»` : ''}` : 'خاموش'}
-          {egress.singBoxVersion ? ` · sing-box ${egress.singBoxVersion}` : ''}
-          {egress.lastError ? ` · خطا: ${egress.lastError}` : ''}
-        </small>
-        {egress.running && egress.tunnelError && <small className="tele-warn">آخرین خطای تونل: {egress.tunnelError}</small>}
+          <ul className="tele-list">
+            {proxies.map((p) => {
+              const [label, color] = STATUS[p.lastStatus] || STATUS.unknown;
+              return (
+                <li key={p.id}>
+                  <details className="tele-card">
+                    <summary>
+                      <span className={`tele-dot ${p.enabled && p.lastStatus === 'healthy' ? 'on' : p.lastStatus === 'unhealthy' ? 'off' : ''}`} />
+                      <span className="grow">
+                        <b>{p.name}</b>
+                        <small>
+                          {p.protocol} · {label}
+                          {p.lastLatencyMs != null ? ` · ${toFa(p.lastLatencyMs)} ms` : ''}
+                        </small>
+                      </span>
+                      {p.id === egress.proxyId && egress.running && <span className="tag ok">در حال استفاده</span>}
+                      {!p.enabled && <span className={`tag ${color === 'danger' ? 'danger' : ''}`}>خاموش</span>}
+                    </summary>
+                    <div className="tele-card-body">
+                      {p.lastError && <small className="tele-warn">{p.lastError}</small>}
+                      {p.lastCheckedAt && <small className="muted">آخرین تست: {formatDateTime(p.lastCheckedAt)}</small>}
+                      <label className="inline-form" title="عدد کمتر = اولویت بالاتر">
+                        اولویت
+                        <input
+                          type="number"
+                          min={0}
+                          max={9999}
+                          dir="ltr"
+                          style={{ width: 80 }}
+                          defaultValue={p.priority}
+                          key={p.priority}
+                          onBlur={(e) => Number(e.target.value) !== p.priority && patchProxy(p.id, { priority: Number(e.target.value) })}
+                        />
+                      </label>
+                      <div className="tele-actions">
+                        <button className="btn sm" disabled={probing != null} onClick={() => probe(p.id)}>
+                          <Activity size={14} /> {probing === p.id ? 'در حال تست…' : 'تست تا تلگرام'}
+                        </button>
+                        <button className="btn sm" onClick={() => patchProxy(p.id, { enabled: !p.enabled })}>
+                          {p.enabled ? 'خاموش کردن' : 'روشن کردن'}
+                        </button>
+                        <button className="btn sm danger" onClick={() => remove(p.id)}>
+                          <Trash2 size={14} /> حذف
+                        </button>
+                      </div>
+                    </div>
+                  </details>
+                </li>
+              );
+            })}
+            {!proxies.length && <li className="muted center">هنوز پروکسی‌ای اضافه نشده</li>}
+          </ul>
+        </>
+      )}
 
-        <div className="tele-health">
-          <label className="inline-form" title="برای پیدا کردن IP پروکسی‌هایی که با دامنه وارد شده‌اند">
-            DNS پروکسی‌ها
+      {page === 'settings' && (
+        <>
+          <div className="tele-group">
+            <h4>مسیر تلگرام</h4>
+            <p className="hint">فقط ترافیک تلگرام از پروکسی‌ها رد می‌شود و چت داخلی همیشه روی شبکه داخلی می‌ماند. اگر همه قطع باشند، تلگرام در صف می‌ماند و هرگز مستقیم وصل نمی‌شود.</p>
+            <label className="check">
+              <input type="checkbox" checked={!!policy.enabled} onChange={(e) => savePolicy({ enabled: e.target.checked })} />
+              تلگرام از طریق پروکسی‌ها فعال باشد
+            </label>
+            <label>
+              انتخاب پروکسی
+              <select value={policy.mode || 'priority'} onChange={(e) => savePolicy({ mode: e.target.value })}>
+                <option value="priority">اولویت (اولین سالم)</option>
+                <option value="best">کمترین تأخیر</option>
+                <option value="random">تصادفی بین سالم‌ها</option>
+                <option value="manual">دستی</option>
+              </select>
+            </label>
+            {policy.mode === 'manual' && (
+              <label>
+                پروکسی ثابت
+                <select value={policy.activeProxyId || ''} onChange={(e) => savePolicy({ activeProxyId: e.target.value ? Number(e.target.value) : null })}>
+                  <option value="">— انتخاب —</option>
+                  {proxies.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} ({p.protocol})
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+          </div>
+
+          <div className="tele-group">
+            <h4>تست خودکار</h4>
+            <label className="check">
+              <input type="checkbox" checked={!!policy.autoHealth} onChange={(e) => savePolicy({ autoHealth: e.target.checked })} />
+              پروکسی‌ها مرتب تا سرور تلگرام تست شوند و پروکسی خراب خودکار عوض شود
+            </label>
+            <label className="inline-form">
+              هر
+              <input
+                type="number"
+                min={1}
+                max={1440}
+                dir="ltr"
+                style={{ width: 80 }}
+                defaultValue={minutes}
+                key={minutes}
+                onBlur={(e) => {
+                  const m = Math.max(1, Math.min(1440, Math.round(Number(e.target.value)) || 10));
+                  if (m !== minutes) savePolicy({ healthIntervalSec: m * 60 });
+                }}
+              />
+              دقیقه
+            </label>
+            <small className="muted">
+              {health.lastRunAt ? `آخرین تست: ${formatDateTime(health.lastRunAt)}. ` : ''}
+              {policy.autoHealth && health.nextRunAt ? `تست بعدی: ${formatDateTime(health.nextRunAt)}.` : ''}
+            </small>
+          </div>
+
+          <details className="tele-group">
+            <summary>DNS پروکسی‌ها (پیشرفته)</summary>
+            <p className="hint">معمولاً لازم نیست چیزی بنویسید: آدرس پروکسی‌های دامنه‌دار خودکار از چند DNS داخلی پرسیده می‌شود و آخرین IP سالم برای زمان قطعی می‌ماند. فقط اگر DNS دیگری مثل DNS دیتاسنتر دارید، اینجا بگذارید.</p>
             <input
               dir="ltr"
               list="tele-dns-presets"
-              style={{ width: 170 }}
               placeholder="خالی = خودکار"
               defaultValue={(policy.dns || '').replace(/:53$/, '')}
               key={policy.dns || ''}
@@ -146,120 +284,156 @@ export default function VpnAdmin() {
               <option value="78.157.42.100">الکترو</option>
               <option value="10.202.10.10">رادار</option>
             </datalist>
-          </label>
-        </div>
-        <small className="muted">
-          آدرس پروکسی‌هایی که با دامنه وارد شده‌اند خودکار هم‌زمان از DNS سرور و چند DNS داخلی (شکن، ۴۰۳، الکترو، رادار) پرسیده می‌شود و آخرین IP سالم برای زمان قطعی نگه داشته می‌شود؛ معمولاً لازم نیست چیزی بنویسید. اگر DNS دیگری دارید (مثلاً DNS دیتاسنتر) اینجا بگذارید تا آن هم پرسیده شود. فقط آدرس خود پروکسی پیدا می‌شود؛ ترافیک تلگرام از پروکسی می‌رود.
-        </small>
+          </details>
+          {egress.singBoxVersion && <small className="muted">sing-box {egress.singBoxVersion}</small>}
+        </>
+      )}
 
-        <div className="tele-health">
-          <label className="check">
-            <input type="checkbox" checked={!!policy.autoHealth} onChange={(e) => savePolicy({ autoHealth: e.target.checked })} />
-            تست خودکار همه پروکسی‌ها
-          </label>
-          <label className="inline-form">
-            هر
-            <input
-              type="number"
-              min={1}
-              max={1440}
-              dir="ltr"
-              style={{ width: 72 }}
-              defaultValue={minutes}
-              key={minutes}
-              onBlur={(e) => {
-                const m = Math.max(1, Math.min(1440, Math.round(Number(e.target.value)) || 10));
-                if (m !== minutes) savePolicy({ healthIntervalSec: m * 60 });
-              }}
-            />
-            دقیقه
-          </label>
-          <button type="button" className="btn sm" disabled={probing === 'all'} onClick={() => probe('all')}>
-            <Activity size={14} /> {probing === 'all' ? 'در حال تست…' : 'تست همه الان'}
-          </button>
-        </div>
-        <small className="muted">
-          هر پروکسی واقعاً تا سرور تلگرام تست می‌شود؛ بعد طبق سیاست بالا بهترین سالم انتخاب می‌شود و اگر پروکسی فعلی خراب شده باشد، تونل خودش عوض می‌شود.
-          {health.lastRunAt ? ` آخرین تست: ${formatDateTime(health.lastRunAt)}.` : ''}
-          {policy.autoHealth && health.nextRunAt ? ` تست بعدی: ${formatDateTime(health.nextRunAt)}.` : ''}
-        </small>
-      </div>
-
-      <TeleAddProxy onAdded={load} />
-
-      <ul className="user-list">
-        {proxies.map((p) => {
-          const [label, color] = STATUS[p.lastStatus] || STATUS.unknown;
-          return (
-            <li key={p.id} className="row-item">
-              <span className="grow">
-                <b>
-                  {p.name} <span className="tag">{p.protocol}</span> <span className={`tag ${color}`}>{label}</span>
-                  {p.id === egress.proxyId && egress.running && <span className="tag ok">در حال استفاده</span>}
-                  {!p.enabled && <span className="tag danger">خاموش</span>}
-                </b>
-                <small>
-                  {p.lastLatencyMs != null ? `${toFa(p.lastLatencyMs)} ms` : ''}
-                  {p.lastCheckedAt ? ` · ${formatDateTime(p.lastCheckedAt)}` : ''}
-                  {p.lastError ? ` · ${p.lastError}` : ''}
-                </small>
-              </span>
-              <label className="inline-form" title="عدد کمتر = اولویت بالاتر">
-                <small>اولویت</small>
-                <input
-                  type="number"
-                  min={0}
-                  max={9999}
-                  dir="ltr"
-                  style={{ width: 64 }}
-                  defaultValue={p.priority}
-                  key={p.priority}
-                  onBlur={(e) => Number(e.target.value) !== p.priority && patchProxy(p.id, { priority: Number(e.target.value) })}
-                />
-              </label>
-              <button className="btn sm" title="تست واقعی تا تلگرام" disabled={probing != null} onClick={() => probe(p.id)}>
-                <Activity size={14} /> {probing === p.id ? '…' : ''}
-              </button>
-              <button className="btn sm" onClick={() => patchProxy(p.id, { enabled: !p.enabled })}>
-                {p.enabled ? 'خاموش' : 'روشن'}
-              </button>
-              <button className="btn sm danger" onClick={() => remove(p.id)}>
-                <Trash2 size={14} />
-              </button>
-            </li>
-          );
-        })}
-        {!proxies.length && <li className="muted">هنوز پروکسی‌ای اضافه نشده</li>}
-      </ul>
-
-      <button type="button" className="btn sm" onClick={load}>
-        <RefreshCw size={14} /> به‌روزرسانی
-      </button>
-
-      <TeleAlerts />
+      {page === 'alerts' && <TeleAlerts />}
     </div>
   );
 }
 
-// The Telegram tab: who may use it, each user's traffic and permissions, and channel mirrors.
+// The Telegram tab: an overview, the users, and the channels copied into the app.
 // The VPN tab (the default export) is only about the tunnel the Telegram part goes through.
-export function TeleSection() {
+export function TeleSection({ onVpn }) {
+  const me = useStore((s) => s.me);
+  const [page, setPage] = useState('overview');
   return (
     <div className="tele-admin">
-      <TeleAccess />
-      <TeleUsers />
-      <TeleMirrors />
-      <TeleAccess
-        path="/admin/access/mirror-files"
-        icon={FileDown}
-        title="دریافت ویدیو و فایل کانال‌های منتشرشده"
-        hint="ویدیو و فایل پست‌های کانال‌های منتشرشده با زدن روی آن‌ها از تلگرام گرفته می‌شود (مصرف VPN). فقط این کاربران می‌توانند اولین بار آن را بگیرند؛ بعد از آن برای همه اعضای کانال باز است. مالک همیشه می‌تواند."
-        labels={FILES_LABELS}
+      <Segments
+        value={page}
+        onChange={setPage}
+        items={[
+          ['overview', 'نمای کلی'],
+          ['users', 'کاربران'],
+          ...(me.role === 'owner' ? [['channels', 'کانال‌های منتشرشده']] : []),
+        ]}
       />
+      {page === 'overview' && <TeleOverview go={setPage} onVpn={onVpn} />}
+      {page === 'users' && (
+        <>
+          <TeleAccess />
+          <TeleUsers />
+        </>
+      )}
+      {page === 'channels' && (
+        <>
+          <TeleMirrors />
+          <TeleAccess
+            path="/admin/access/mirror-files"
+            icon={FileDown}
+            title="چه کسانی ویدیو و فایل کانال را بگیرند"
+            hint="اولین باز کردن ویدیو یا فایل از تلگرام گرفته می‌شود و VPN مصرف می‌کند. فقط این کاربران می‌توانند آن را بگیرند؛ بعد از آن برای همه اعضا باز است."
+            labels={FILES_LABELS}
+          />
+        </>
+      )}
     </div>
   );
 }
 
+// What is working and what needs attention, each with a way to it.
+function TeleOverview({ go, onVpn }) {
+  const me = useStore((s) => s.me);
+  const [d, setD] = useState(null);
+  useEffect(() => {
+    const quiet = (url) => api('GET', url).catch(() => null);
+    Promise.all([quiet('/admin/tele/accounts'), quiet('/admin/tele/proxies'), me.role === 'owner' ? quiet('/admin/tele/mirrors') : null]).then(([accounts, net, mirrors]) => setD({ accounts, net, mirrors }));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  if (!d) return <p className="muted">…</p>;
+
+  const users = d.accounts?.accounts || [];
+  const proxies = d.net?.proxies || [];
+  const mirrors = d.mirrors?.mirrors || [];
+  const running = !!d.net?.egress?.running;
+  const connected = users.filter((a) => a.status === 'connected').length;
+  const usage = users.reduce((n, a) => n + a.used, 0);
+  const capped = users.filter((a) => a.effectiveQuotaMb > 0 && a.used >= a.effectiveQuotaMb * 1048576);
+  const broken = mirrors.filter((m) => m.lastError);
+  const ownerReady = d.mirrors ? !!d.mirrors.connected : true;
+
+  const steps = [
+    ['پروکسی اضافه کنید', proxies.length > 0, onVpn],
+    ['در VPN ← تنظیمات، مسیر تلگرام را روشن کنید', !!d.net?.policy?.enabled, onVpn],
+    ...(me.role === 'owner' ? [['حساب تلگرام خودتان را از منو ← تلگرام وصل کنید', ownerReady, null]] : []),
+  ];
+  const issues = [
+    !running && d.net?.policy?.enabled && ['تونل قطع است؛ کاربران به تلگرام وصل نمی‌شوند', onVpn],
+    broken.length > 0 && [`${toFa(broken.length)} کانال منتشرشده خطا دارد`, () => go('channels')],
+    capped.length > 0 && [`${toFa(capped.length)} کاربر به سقف مصرف رسیده`, () => go('users')],
+  ].filter(Boolean);
+  const ready = steps.every(([, done]) => done);
+  const cards = [
+    ['تونل', running ? 'وصل' : 'خاموش'],
+    ['کاربران وصل', `${toFa(connected)} از ${toFa(users.length)}`],
+    ['مصرف این ماه', mbText(usage)],
+    ...(d.mirrors ? [['کانال‌های منتشرشده', toFa(mirrors.filter((m) => m.enabled).length)]] : []),
+  ];
+
+  return (
+    <>
+      <div className="stat-grid">
+        {cards.map(([label, value]) => (
+          <div key={label} className="stat">
+            <small>{label}</small>
+            <b>{value}</b>
+          </div>
+        ))}
+      </div>
+      {!ready && (
+        <div className="tele-group">
+          <h4>راه‌اندازی</h4>
+          <ol className="tele-steps">
+            {steps.map(([label, done, action]) => (
+              <li key={label} className={done ? 'done' : ''}>
+                {done ? <CircleCheck size={18} /> : <Circle size={18} />}
+                {action && !done ? (
+                  <button type="button" className="tele-link" onClick={action}>
+                    {label} <ChevronLeft size={14} />
+                  </button>
+                ) : (
+                  <span>{label}</span>
+                )}
+              </li>
+            ))}
+          </ol>
+        </div>
+      )}
+      {issues.map(([text, action]) => (
+        <button key={text} type="button" className="tele-issue" onClick={action}>
+          <TriangleAlert size={17} />
+          <span className="grow">{text}</span>
+          <ChevronLeft size={16} />
+        </button>
+      ))}
+      {ready && !issues.length && (
+        <p className="tele-fine">
+          <CircleCheck size={18} /> همه‌چیز سالم است.
+        </p>
+      )}
+      {users.length > 0 && (
+        <div className="tele-group">
+          <h4>پرمصرف‌ترین کاربران این ماه</h4>
+          <ul className="tele-top">
+            {users.slice(0, 5).map((a) => (
+              <li key={a.id}>
+                <span className="grow">{a.name}</span>
+                <small dir="auto">{mbText(a.used)}</small>
+                <span className="tele-usage-bar">
+                  <span style={{ width: `${users[0].used ? (a.used / users[0].used) * 100 : 0}%` }} />
+                </span>
+              </li>
+            ))}
+          </ul>
+          <button type="button" className="tele-link" onClick={() => go('users')}>
+            همه کاربران <ChevronLeft size={14} />
+          </button>
+        </div>
+      )}
+    </>
+  );
+}
 
 const mbText = (bytes) => `${toFa((bytes / 1048576).toFixed(bytes < 10485760 ? 1 : 0))} MB`;
 
@@ -310,7 +484,7 @@ function TeleAlerts() {
     },
   });
   return (
-    <div className="boxed tele-alerts" style={{ marginTop: 16 }}>
+    <div className="tele-group tele-alerts">
       <h4 className="with-icon">
         <BellRing size={16} /> هشدارها
       </h4>
@@ -367,6 +541,7 @@ function TeleUsers() {
   const [fileMb, setFileMb] = useState('');
   const [quotaMb, setQuotaMb] = useState('');
   const [chartFor, setChartFor] = useState(null);
+  const [q, setQ] = useState('');
   const load = () =>
     api('GET', '/admin/tele/accounts')
       .then((r) => {
@@ -409,95 +584,108 @@ function TeleUsers() {
       showToast(err.message);
     }
   };
+  const term = q.trim().toLowerCase();
+  const shown = data.accounts.filter((a) => !term || `${a.name} ${a.username} ${a.tgName || ''}`.toLowerCase().includes(term));
   const top = data.accounts[0]?.used || 0;
 
   return (
-    <div className="boxed" style={{ marginTop: 16 }}>
+    <div className="tele-group">
       <h4 className="with-icon">
-        <BarChart3 size={16} /> کاربران تلگرام
+        <BarChart3 size={16} /> کاربران و مصرف این ماه
       </h4>
-      <p className="hint">مصرف اینترنت (VPN) هر کاربر در این ماه، از پرمصرف به کم‌مصرف. عکس، پیام صوتی و فایل/ویدیو پیش‌فرض برای همه خاموش است و فقط با زدن روی آن‌ها دانلود می‌شوند. «پیام/عضویت جدید» یعنی پیام دادن به هر کسی با ‎@نام‌کاربری یا شماره، و جستجو و عضویت در گروه‌ها و کانال‌ها؛ این هم پیش‌فرض خاموش است.</p>
-      <form className="inline-form" onSubmit={saveQuota}>
-        <label className="grow">
-          سقف مصرف ماهانه هر کاربر (مگابایت، ۰ = بدون سقف)
-          <input type="number" min={0} dir="ltr" value={quotaMb} onChange={(e) => setQuotaMb(e.target.value)} />
-        </label>
-        <button className="btn sm">ذخیره</button>
-      </form>
-      <form className="inline-form" onSubmit={saveMax}>
-        <label className="grow">
-          حداکثر حجم هر عکس یا پیام صوتی (مگابایت)
-          <input type="number" min={1} max={50} dir="ltr" value={maxMb} onChange={(e) => setMaxMb(e.target.value)} />
-        </label>
-        <label className="grow">
-          حداکثر حجم هر فایل یا ویدیو (مگابایت)
-          <input type="number" min={1} max={2000} dir="ltr" value={fileMb} onChange={(e) => setFileMb(e.target.value)} />
-        </label>
-        <button className="btn sm">ذخیره</button>
-      </form>
-      <ul className="user-list tele-users">
-        {data.accounts.map((a) => {
+      <input className="search" placeholder="جستجوی کاربر…" value={q} onChange={(e) => setQ(e.target.value)} />
+      <ul className="tele-list tele-users">
+        {shown.map((a) => {
           const cap = a.effectiveQuotaMb;
           const over = cap > 0 && a.used >= cap * 1048576;
           return (
-            <li key={a.id} className="row-item tele-user">
-              <span className="grow">
-                <b>{a.name}</b> <small className="muted">@{a.username}</small>
-                {over && <span className="tag danger">به سقف رسید</span>}
-                <br />
-                <small className="muted">
-                  تلگرام: {a.tgName || '—'} · {a.status === 'connected' ? (a.live ? 'وصل' : 'وصل (در حالت صرفه‌جویی)') : 'وصل نیست'}
-                </small>
-                <span className="tele-usage">
-                  <span className="tele-usage-bar">
-                    <span style={{ width: `${cap > 0 ? Math.min(100, (a.used / (cap * 1048576)) * 100) : top ? (a.used / top) * 100 : 0}%` }} className={over ? 'over' : ''} />
+            <li key={a.id}>
+              <details className="tele-card">
+                <summary>
+                  <span className={`tele-dot ${a.status === 'connected' ? 'on' : ''}`} />
+                  <span className="grow">
+                    <b>{a.name}</b> {over && <span className="tag danger">به سقف رسید</span>}
+                    <span className="tele-usage">
+                      <span className="tele-usage-bar">
+                        <span style={{ width: `${cap > 0 ? Math.min(100, (a.used / (cap * 1048576)) * 100) : top ? (a.used / top) * 100 : 0}%` }} className={over ? 'over' : ''} />
+                      </span>
+                      <small dir="auto">
+                        {mbText(a.used)}
+                        {cap > 0 ? ` از ${toFa(cap)} MB` : ''}
+                      </small>
+                    </span>
                   </span>
-                  <small dir="auto">
-                    {mbText(a.used)}
-                    {cap > 0 ? ` از ${toFa(cap)} MB` : ''}
+                </summary>
+                <div className="tele-card-body">
+                  <small className="muted">
+                    @{a.username} · تلگرام: {a.tgName || '—'} · {a.status === 'connected' ? (a.live ? 'وصل' : 'وصل (در حالت صرفه‌جویی)') : 'وصل نیست'}
                   </small>
-                  <button type="button" className="icon-btn sm" title="مصرف روزانه و ماهانه" aria-label="مصرف روزانه و ماهانه" onClick={() => setChartFor(chartFor === a.id ? null : a.id)}>
-                    <LineChart size={15} />
+                  <b>چه چیزهایی را بگیرد</b>
+                  <div className="tele-perms">
+                    <label className="check">
+                      <input type="checkbox" checked={a.allowMedia} onChange={() => patch(a, { allowMedia: !a.allowMedia })} /> عکس
+                    </label>
+                    <label className="check">
+                      <input type="checkbox" checked={a.allowVoice} onChange={() => patch(a, { allowVoice: !a.allowVoice })} /> صوت
+                    </label>
+                    <label className="check">
+                      <input type="checkbox" checked={a.allowFiles} onChange={() => patch(a, { allowFiles: !a.allowFiles })} /> فایل و ویدیو
+                    </label>
+                  </div>
+                  <label className="check" title={a.owner ? 'مالک همیشه این اجازه را دارد' : ''}>
+                    <input type="checkbox" checked={a.allowExplore} disabled={a.owner} onChange={() => patch(a, { allowExplore: !a.allowExplore })} /> پیام به هر کس و عضویت در گروه و کانال جدید
+                  </label>
+                  <label className="inline-form">
+                    سقف ماهانه (MB)
+                    <input
+                      type="number"
+                      min={0}
+                      dir="ltr"
+                      style={{ width: 96 }}
+                      placeholder={data.defaultQuotaMb ? toFa(data.defaultQuotaMb) : '∞'}
+                      defaultValue={a.quotaMb ?? ''}
+                      key={`q-${a.id}-${a.quotaMb}`}
+                      onBlur={(e) => {
+                        const v = e.target.value.trim();
+                        const next = v === '' ? null : Number(v);
+                        if (next !== (a.quotaMb ?? null)) patch(a, { quotaMb: next });
+                      }}
+                    />
+                  </label>
+                  <small className="muted">خالی = سقف پیش‌فرض · ۰ = بدون سقف</small>
+                  <button type="button" className="btn sm" onClick={() => setChartFor(chartFor === a.id ? null : a.id)}>
+                    <LineChart size={14} /> نمودار مصرف
                   </button>
-                </span>
-                {chartFor === a.id && <UsageChart accountId={a.id} />}
-              </span>
-              <span className="tele-user-ctl">
-                <label className="inline-form" title="خالی = سقف پیش‌فرض؛ ۰ = بدون سقف">
-                  <small>سقف (MB)</small>
-                  <input
-                    type="number"
-                    min={0}
-                    dir="ltr"
-                    style={{ width: 76 }}
-                    placeholder={data.defaultQuotaMb ? toFa(data.defaultQuotaMb) : '∞'}
-                    defaultValue={a.quotaMb ?? ''}
-                    key={`q-${a.id}-${a.quotaMb}`}
-                    onBlur={(e) => {
-                      const v = e.target.value.trim();
-                      const next = v === '' ? null : Number(v);
-                      if (next !== (a.quotaMb ?? null)) patch(a, { quotaMb: next });
-                    }}
-                  />
-                </label>
-                <label className="check">
-                  <input type="checkbox" checked={a.allowMedia} onChange={() => patch(a, { allowMedia: !a.allowMedia })} /> عکس
-                </label>
-                <label className="check">
-                  <input type="checkbox" checked={a.allowVoice} onChange={() => patch(a, { allowVoice: !a.allowVoice })} /> صوت
-                </label>
-                <label className="check">
-                  <input type="checkbox" checked={a.allowFiles} onChange={() => patch(a, { allowFiles: !a.allowFiles })} /> فایل
-                </label>
-                <label className="check" title={a.owner ? 'مالک همیشه این اجازه را دارد' : 'پیام به هر کس با ‎@نام‌کاربری یا شماره، جستجو و عضویت در گروه‌ها و کانال‌ها'}>
-                  <input type="checkbox" checked={a.allowExplore} disabled={a.owner} onChange={() => patch(a, { allowExplore: !a.allowExplore })} /> پیام/عضویت جدید
-                </label>
-              </span>
+                  {chartFor === a.id && <UsageChart accountId={a.id} />}
+                </div>
+              </details>
             </li>
           );
         })}
-        {!data.accounts.length && <li className="muted">هنوز کسی حساب تلگرام وصل نکرده است.</li>}
+        {!shown.length && <li className="muted center">{data.accounts.length ? 'کاربری پیدا نشد.' : 'هنوز کسی حساب تلگرام وصل نکرده است.'}</li>}
       </ul>
+      <details className="tele-group">
+        <summary>تنظیمات پیش‌فرض همه کاربران</summary>
+        <p className="hint">عکس، صوت و فایل پیش‌فرض برای همه خاموش است و فقط با زدن روی آن‌ها دانلود می‌شوند.</p>
+        <form className="inline-form" onSubmit={saveQuota}>
+          <label className="grow">
+            سقف مصرف ماهانه (مگابایت، ۰ = بدون سقف)
+            <input type="number" min={0} dir="ltr" value={quotaMb} onChange={(e) => setQuotaMb(e.target.value)} />
+          </label>
+          <button className="btn sm">ذخیره</button>
+        </form>
+        <form className="inline-form" onSubmit={saveMax}>
+          <label className="grow">
+            حداکثر عکس یا صوت (مگابایت)
+            <input type="number" min={1} max={50} dir="ltr" value={maxMb} onChange={(e) => setMaxMb(e.target.value)} />
+          </label>
+          <label className="grow">
+            حداکثر فایل یا ویدیو (مگابایت)
+            <input type="number" min={1} max={2000} dir="ltr" value={fileMb} onChange={(e) => setFileMb(e.target.value)} />
+          </label>
+          <button className="btn sm">ذخیره</button>
+        </form>
+      </details>
     </div>
   );
 }
@@ -554,8 +742,8 @@ const FILES_LABELS = {
 function TeleAccess({
   path = '/admin/access/tele',
   icon: Icon = UserCheck,
-  title = 'دسترسی به تلگرام',
-  hint = 'چه کسانی بخش تلگرام را داشته باشند. بستن برای کسی که وارد شده، اتصالش را همان لحظه می‌بندد؛ حسابش می‌ماند و با باز شدن دوباره، بدون ورود دوباره کار می‌کند. مالک همیشه دسترسی دارد.',
+  title = 'چه کسانی تلگرام داشته باشند',
+  hint = 'بستن برای کسی که وارد شده، اتصالش را همان لحظه می‌بندد؛ حسابش می‌ماند و با باز شدن دوباره کار می‌کند. مالک همیشه دسترسی دارد.',
   labels = ACCESS_LABELS,
 }) {
   const showToast = useStore((s) => s.showToast);
@@ -582,13 +770,12 @@ function TeleAccess({
   const shown = data.users.filter((u) => !u.owner && (!term || `${u.name} ${u.username}`.toLowerCase().includes(term)));
   const listed = data.users.filter((u) => u.listed).length;
   return (
-    <div className="boxed" style={{ marginTop: 16 }}>
+    <div className="tele-group">
       <h4 className="with-icon">
         <Icon size={16} /> {title}
       </h4>
       <p className="hint">{hint}</p>
       <label>
-        حالت
         <select value={data.mode} disabled={busy} onChange={(e) => save({ mode: e.target.value })}>
           {data.modes.map((m) => (
             <option key={m} value={m}>
@@ -644,6 +831,7 @@ function TeleMirrors() {
   const [withFiles, setWithFiles] = useState(false);
   const [visibility, setVisibility] = useState('public');
   const [busy, setBusy] = useState(false);
+  const [adding, setAdding] = useState(false);
   const load = () =>
     api('GET', '/admin/tele/mirrors')
       .then(setData)
@@ -685,129 +873,159 @@ function TeleMirrors() {
     ) ?? prompt('لینک دعوت:', text);
   const used = new Set(data.mirrors.map((m) => m.tgChatId));
   const free = (channels || []).filter((c) => !used.has(c.tgChatId));
+  const addForm = (
+    <form
+      className="tele-group"
+      onSubmit={(e) => {
+        e.preventDefault();
+        act(() => api('POST', '/admin/tele/mirrors', { tgChatId, ...(target ? { chatId: Number(target) } : {}), withPhotos, withFiles, visibility }, { timeout: 120000 }), 'اضافه شد').then(() => {
+          setTgChatId('');
+          setAdding(false);
+        });
+      }}
+    >
+      <label>
+        ۱. کانال یا گروه تلگرام
+        <span className="inline-form">
+          <input className="grow" value={q} onChange={(e) => setQ(e.target.value)} placeholder="جستجو، ‎@نام‌کاربری یا لینک t.me" />
+          <button type="button" className={`btn sm ${searching ? 'spin' : ''}`} disabled={searching} onClick={() => findChannels()}>
+            <RefreshCw size={14} /> {searching ? 'در حال دریافت…' : 'جستجو'}
+          </button>
+        </span>
+      </label>
+      <select value={tgChatId} onChange={(e) => setTgChatId(e.target.value)} aria-label="کانال تلگرام">
+        <option value="">{channels ? `— انتخاب کنید (${toFa(free.length)}) —` : '— در حال دریافت… —'}</option>
+        {free.map((c) => (
+          <option key={c.tgChatId} value={c.tgChatId}>
+            {c.kind === 'group' ? '👥 ' : '📢 '}
+            {c.title}
+            {c.username ? ` (@${c.username})` : ''}
+            {c.joined ? '' : ' · عضو نیستید'}
+          </option>
+        ))}
+      </select>
+      {channels && !channels.length && <small className="muted">چیزی پیدا نشد. برای کانال عمومی‌ای که عضوش نیستید، ‎@نام‌کاربری آن را جستجو کنید.</small>}
+      <label>
+        ۲. کجا منتشر شود
+        <select value={target} onChange={(e) => setTarget(e.target.value)}>
+          <option value="">کانال تازه در برنامه</option>
+          {data.appChannels.map((c) => (
+            <option key={c.id} value={c.id}>
+              {c.title}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label>
+        ۳. چه کسانی ببینند
+        <select value={visibility} onChange={(e) => setVisibility(e.target.value)}>
+          {Object.entries(VIS_LABELS).map(([k, label]) => (
+            <option key={k} value={k}>
+              {label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="check">
+        <input type="checkbox" checked={withPhotos} onChange={(e) => setWithPhotos(e.target.checked)} /> عکس‌ها را هم بیاور (با اولین باز کردن)
+      </label>
+      <label className="check">
+        <input type="checkbox" checked={withFiles} onChange={(e) => setWithFiles(e.target.checked)} /> ویدیو و فایل را هم بیاور (با اولین باز کردن)
+      </label>
+      <button className="btn sm primary" disabled={!tgChatId || busy}>
+        افزودن
+      </button>
+    </form>
+  );
+
   return (
-    <div className="boxed tele-mirrors" style={{ marginTop: 16 }}>
-      <h4 className="with-icon">
-        <Newspaper size={16} /> انتشار کانال‌ها و گروه‌های تلگرام در برنامه (فقط مالک)
-      </h4>
-      <p className="hint">پست‌های یک کانال (یا پیام‌های یک گروه، با نام نویسنده) خودکار در یک کانال همین برنامه منتشر می‌شوند؛ کاربران بدون تلگرام می‌خوانند و ترافیک فقط یک بار مصرف می‌شود. عکس، ویدیو و فایل فقط وقتی کسی رویشان بزند از تلگرام گرفته می‌شوند و بعد برای همه آماده‌اند؛ ویدیو و فایل را فقط کاربرانی که پایین‌تر انتخاب می‌کنید می‌گیرند.</p>
+    <div className="tele-mirrors">
+      <p className="hint">پست‌های تلگرام خودکار در یک کانال همین برنامه منتشر می‌شوند؛ کاربران بدون تلگرام می‌خوانند و ترافیک فقط یک بار مصرف می‌شود.</p>
       {!data.connected ? (
         <p className="muted">اول حساب تلگرام خودتان را از منو ← تلگرام وصل کنید.</p>
       ) : (
         <>
-          <form
-            className="inline-form"
-            onSubmit={(e) => {
-              e.preventDefault();
-              findChannels();
-            }}
-          >
-            <input className="grow" value={q} onChange={(e) => setQ(e.target.value)} placeholder="جستجو در کانال‌ها و گروه‌های شما، یا ‎@نام‌کاربری / لینک t.me یک کانال یا گروه عمومی" />
-            <button className={`btn sm ${searching ? 'spin' : ''}`} disabled={searching}>
-              <RefreshCw size={14} /> {searching ? 'در حال دریافت…' : 'جستجو'}
+          <div className="tele-actions">
+            <button type="button" className="btn sm primary" onClick={() => setAdding(!adding)}>
+              <Plus size={14} /> افزودن کانال
             </button>
-          </form>
-          <form
-            className="tele-mirror-form"
-            onSubmit={(e) => {
-              e.preventDefault();
-              act(() => api('POST', '/admin/tele/mirrors', { tgChatId, ...(target ? { chatId: Number(target) } : {}), withPhotos, withFiles, visibility }, { timeout: 120000 }), 'اضافه شد').then(() => setTgChatId(''));
-            }}
-          >
-            <select value={tgChatId} onChange={(e) => setTgChatId(e.target.value)}>
-              <option value="">{channels ? `— کانال یا گروه تلگرام (${toFa(free.length)}) —` : '— در حال دریافت کانال‌ها و گروه‌ها… —'}</option>
-              {free.map((c) => (
-                <option key={c.tgChatId} value={c.tgChatId}>
-                  {c.kind === 'group' ? '👥 ' : '📢 '}
-                  {c.title}
-                  {c.username ? ` (@${c.username})` : ''}
-                  {c.joined ? '' : ' · عضو نیستید'}
-                </option>
-              ))}
-            </select>
-            <select value={target} onChange={(e) => setTarget(e.target.value)}>
-              <option value="">کانال تازه در برنامه</option>
-              {data.appChannels.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.title}
-                </option>
-              ))}
-            </select>
-            <select value={visibility} onChange={(e) => setVisibility(e.target.value)} aria-label="چه کسانی ببینند">
-              {Object.entries(VIS_LABELS).map(([k, label]) => (
-                <option key={k} value={k}>
-                  {label}
-                </option>
-              ))}
-            </select>
-            <label className="check">
-              <input type="checkbox" checked={withPhotos} onChange={(e) => setWithPhotos(e.target.checked)} /> عکس‌ها (با اولین کلیک)
-            </label>
-            <label className="check">
-              <input type="checkbox" checked={withFiles} onChange={(e) => setWithFiles(e.target.checked)} /> ویدیو و فایل (با اولین کلیک)
-            </label>
-            <button className="btn sm primary" disabled={!tgChatId || busy}>
-              افزودن
+            <button type="button" className="btn sm" disabled={busy || !data.mirrors.length} onClick={() => act(() => api('POST', '/admin/tele/mirrors/run', {}, { timeout: 180000 }), 'بررسی شد')}>
+              <RefreshCw size={14} /> بررسی الان
             </button>
-          </form>
-          {channels && !channels.length && <small className="muted">چیزی پیدا نشد. برای کانال یا گروه عمومی‌ای که عضوش نیستید، ‎@نام‌کاربری آن را جستجو کنید.</small>}
-          <ul className="user-list">
+          </div>
+          {adding && addForm}
+          <ul className="tele-list">
             {data.mirrors.map((m) => (
-              <li key={m.id} className="row-item tele-mirror">
-                <span className="grow">
-                  {m.kind === 'group' && <span className="tag">گروه</span>} {m.handle && <span className="tag" dir="ltr">@{m.handle}</span>} <b>{m.title}</b> ← {m.chatTitle || '—'}
-                  {!m.enabled && <span className="tag">متوقف</span>}
-                  <br />
-                  <small className="muted">
-                    {toFa(m.members)} عضو · {m.lastRunAt ? `آخرین بررسی: ${formatDateTime(m.lastRunAt)}` : 'هنوز بررسی نشده'}
-                    {m.lastError ? ` · خطا: ${m.lastError}` : ''}
-                  </small>
-                  {m.visibility === 'link' && m.inviteCode && (
-                    <span className="inline-form tele-invite">
-                      <input readOnly dir="ltr" value={inviteLink(m.inviteCode)} onFocus={(e) => e.target.select()} />
-                      <button type="button" className="btn sm" onClick={() => copy(inviteLink(m.inviteCode))}>
-                        <Copy size={14} /> کپی
-                      </button>
-                      <button type="button" className="btn sm" disabled={busy} onClick={() => confirm('لینک تازه ساخته شود؟ لینک قبلی دیگر کار نمی‌کند (کسانی که عضو شده‌اند می‌مانند).') && act(() => api('POST', `/admin/tele/mirrors/${m.id}/invite`), 'لینک تازه ساخته شد')}>
-                        لینک تازه
-                      </button>
+              <li key={m.id}>
+                <details className="tele-card tele-mirror">
+                  <summary>
+                    <span className={`tele-dot ${m.lastError ? 'off' : m.enabled ? 'on' : ''}`} />
+                    <span className="grow">
+                      <b>{m.chatTitle || m.title}</b>
+                      <small>
+                        {m.handle && <span dir="ltr">@{m.handle}</span>} {m.kind === 'group' ? '· گروه ' : ''}· {toFa(m.members)} عضو
+                        {m.enabled ? '' : ' · متوقف'}
+                      </small>
                     </span>
-                  )}
-                </span>
-                <span className="tele-user-ctl">
-                  <select value={m.visibility} disabled={busy} onChange={(e) => act(() => api('PATCH', `/admin/tele/mirrors/${m.id}`, { visibility: e.target.value }), 'ذخیره شد')} aria-label="چه کسانی ببینند">
-                    {Object.entries(VIS_LABELS).map(([k, label]) => (
-                      <option key={k} value={k}>
-                        {label}
-                      </option>
-                    ))}
-                  </select>
-                  <label className="check">
-                    <input type="checkbox" checked={m.withPhotos} onChange={() => act(() => api('PATCH', `/admin/tele/mirrors/${m.id}`, { withPhotos: !m.withPhotos }))} /> عکس
-                  </label>
-                  <label className="check">
-                    <input type="checkbox" checked={m.withFiles} onChange={() => act(() => api('PATCH', `/admin/tele/mirrors/${m.id}`, { withFiles: !m.withFiles }))} /> ویدیو/فایل
-                  </label>
-                  <button className="btn sm" disabled={busy} onClick={() => act(() => api('PATCH', `/admin/tele/mirrors/${m.id}`, { enabled: !m.enabled }))}>
-                    {m.enabled ? 'توقف' : 'ادامه'}
-                  </button>
-                  <button className="btn sm danger" disabled={busy} onClick={() => confirm('انتشار این کانال متوقف و حذف شود؟ (کانال برنامه و پست‌هایش می‌مانند)') && act(() => api('DELETE', `/admin/tele/mirrors/${m.id}`))}>
-                    <Trash2 size={14} />
-                  </button>
-                </span>
+                  </summary>
+                  <div className="tele-card-body">
+                    <small className="muted">
+                      از تلگرام: {m.title} · {m.lastRunAt ? `آخرین بررسی: ${formatDateTime(m.lastRunAt)}` : 'هنوز بررسی نشده'}
+                    </small>
+                    {m.lastError && <small className="tele-warn">{m.lastError}</small>}
+                    <label>
+                      چه کسانی ببینند
+                      <select value={m.visibility} disabled={busy} onChange={(e) => act(() => api('PATCH', `/admin/tele/mirrors/${m.id}`, { visibility: e.target.value }), 'ذخیره شد')}>
+                        {Object.entries(VIS_LABELS).map(([k, label]) => (
+                          <option key={k} value={k}>
+                            {label}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    {m.visibility === 'link' && m.inviteCode && (
+                      <span className="inline-form tele-invite">
+                        <input readOnly dir="ltr" value={inviteLink(m.inviteCode)} onFocus={(e) => e.target.select()} />
+                        <button type="button" className="btn sm" onClick={() => copy(inviteLink(m.inviteCode))}>
+                          <Copy size={14} /> کپی
+                        </button>
+                        <button type="button" className="btn sm" disabled={busy} onClick={() => confirm('لینک تازه ساخته شود؟ لینک قبلی دیگر کار نمی‌کند (کسانی که عضو شده‌اند می‌مانند).') && act(() => api('POST', `/admin/tele/mirrors/${m.id}/invite`), 'لینک تازه ساخته شد')}>
+                          لینک تازه
+                        </button>
+                      </span>
+                    )}
+                    <div className="tele-perms">
+                      <label className="check">
+                        <input type="checkbox" checked={m.withPhotos} onChange={() => act(() => api('PATCH', `/admin/tele/mirrors/${m.id}`, { withPhotos: !m.withPhotos }))} /> عکس
+                      </label>
+                      <label className="check">
+                        <input type="checkbox" checked={m.withFiles} onChange={() => act(() => api('PATCH', `/admin/tele/mirrors/${m.id}`, { withFiles: !m.withFiles }))} /> ویدیو و فایل
+                      </label>
+                    </div>
+                    <div className="tele-actions">
+                      <button className="btn sm" disabled={busy} onClick={() => act(() => api('PATCH', `/admin/tele/mirrors/${m.id}`, { enabled: !m.enabled }))}>
+                        {m.enabled ? 'توقف' : 'ادامه'}
+                      </button>
+                      <button className="btn sm danger" disabled={busy} onClick={() => confirm('انتشار این کانال متوقف و حذف شود؟ (کانال برنامه و پست‌هایش می‌مانند)') && act(() => api('DELETE', `/admin/tele/mirrors/${m.id}`))}>
+                        <Trash2 size={14} /> حذف انتشار
+                      </button>
+                    </div>
+                  </div>
+                </details>
               </li>
             ))}
-            {!data.mirrors.length && <li className="muted">هنوز کانال یا گروهی منتشر نمی‌شود.</li>}
+            {!data.mirrors.length && <li className="muted center">هنوز کانال یا گروهی منتشر نمی‌شود.</li>}
           </ul>
-          <div className="inline-form">
+          <details className="tele-group">
+            <summary>تنظیمات انتشار</summary>
             <label className="inline-form">
-              بررسی هر
+              بررسی پست‌های جدید هر
               <input
                 type="number"
                 min={1}
                 max={1440}
                 dir="ltr"
-                style={{ width: 72 }}
+                style={{ width: 80 }}
                 defaultValue={data.minutes}
                 key={`m-${data.minutes}`}
                 onBlur={(e) => {
@@ -817,10 +1035,7 @@ function TeleMirrors() {
               />
               دقیقه
             </label>
-            <button type="button" className="btn sm" disabled={busy || !data.mirrors.length} onClick={() => act(() => api('POST', '/admin/tele/mirrors/run', {}, { timeout: 180000 }), 'بررسی شد')}>
-              <RefreshCw size={14} /> بررسی الان
-            </button>
-          </div>
+          </details>
         </>
       )}
     </div>

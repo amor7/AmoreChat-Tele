@@ -70,7 +70,7 @@ export default function Admin({ onClose }) {
       {tab === 'settings' && <Settings />}
       {tab === 'audit' && <Audit />}
       {tab === 'live' && <Live />}
-      {tab === 'tele' && <TeleSection />}
+      {tab === 'tele' && <TeleSection onVpn={() => setTab('vpn')} />}
       {tab === 'vpn' && <VpnAdmin />}
       {tab === 'security' && <AdminSecurity />}
       {tab === 'backup' && <Backups />}

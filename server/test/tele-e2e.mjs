@@ -1059,12 +1059,14 @@ async function uiChecks({ owner, alice, bob, pd, gd, meta, photoMsg, voiceMsg, s
     await page.click('.menu-btn');
     await clickText('.sidebar .menu > button', 'پنل مدیریت');
     await clickText('.modal .tabs button', 'VPN');
+    await clickText('.modal .tele-seg button', 'هشدارها');
     await waitText('.modal h4', 'هشدارها');
     await noBrokenText('admin panel, VPN');
     await shot('admin');
     await page.evaluate(() => document.querySelector('.modal .tele-alerts').scrollIntoView());
     await shot('admin-alerts');
     await clickText('.modal .tabs button', 'تلگرام');
+    await clickText('.modal .tele-seg button', 'کاربران');
     await waitText('.modal .tele-users', 'Alice');
     await noBrokenText('admin panel, Telegram');
     await page.evaluate(() => document.querySelector('.modal .tele-users').scrollIntoView());
@@ -1080,6 +1082,7 @@ async function uiChecks({ owner, alice, bob, pd, gd, meta, photoMsg, voiceMsg, s
 
     log('UI: Telegram sessions open from the page');
     await open(alice, `#/tele/${pd.id}`, { width: 1280, height: 800 });
+    await page.click('button[aria-label="بیشتر"]');
     await page.click('button[aria-label="نشست‌های فعال تلگرام"]');
     await waitText('.modal .tele-sessions', 'همین برنامه');
     await noBrokenText('Telegram sessions');

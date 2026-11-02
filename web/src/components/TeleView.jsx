@@ -3,7 +3,7 @@ import { api } from '../api';
 import { useStore } from '../store';
 import { colorFor, formatDay, formatListTime, formatTime, sameDay, toFa, faDigits } from '../util';
 import Avatar from './Avatar';
-import { ArrowRight, Cable, Check, LogOut, Megaphone, Plus, RefreshCw, Search, SendHorizontal, Users, X, CircleMinus, Reply, ImagePlus, Mic, Play, Forward, Trash2, ShieldCheck, Paperclip, FileText, Film, Download, UserPlus, Lock, MessageSquare, DoorOpen } from 'lucide-react';
+import { ArrowRight, Cable, Check, LogOut, Megaphone, Plus, RefreshCw, Search, SendHorizontal, Users, X, CircleMinus, Reply, ImagePlus, Mic, Play, Forward, Trash2, ShieldCheck, Paperclip, FileText, Film, Download, UserPlus, Lock, MessageSquare, DoorOpen, MoreVertical } from 'lucide-react';
 
 // Telegram, in the same look as the app's own chats: chat list on the side, the open chat beside it.
 // Route: #/tele (list) and #/tele/<dialogId> (an open chat).
@@ -30,6 +30,7 @@ export default function TeleView({ dialogId }) {
   const [syncing, setSyncing] = useState(false);
   const [picking, setPicking] = useState(false);
   const [finding, setFinding] = useState(false);
+  const [more, setMore] = useState(false);
   const phone = usePhoneLayout();
   const showToast = useStore((s) => s.showToast);
 
@@ -138,15 +139,48 @@ export default function TeleView({ dialogId }) {
               <button className="icon-btn" aria-label="افزودن گفتگو" title="افزودن گفتگو" onClick={startPicking}>
                 <Plus size={21} />
               </button>
-              <button className={`icon-btn ${syncing ? 'spin' : ''}`} aria-label="به‌روزرسانی" title="به‌روزرسانی" onClick={() => syncList()} disabled={syncing}>
-                <RefreshCw size={19} />
-              </button>
-              <button className="icon-btn" aria-label="نشست‌های فعال تلگرام" title="نشست‌های فعال تلگرام (دستگاه‌هایی که حساب شما رویشان باز است)" onClick={() => useStore.getState().openModal('teleSessions')}>
-                <ShieldCheck size={19} />
-              </button>
-              <button className="icon-btn" aria-label="خروج از حساب تلگرام" title="خروج از حساب تلگرام" onClick={logout}>
-                <LogOut size={19} />
-              </button>
+              <span className="tele-more">
+                <button className="icon-btn" aria-label="بیشتر" aria-expanded={more} title="بیشتر" onClick={() => setMore(!more)}>
+                  <MoreVertical size={20} />
+                </button>
+                {more && (
+                  <>
+                    <button className="tele-more-back" aria-label="بستن" onClick={() => setMore(false)} />
+                    <div className="tele-more-menu" role="menu">
+                      <button
+                        role="menuitem"
+                        disabled={syncing}
+                        onClick={() => {
+                          setMore(false);
+                          syncList();
+                        }}
+                      >
+                        <RefreshCw size={17} /> به‌روزرسانی فهرست
+                      </button>
+                      <button
+                        role="menuitem"
+                        aria-label="نشست‌های فعال تلگرام"
+                        onClick={() => {
+                          setMore(false);
+                          useStore.getState().openModal('teleSessions');
+                        }}
+                      >
+                        <ShieldCheck size={17} /> دستگاه‌های فعال تلگرام
+                      </button>
+                      <button
+                        role="menuitem"
+                        className="danger"
+                        onClick={() => {
+                          setMore(false);
+                          logout();
+                        }}
+                      >
+                        <LogOut size={17} /> خروج از حساب تلگرام
+                      </button>
+                    </div>
+                  </>
+                )}
+              </span>
             </>
           )}
           {picking && (

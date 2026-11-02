@@ -232,7 +232,11 @@ export const useStore = create((set, get) => ({
     if (list?.some((x) => x.replyTo?.id === id)) {
       set((s) => ({ messages: { ...s.messages, [chatId]: s.messages[chatId].map((x) => (x.replyTo?.id === id ? { ...x, replyTo: { ...x.replyTo, type: 'deleted', text: '' } } : x)) } }));
     }
-    if (wasLast) get().refreshChat(chatId);
+    if (wasLast) {
+      const before = get().messages[chatId]?.findLast((x) => x.id !== id && x.type !== 'deleted') || null;
+      set((s) => ({ chats: { ...s.chats, [chatId]: { ...s.chats[chatId], lastMessage: before } } }));
+      get().refreshChat(chatId);
+    }
   },
 
   markRead(chatId) {
