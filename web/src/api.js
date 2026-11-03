@@ -21,11 +21,14 @@ export async function api(method, url, body, { timeout = 20000 } = {}) {
   } catch {
     throw new ApiError('ارتباط با سرور برقرار نشد', 0);
   }
+  // A weak link can cut the answer short: that is a failed request, not an empty answer.
+  const text = await res.text().catch(() => null);
+  if (text === null) throw new ApiError('ارتباط با سرور قطع شد', 0);
   let data = {};
   try {
-    data = await res.json();
+    data = text ? JSON.parse(text) : {};
   } catch {
-    /* empty body */
+    if (res.ok) throw new ApiError('پاسخ سرور ناقص رسید', 0);
   }
   if (!res.ok) throw new ApiError(data.error || 'خطا در ارتباط با سرور', res.status);
   return data;

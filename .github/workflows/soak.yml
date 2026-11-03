@@ -9,6 +9,9 @@ on:
       hours:
         description: 'Hours (at most 5.5: GitHub stops a job at 6)'
         default: '2'
+      network:
+        description: 'good, or bad (delay, loss and cuts on the app and LiveKit ports; the Android job is skipped)'
+        default: 'good'
 env:
   HOURS: ${{ inputs.hours || '2' }}
 
@@ -38,10 +41,20 @@ jobs:
           LIVEKIT_URL=http://127.0.0.1:7880 PORT=3101 nohup node server/src/index.js > server.log 2>&1 &
           for i in $(seq 1 30); do curl -sf http://localhost:3101/healthz && break; sleep 1; done
           npm install --no-save puppeteer@25.11.0
+      - name: A bad network
+        if: inputs.network == 'bad'
+        run: |
+          echo good > /tmp/netphase
+          sudo nohup env PHASE_FILE=/tmp/netphase bash server/test/netem.sh > netem.log 2>&1 &
+          sleep 3 && sudo tc qdisc show dev lo
       - name: Ten users for hours
         run: |
           CODE=$(grep -oP 'SETUP CODE: \K\S+' server.log)
+          [ "${{ inputs.network }}" = bad ] && export PHASE_FILE=/tmp/netphase
           SERVER_LOG=$PWD/server.log USERS=10 node server/test/soak.mjs http://localhost:3101 "$CODE"
+      - name: Compress the server log
+        if: always()
+        run: gzip -9 -f server.log || true
       - name: Report
         if: always()
         run: cat soak-out/report.md >> "$GITHUB_STEP_SUMMARY" || true
@@ -53,9 +66,10 @@ jobs:
           path: |
             soak-out/report.*
             soak-out/issue-*.png
-            server.log
+            server.log.gz
 
   android:
+    if: inputs.network != 'bad'
     runs-on: ubuntu-latest
     timeout-minutes: 355
     env:
