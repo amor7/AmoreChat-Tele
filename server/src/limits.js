@@ -58,8 +58,9 @@ export function effectiveLimits(user) {
 
 // ---------- Flood guard ----------
 // Per user, in memory: enough for anyone typing (and for a phone sending its offline queue at once),
-// not for a script filling a group. Slow mode in a group still applies on top.
-export const BURSTS = { send: [60, 30_000], react: [60, 20_000], typing: [5, 5000] };
+// not for a script filling a group. Slow mode in a group still applies on top. The page sends
+// "typing" once per message it starts (and every 2.5 s after): quick short messages mean several.
+export const BURSTS = { send: [60, 30_000], react: [60, 20_000], typing: [20, 10_000] };
 const bursts = new Map(); // "kind:user[:key]" -> recent times
 export function overBurst(userId, kind, key = '', n = 1) {
   const [max, windowMs] = BURSTS[kind];
