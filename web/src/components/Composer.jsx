@@ -3,7 +3,7 @@ import { createPortal } from 'react-dom';
 import { api, upload, CANCELLED } from '../api';
 import { useStore, dataSaverNow } from '../store';
 import { emitTyping, resetTyping, isChatMuted } from '../socket';
-import { enqueue, flushOutbox } from '../offline';
+import { enqueue, flushOutbox, newClientId } from '../offline';
 import { EmojiPicker, RichText } from './Emoji';
 import PreviewIcon from './PreviewIcon';
 import Avatar from './Avatar';
@@ -91,6 +91,7 @@ export default function Composer({ chat, droppedFile, onDroppedHandled }) {
     useStore.setState({ replyTo: null, editing: null, ...(edit ? {} : { sentAt: Date.now() }) });
     inputRef.current?.focus();
     setBusy(true);
+    const clientId = newClientId();
     sendChain.current = sendChain.current.then(async () => {
       try {
         if (edit) {
@@ -98,15 +99,15 @@ export default function Composer({ chat, droppedFile, onDroppedHandled }) {
           useStore.getState().updateMessage(message);
         } else if (!useStore.getState().connected) {
           // Offline: it goes into the outbox and is sent when the connection is back.
-          await enqueue(chat.id, t, reply?.id);
+          await enqueue(chat.id, t, reply?.id, clientId);
           flushOutbox();
         } else {
-          const { message } = await api('POST', `/chats/${chat.id}/messages`, { text: t, replyTo: reply?.id });
+          const { message } = await api('POST', `/chats/${chat.id}/messages`, { text: t, replyTo: reply?.id, clientId });
           useStore.getState().addMessage(message);
         }
       } catch (e) {
         if (!e.status && !edit) {
-          await enqueue(chat.id, t, reply?.id).catch(() => {});
+          await enqueue(chat.id, t, reply?.id, clientId).catch(() => {});
         } else {
           showToast(e.message);
           // Not sent: give the text back (unless something new was typed meanwhile).

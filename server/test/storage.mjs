@@ -220,4 +220,13 @@ const team = (await ali.call('POST', '/api/chats', { type: 'group', title: 'Team
 const hey = (await ali.call('POST', `/api/chats/${team.id}/messages`, { text: '@google look' })).message;
 assert.deepEqual(hey.mentions, [saraId], 'a mention in a group');
 
+// A send repeated after its answer was lost makes one message, not two.
+const once = { text: `once ${Date.now()}`, clientId: 'c-retry-test-001' };
+const m1 = (await ali.call('POST', `/api/chats/${dm}/messages`, once)).message;
+const m2 = (await ali.call('POST', `/api/chats/${dm}/messages`, once)).message;
+assert.equal(m2.id, m1.id, 'the same send twice');
+assert.equal((await sara.call('GET', `/api/chats/${dm}/messages?limit=100`)).messages.filter((m) => m.text === once.text).length, 1);
+const other = (await sara.call('POST', `/api/chats/${dm}/messages`, once)).message;
+assert.notEqual(other.id, m1.id, 'the id is per sender');
+
 console.log('STORAGE TEST PASSED');

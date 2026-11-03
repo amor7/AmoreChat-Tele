@@ -514,6 +514,11 @@ const migrations = [
   );
   ${RESERVED_NAMES.map((n) => `INSERT OR IGNORE INTO reserved_names (handle, created_at) VALUES ('${n}', ${Date.now()});`).join('\n')}
   `,
+  // v22: a send the client repeats (no answer came) gives back the first one instead of a copy
+  `
+  ALTER TABLE messages ADD COLUMN client_id TEXT;
+  CREATE UNIQUE INDEX messages_client ON messages (chat_id, sender_id, client_id) WHERE client_id IS NOT NULL;
+  `,
 ];
 
 const current = db.prepare('PRAGMA user_version').get().user_version;

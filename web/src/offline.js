@@ -68,8 +68,11 @@ export async function loadOutbox() {
 }
 const saveOutbox = () => put(key('outbox'), useStore.getState().outbox);
 
-export async function enqueue(chatId, text, replyTo = null) {
-  const item = { tmpId: `tmp-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, chatId, text, replyTo, createdAt: Date.now(), error: null };
+// One id per message the user sends, kept through every retry: the server makes it only once.
+export const newClientId = () => `c${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`;
+
+export async function enqueue(chatId, text, replyTo = null, clientId = newClientId()) {
+  const item = { tmpId: `tmp-${clientId}`, clientId, chatId, text, replyTo, createdAt: Date.now(), error: null };
   useStore.setState((s) => ({ outbox: [...s.outbox, item] }));
   await saveOutbox();
   return item;
@@ -88,7 +91,7 @@ export async function flushOutbox() {
     for (const item of [...useStore.getState().outbox]) {
       if (item.error) continue;
       try {
-        const { message } = await api('POST', `/chats/${item.chatId}/messages`, { text: item.text, replyTo: item.replyTo });
+        const { message } = await api('POST', `/chats/${item.chatId}/messages`, { text: item.text, replyTo: item.replyTo, clientId: item.clientId });
         useStore.getState().addMessage(message);
         await dropFromOutbox(item.tmpId);
       } catch (e) {

@@ -155,9 +155,15 @@ export default async function messageRoutes(app) {
 
   app.post('/api/chats/:id/messages', async (req) => {
     const { chat, member } = requireChat(req, req.params.id);
+    const b = req.body || {};
+    // The same send again (its answer was lost on a weak link): the message it already made.
+    const clientId = /^[A-Za-z0-9_-]{8,64}$/.test(b.clientId || '') ? b.clientId : null;
+    if (clientId) {
+      const seen = get('SELECT id FROM messages WHERE chat_id = ? AND sender_id = ? AND client_id = ?', chat.id, req.user.id, clientId);
+      if (seen) return { message: loadMessage(seen.id) };
+    }
     assertCanPost(req.user, chat, member);
 
-    const b = req.body || {};
     const text = String(b.text || '').trim();
     if (text.length > MAX_TEXT) fail(400, `متن پیام حداکثر ${MAX_TEXT} کاراکتر است`);
 
@@ -180,7 +186,7 @@ export default async function messageRoutes(app) {
       if (r) replyTo = r.id;
     }
 
-    const msg = postMessage({ chatId: chat.id, senderId: req.user.id, type, text, fileId, replyTo });
+    const msg = postMessage({ chatId: chat.id, senderId: req.user.id, type, text, fileId, replyTo, clientId });
     if (chat.is_emergency) toAll('emergency', msg);
     return { message: msg };
   });
