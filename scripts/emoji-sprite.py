@@ -38,6 +38,10 @@ if 'flags' not in wanted['groups']:
     )
     wanted['emoji'] += [[''.join(chr(int(c, 16)) for c in e['unified'].split('-')), 'flags'] for e in flags]
 
+# Left out of the picker by the owner's choice.
+LEFT_OUT = {key('🏳️‍🌈'), key('🏳️‍⚧️'), key('⚧️')}
+wanted['emoji'] = [(ch, group) for ch, group in wanted['emoji'] if key(ch) not in LEFT_OUT]
+
 found = [(ch, group) for ch, group in wanted['emoji'] if key(ch) in images]
 missing = [ch for ch, _ in wanted['emoji'] if key(ch) not in images]
 cols = math.ceil(math.sqrt(len(found)))
