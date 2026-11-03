@@ -172,7 +172,7 @@ select:focus {
 .emoji-picker {
   position: absolute;
   bottom: 52px;
-  inset-inline-end: -40px;
+  inset-inline-end: 0;
   width: 340px;
   max-width: calc(100vw - 24px);
   height: 360px;
