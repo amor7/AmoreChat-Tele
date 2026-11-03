@@ -1,7 +1,7 @@
 // Share links as sellers write them, WireGuard files, and long pasted text staying fast.
 // Usage: node server/test/uri.test.mjs
 import assert from 'node:assert/strict';
-import { normalizeProxyLink, outboundFromConfig } from '../src/tele/uri.js';
+import { normalizeProxyLink, outboundFromConfig, detectProtocol, parseMtproto, nameOfConfig } from '../src/tele/uri.js';
 
 const cases = [
   ['socks5://203.0.113.1:1080@user:pass', 'socks5://user:pass@203.0.113.1:1080'],
@@ -55,4 +55,24 @@ try {
   /* incomplete: refused, quickly */
 }
 assert.ok(Date.now() - t < 1000, `slow on long input: ${Date.now() - t} ms`);
+// MTProto links: never read as an HTTP proxy at t.me.
+const secret = 'ee' + '0123456789abcdef'.repeat(2) + '6578616d706c652e636f6d';
+for (const link of [
+  `https://t.me/proxy?server=proxy.example.com&port=443&secret=${secret}`,
+  `t.me/proxy?server=proxy.example.com&port=443&secret=${secret}`,
+  `tg://proxy?server=proxy.example.com&port=443&secret=${secret}`,
+]) {
+  assert.equal(detectProtocol(link), 'mtproto', link);
+  const o = outboundFromConfig(link, null, 'proxy-1');
+  assert.deepEqual([o.type, o.server, o.port, o.secret], ['mtproto', 'proxy.example.com', 443, secret], link);
+}
+// Saved as http before: still MTProto.
+assert.equal(outboundFromConfig(`https://t.me/proxy?server=proxy.example.com&port=443&secret=${secret}`, 'http', 't').type, 'mtproto');
+assert.equal(parseMtproto('https://t.me/proxy?server=203.0.113.5&port=443&secret=eeExampleOnlyBase64urlSecret_-').secret, 'eeExampleOnlyBase64urlSecret_-', 'base64url secrets');
+assert.equal(nameOfConfig(`tg://proxy?server=proxy.example.com&port=443&secret=${secret}`), 'MTProto proxy.example.com');
+for (const broken of ['https://t.me/proxy?server=proxy.example.com&port=0&secret=' + secret, 'https://t.me/proxy?port=443&secret=' + secret, 'https://t.me/proxy?server=proxy.example.com&port=443&secret=x']) {
+  assert.throws(() => outboundFromConfig(broken, null, 't'), /MTProto/, broken);
+}
+assert.equal(detectProtocol('https://user:pass@proxy.example.com:443'), 'http', 'plain HTTPS proxies stay HTTP');
+
 console.log('uri: all checks passed');

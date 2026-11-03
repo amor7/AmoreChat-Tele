@@ -8,8 +8,8 @@ import path from 'node:path';
 import { spawn, execFileSync } from 'node:child_process';
 import { DATA_DIR } from '../db.js';
 import { getProxy, selectActiveProxy, getRoutePolicy, recordHealth, listProxies } from './proxies.js';
-import { outboundFromConfig } from './uri.js';
-import { pinProxyAddresses, setResolveCache } from './resolve.js';
+import { outboundFromConfig, parseMtproto, isMtprotoLink } from './uri.js';
+import { pinProxyAddresses, setResolveCache, resolveProxyHost } from './resolve.js';
 import { ovpnState, ovpnError, syncOvpn } from './ovpn.js';
 
 const EGRESS_DIR = path.join(DATA_DIR, 'tele-egress');
@@ -23,6 +23,20 @@ const LOCAL_SOCKS_PORT = Number(process.env.TELE_SOCKS_PORT || 17890);
 let child = null;
 let currentProxyId = null;
 let lastError = '';
+// While the active proxy is MTProto: { server, port, secret }. TDLib talks to it itself; no sing-box.
+let mtproto = null;
+export const isMtprotoProxy = (row) => row?.protocol === 'mtproto' || isMtprotoLink(row?.config);
+
+// Told when TDLib has to go another way (MTProto ↔ the local tunnel), so open clients switch too.
+const changeListeners = new Set();
+export const onEgressChange = (fn) => changeListeners.add(fn);
+const announce = (ep) => {
+  for (const fn of changeListeners) Promise.resolve().then(() => fn(ep)).catch(() => {});
+};
+// accounts.js gives a check through an open Telegram connection (TDLib's own test of the proxy).
+let mtprotoTester = null;
+export const setMtprotoTester = (fn) => (mtprotoTester = fn);
+const proxyDns = () => String(getRoutePolicy().dns || '').split(',').filter(Boolean)[0] || '';
 
 // sing-box colors its log lines; keep the text only.
 // eslint-disable-next-line no-control-regex
@@ -126,7 +140,8 @@ export function egressStatus() {
   const policy = getRoutePolicy();
   const bin = findSingBox();
   return {
-    running: !!(child && !child.killed),
+    running: !!(child && !child.killed) || !!mtproto,
+    kind: mtproto ? 'mtproto' : 'tunnel',
     proxyId: currentProxyId,
     localSocks: `socks5://${LOCAL_SOCKS_HOST}:${LOCAL_SOCKS_PORT}`,
     lastError: lastError || null,
@@ -174,6 +189,7 @@ async function stopNow() {
   const proc = child;
   child = null;
   currentProxyId = null;
+  mtproto = null;
   await killProc(proc);
   fs.rmSync(PID_PATH, { force: true });
 }
@@ -273,9 +289,31 @@ export const ensureEgress = () =>
       lastError = 'هیچ پروکسی سالمی نیست';
       throw Object.assign(new Error('هیچ پروکسی سالمی برای تلگرام در دسترس نیست'), { statusCode: 503 });
     }
+    if (isMtprotoProxy(proxy)) {
+      if (mtproto && currentProxyId === proxy.id) return { mtproto, proxyId: proxy.id };
+      await stopNow();
+      ensureDir();
+      let mt;
+      try {
+        mt = parseMtproto(proxy.config);
+      } catch (e) {
+        lastError = e.message;
+        recordHealth(proxy.id, { ok: false, error: e.message });
+        throw e;
+      }
+      // A shutdown can take DNS away: the IP from the domestic resolvers, or the last one known.
+      mt = { ...mt, server: (await resolveProxyHost(mt.server, proxyDns())) || mt.server };
+      mtproto = mt;
+      currentProxyId = proxy.id;
+      lastError = '';
+      const ep = { mtproto: mt, proxyId: proxy.id };
+      announce(ep);
+      return ep;
+    }
     if (child && !child.killed && currentProxyId === proxy.id) {
       return { host: LOCAL_SOCKS_HOST, port: LOCAL_SOCKS_PORT, proxyId: proxy.id };
     }
+    const fromMtproto = !!mtproto;
     await stopNow();
     ensureDir();
     const bin = findSingBox();
@@ -315,7 +353,9 @@ export const ensureEgress = () =>
     currentProxyId = proxy.id;
     lastError = '';
     writePrivate(PID_PATH, String(child.pid));
-    return { host: LOCAL_SOCKS_HOST, port: LOCAL_SOCKS_PORT, proxyId: proxy.id };
+    const ep = { host: LOCAL_SOCKS_HOST, port: LOCAL_SOCKS_PORT, proxyId: proxy.id };
+    if (fromMtproto) announce(ep);
+    return ep;
   }).catch((e) => {
     // The tunnel is not there (no healthy proxy, Tele off, sing-box failed).
     e.egress = true;
@@ -403,9 +443,43 @@ function viaSocks(port, host, dport, timeoutMs = 8000) {
  * Health probe: a separate sing-box with this proxy only, then a real request to a Telegram data
  * center through it. The latency is the time until Telegram answers.
  */
+// MTProto: TDLib's own test through an open Telegram connection when there is one; else whether
+// the proxy server answers at all.
+async function probeMtproto(row) {
+  let mt;
+  try {
+    mt = parseMtproto(row.config);
+  } catch (e) {
+    return recordHealth(row.id, { ok: false, error: e.message });
+  }
+  const ip = await resolveProxyHost(mt.server, proxyDns());
+  if (!ip) return recordHealth(row.id, { ok: false, error: `آدرس ${mt.server} پیدا نشد (DNS)` });
+  if (mtprotoTester) {
+    try {
+      const ms = await mtprotoTester({ ...mt, server: ip });
+      if (ms != null) return recordHealth(row.id, { ok: true, latencyMs: ms });
+    } catch (e) {
+      return recordHealth(row.id, { ok: false, error: `تلگرام از این پروکسی جواب نداد: ${plain(e.message)}`.slice(0, 300) });
+    }
+  }
+  const t0 = Date.now();
+  try {
+    await new Promise((resolve, reject) => {
+      const s = net.createConnection({ host: ip, port: mt.port });
+      const timer = setTimeout(() => (s.destroy(), reject(new Error('timeout'))), 8000);
+      s.on('connect', () => (clearTimeout(timer), s.destroy(), resolve()));
+      s.on('error', (e) => (clearTimeout(timer), reject(e)));
+    });
+    return recordHealth(row.id, { ok: true, latencyMs: Date.now() - t0 });
+  } catch (e) {
+    return recordHealth(row.id, { ok: false, error: `سرور پروکسی جواب نداد: ${plain(e.message)}` });
+  }
+}
+
 export async function probeViaEgress(proxyId) {
   const row = getProxy(proxyId);
   if (!row) throw Object.assign(new Error('پروکسی پیدا نشد'), { statusCode: 404 });
+  if (isMtprotoProxy(row)) return probeMtproto(row);
   const bin = findSingBox();
   if (!bin) return recordHealth(row.id, { ok: false, error: 'sing-box نصب نیست' });
   if (row.protocol === 'openvpn') {
