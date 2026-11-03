@@ -186,6 +186,12 @@ export default async function storageRoutes(app) {
   app.post('/api/admin/storage/compact', async (req) => {
     if (req.user.role !== 'owner') fail(403, 'فقط مالک');
     const before = fs.statSync(path.join(DATA_DIR, 'amorechat.db')).size;
+    // VACUUM writes a full copy of the database first: without that much free space it fails
+    // halfway, and the server answers nobody while it runs (so not for a few kilobytes).
+    const free = get('PRAGMA freelist_count').freelist_count * get('PRAGMA page_size').page_size;
+    if (free < 1024 * 1024) return { saved: 0, nothingToDo: true };
+    const disk = fs.statfsSync(DATA_DIR);
+    if (disk.bavail * disk.bsize < before * 1.2) fail(507, `برای فشرده‌سازی حدود ${Math.ceil((before * 1.2) / 1048576)} مگابایت فضای خالی لازم است؛ اول چند فایل حذف کنید`);
     db.exec('VACUUM');
     const after = fs.statSync(path.join(DATA_DIR, 'amorechat.db')).size;
     audit(req.user.id, 'storage.compact', '', { saved: before - after });

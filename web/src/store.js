@@ -258,11 +258,16 @@ export const useStore = create((set, get) => ({
   setTyping({ chatId, userId, name }) {
     set((s) => ({ typing: { ...s.typing, [chatId]: { ...s.typing[chatId], [userId]: { name, until: Date.now() + 4000 } } } }));
   },
-  setPresence({ userId, online, lastSeen }) {
+  // `lastSeenHidden`: that user hides it from us (or we hide ours); `recently` stands in for it.
+  setPresence({ userId, online, lastSeen, lastSeenHidden, recently }) {
     set((s) => {
       const chats = { ...s.chats };
       for (const c of Object.values(chats)) {
-        if (c.peer?.id === userId) chats[c.id] = { ...c, peer: { ...c.peer, online, lastSeen: lastSeen ?? c.peer.lastSeen } };
+        if (c.peer?.id !== userId) continue;
+        const peer = lastSeenHidden
+          ? { ...c.peer, online: false, lastSeen: null, lastSeenHidden: true, recently }
+          : { ...c.peer, online, lastSeen: lastSeen ?? c.peer.lastSeen, lastSeenHidden: false };
+        chats[c.id] = { ...c, peer };
       }
       return { online: { ...s.online, [userId]: online }, chats };
     });

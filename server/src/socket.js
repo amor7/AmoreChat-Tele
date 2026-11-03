@@ -3,6 +3,8 @@ import { get, all, run, now } from './db.js';
 import { userFromToken, SESSION_COOKIE } from './auth.js';
 import { setIO, online } from './realtime.js';
 import { isBanned, handshakeIp } from './secwatch.js';
+import { presenceAudience } from './presence.js';
+import { overBurst } from './limits.js';
 
 export function setupSocket(app) {
   const io = new Server(app.server, {
@@ -35,6 +37,12 @@ export function setupSocket(app) {
     next();
   });
 
+  // Only people who share a chat with the user and may see it (presence.js), never everyone.
+  const presenceTo = (uid, event) => {
+    const rooms = presenceAudience(uid).map((id) => `user:${id}`);
+    if (rooms.length) io.to(rooms).emit('presence', event);
+  };
+
   io.on('connection', (socket) => {
     const uid = socket.data.user.id;
     socket.join(`user:${uid}`);
@@ -46,10 +54,11 @@ export function setupSocket(app) {
 
     const count = (online.get(uid) || 0) + 1;
     online.set(uid, count);
-    if (count === 1) io.emit('presence', { userId: uid, online: true });
+    if (count === 1) presenceTo(uid, { userId: uid, online: true });
 
     socket.on('typing', (data) => {
       const chatId = Number(data?.chatId);
+      if (overBurst(uid, 'typing', chatId)) return;
       // Channels: "X is typing" would reveal who the admins are.
       if (socket.rooms.has(`chat:${chatId}`) && get('SELECT type FROM chats WHERE id = ?', chatId)?.type !== 'channel') {
         socket.to(`chat:${chatId}`).emit('typing', { chatId, userId: uid, name: socket.data.user.name });
@@ -65,7 +74,7 @@ export function setupSocket(app) {
       online.delete(uid);
       const t = now();
       run('UPDATE users SET last_seen = ? WHERE id = ?', t, uid);
-      io.emit('presence', { userId: uid, online: false, lastSeen: t });
+      presenceTo(uid, { userId: uid, online: false, lastSeen: t });
     });
   });
 

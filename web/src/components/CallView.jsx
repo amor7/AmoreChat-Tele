@@ -7,7 +7,7 @@ import Ping from './Ping';
 import { VolumeButton } from './VoiceTools';
 import { ShareDialog } from './Voice';
 import { ChevronDown, Mic, MicOff, Video as VideoIcon, VideoOff, PhoneOff, SwitchCamera, ScreenShare, ScreenShareOff, Volume2 } from 'lucide-react';
-import { setMic, setCamera, flipCamera, hangUp, canShareScreen, startScreenShare, stopScreenShare, enableAudioPlayback } from '../rtc';
+import { setMic, setCamera, flipCamera, hangUp, canShareScreen, stopScreenShare, enableAudioPlayback } from '../rtc';
 
 const run = (fn) =>
   Promise.resolve()

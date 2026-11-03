@@ -4,7 +4,8 @@ import { getSetting } from '../settings.js';
 import { hasSitePerm, hasChatPerm, cleanPerms, CHAT_PERMS } from '../perms.js';
 import { randomCode, publicUser } from '../auth.js';
 import { spendLookup, knowsUser } from '../lookup.js';
-import { isOnline, toChat, toUser, toAll } from '../realtime.js';
+import { toChat, toUser, toAll } from '../realtime.js';
+import { presenceOf } from '../presence.js';
 import {
   fail,
   getChat,
@@ -53,7 +54,7 @@ function outranks(actor, actorMember, targetMember) {
   return true;
 }
 
-function membersOf(chatId) {
+function membersOf(chatId, viewer, known) {
   return all(
     `SELECT u.*, cm.role AS chat_role, cm.perms AS chat_perms, cm.muted_until
      FROM chat_members cm JOIN users u ON u.id = cm.user_id
@@ -63,7 +64,7 @@ function membersOf(chatId) {
     chatId,
   ).map((u) => ({
     ...publicUser(u),
-    online: isOnline(u.id),
+    ...presenceOf(viewer, u, known),
     chatRole: u.chat_role,
     chatPerms: parseJSON(u.chat_perms, []),
     mutedUntil: u.muted_until,
@@ -182,7 +183,7 @@ export default async function chatRoutes(app) {
       members:
         chat.type === 'saved'
           ? []
-          : membersOf(chat.id).filter(
+          : membersOf(chat.id, req.user, chat.type !== 'channel').filter(
               (u) => !membersHidden(chat) || seesAll || u.id === req.user.id || (chat.type === 'group' && u.chatRole !== 'member'),
             ),
       membersHidden: membersHidden(chat) && !seesAll,

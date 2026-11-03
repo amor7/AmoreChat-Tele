@@ -1,5 +1,6 @@
 import { get, all, run, now, tx, parseJSON } from './db.js';
-import { toChat, toChatExcept, toUser, joinChat, leaveChat, isOnline } from './realtime.js';
+import { toChat, toChatExcept, toUser, joinChat, leaveChat } from './realtime.js';
+import { presenceOf } from './presence.js';
 import { hasSitePerm } from './perms.js';
 import { notifyMessage, pushTo } from './push.js';
 import { kickFromVoice } from './voice.js';
@@ -244,14 +245,15 @@ function formatSummary(c, userId) {
   };
   if (c.type === 'dm') {
     const p = get(
-      `SELECT u.id, u.username, u.display_name, u.avatar_file_id, u.last_seen
+      `SELECT u.id, u.username, u.display_name, u.avatar_file_id, u.last_seen, u.last_seen_privacy
        FROM chat_members cm JOIN users u ON u.id = cm.user_id
        WHERE cm.chat_id = ? AND cm.user_id != ?`,
       c.id,
       userId,
     );
     if (p) {
-      out.peer = { id: p.id, username: p.username, displayName: p.display_name, avatar: p.avatar_file_id, lastSeen: p.last_seen, online: isOnline(p.id) };
+      const viewer = get('SELECT id, last_seen_privacy FROM users WHERE id = ?', userId);
+      out.peer = { id: p.id, username: p.username, displayName: p.display_name, avatar: p.avatar_file_id, ...presenceOf(viewer, p, true) };
       out.title = p.display_name;
       out.avatar = p.avatar_file_id;
     }

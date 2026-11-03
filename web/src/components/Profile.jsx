@@ -101,6 +101,19 @@ export default function Profile({ onClose }) {
 
       <Appearance />
 
+      <h4>حریم خصوصی</h4>
+      <label>
+        چه کسانی «آنلاین» و «آخرین بازدید» مرا ببینند؟
+        <select value={me.lastSeenPrivacy || 'everyone'} onChange={(e) => save({ lastSeenPrivacy: e.target.value })}>
+          <option value="everyone">همه</option>
+          <option value="contacts">فقط هم‌گفتگوها (کسانی که با من گروه یا گفتگوی مشترک دارند)</option>
+          <option value="nobody">هیچ‌کس</option>
+        </select>
+      </label>
+      <p className="muted tiny">
+        مثل تلگرام: اگر آن را از کسی پنهان کنید، شما هم وضعیت او را نمی‌بینید و به‌جایش «اخیراً آنلاین بوده» نشان داده می‌شود. عکس پروفایل همیشه برای همه دیده می‌شود.
+      </p>
+
       <h4>مصرف اینترنت</h4>
       <label className="check">
         <input type="checkbox" checked={prefs.dataSaver} onChange={(e) => setPrefs({ dataSaver: e.target.checked })} />

@@ -881,14 +881,14 @@ async function part2() {
   assert.equal(r.http, 400, 'Bob (no Telegram) searched');
 
   log('The admin closes Telegram for Alice: her connection closes; reopened, it works with no new login');
-  ok(await owner.call('PATCH', '/api/admin/tele/access', { mode: 'deny', add: [aliceAcc.userId] }), 'close for alice');
+  ok(await owner.call('PATCH', '/api/admin/access/tele', { mode: 'deny', add: [aliceAcc.userId] }), 'close for alice');
   r = ok(await alice.call('GET', '/api/tele/status'), 'status');
   assert.equal(r.access, false);
   r = await alice.call('GET', `/api/tele/dialogs/${pd.id}/messages`);
   assert.equal(r.http, 403);
   r = ok(await owner.call('GET', '/api/admin/tele/accounts'), 'accounts');
   assert.equal(r.accounts.find((a) => a.username === 'alice').live, false, 'still connected to Telegram');
-  ok(await owner.call('PATCH', '/api/admin/tele/access', { mode: 'all', remove: [aliceAcc.userId] }), 'open again');
+  ok(await owner.call('PATCH', '/api/admin/access/tele', { mode: 'all', remove: [aliceAcc.userId] }), 'open again');
   r = ok(await alice.call('GET', `/api/tele/dialogs/${pd.id}/messages`), 'messages after reopening');
   assert.ok(r.messages.some((m) => m.text === helloText) && !r.notice, JSON.stringify(r.notice));
   assert.equal(ok(await alice.call('GET', '/api/tele/status'), 'status').account.status, 'connected');
@@ -1157,7 +1157,6 @@ async function part3() {
     return;
   }
   const DATA_DIR = fs.mkdtempSync(path.join(os.tmpdir(), 'tele-e2e-mirror-'));
-  const textOf = (m) => m.content?.text?.text || m.content?.caption?.text || '';
   log('Part 3: the owner connects the spare account; the bot posts in its channel');
   const { owner, alice, bob } = await setupApp({ DATA_DIR });
   await addProxies(owner);

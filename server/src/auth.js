@@ -89,10 +89,9 @@ export function publicUser(u) {
     bio: u.bio,
     avatar: u.avatar_file_id,
     role: u.role,
-    lastSeen: u.last_seen,
   };
 }
 
 export function selfUser(u) {
-  return { ...publicUser(u), adminPerms: JSON.parse(u.admin_perms || '[]'), limits: effectiveLimits(u), twoFactor: !!u.totp_enabled, mirrorFiles: accessAllowed('mirror_files', u) };
+  return { ...publicUser(u), adminPerms: JSON.parse(u.admin_perms || '[]'), limits: effectiveLimits(u), twoFactor: !!u.totp_enabled, lastSeenPrivacy: u.last_seen_privacy || 'everyone', mirrorFiles: accessAllowed('mirror_files', u) };
 }

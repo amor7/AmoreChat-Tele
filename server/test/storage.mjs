@@ -201,13 +201,14 @@ assert.equal((await owner.call('POST', '/api/admin/handles', { handle: 'my_brand
 assert.equal((await ali.call('POST', '/api/chats', { type: 'group', title: 'x', isPublic: true, handle: 'my_brand' })).status, 409);
 assert.equal((await owner.call('DELETE', '/api/admin/handles/my_brand')).status, 200);
 assert.equal((await ali.call('POST', '/api/chats', { type: 'group', title: 'x', isPublic: true, handle: 'my_brand' })).status, 200, 'free again');
-// A gift replaces the username; the old one is free.
+// A gift replaces the username; the old one is held back so nobody else can pass for her.
 r = await owner.call('POST', '/api/admin/handles/google/gift', { username: 'sara' });
 assert.equal(r.status, 200, JSON.stringify(r));
 assert.equal((await sara.call('GET', '/api/auth/me')).user.username, 'google', 'stays signed in');
 const again = client();
 assert.equal((await again.call('POST', '/api/auth/login', { username: 'google', password: PASS })).status, 200);
 assert.equal((await again.call('POST', '/api/auth/login', { username: 'sara', password: PASS })).status >= 400, true);
+assert.ok((await owner.call('GET', '/api/admin/handles?q=sara')).names.some((n) => n.handle === 'sara'), 'old name not reserved');
 assert.equal((await owner.call('POST', '/api/admin/handles/google/gift', { username: 'ali' })).status, 404, 'not twice');
 
 // A channel: no list of who saw a post, and no calling people out.

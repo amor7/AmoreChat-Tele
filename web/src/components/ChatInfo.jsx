@@ -408,7 +408,7 @@ function MemberRow({ m, chat, me, isOwner, run }) {
           <b>
             {m.displayName} {self && '(شما)'}
           </b>
-          <small>{online ? 'آنلاین' : formatLastSeen(m.lastSeen)}</small>
+          <small>{online ? 'آنلاین' : formatLastSeen(m.lastSeen, m)}</small>
         </span>
         {muted && <VolumeX size={16} aria-label="بی‌صدا" />}
         {m.chatRole !== 'member' && <span className="role-badge">{ROLE_LABELS[m.chatRole]}</span>}
@@ -530,7 +530,7 @@ function PeerProfile({ chat, onClose }) {
         <div className="muted" dir="ltr">
           @{u.username}
         </div>
-        <p className="muted">{online ? 'آنلاین' : formatLastSeen(u.lastSeen)}</p>
+        <p className="muted">{online ? 'آنلاین' : formatLastSeen(u.lastSeen, u)}</p>
         {user?.bio && <p>{user.bio}</p>}
         {user?.role && user.role !== 'user' && <span className="role-badge">{ROLE_LABELS[user.role]} سرور</span>}
       </div>

@@ -69,6 +69,8 @@ public class MainActivity extends Activity {
     private final List<String> pendingJs = new ArrayList<>();
     private final Map<String, Uri> shared = new ConcurrentHashMap<>();
     private volatile X509Certificate setupCa;
+    /** The page now in the WebView (the bridge runs off the UI thread, where web.getUrl() can't be read). */
+    private volatile String pageUrl = "";
     private String[] pendingDownload;
     private android.widget.FrameLayout root;
     private android.view.View lockCover;
@@ -451,6 +453,7 @@ public class MainActivity extends Activity {
         @Override
         public void onPageStarted(WebView view, String url, Bitmap favicon) {
             pageReady = false;
+            pageUrl = url == null ? "" : url;
         }
 
         @Override
@@ -559,6 +562,33 @@ public class MainActivity extends Activity {
 
     // ---------- JS bridge: window.AmoreAndroid ----------
 
+    // The bridge is there for whatever page is open, so each server's page could reach the others.
+    // Methods that pick or add a server work only on the app's own pages (setup / offline); a server's
+    // page may only act on itself, and removing another server needs a confirmation from the app.
+    private boolean onOwnPage() {
+        return pageUrl.startsWith("file:///android_asset/");
+    }
+
+    private boolean onCurrentServer() {
+        String cur = Prefs.server(this);
+        return cur != null && Uri.parse(pageUrl).getHost() != null && Uri.parse(pageUrl).getHost().equals(Uri.parse(cur).getHost());
+    }
+
+    private void doRemoveServer(String url) {
+        forgetServer(url);
+        Prefs.removeServer(this, url);
+        Notifs.cancelAllMessages(this, url);
+        NotifyService.kick(this);
+        String next = Prefs.server(this);
+        if (next == null) {
+            NotifyService.stop(this);
+            web.clearHistory();
+            web.loadUrl(SETUP_URL);
+        } else {
+            showServer(next);
+        }
+    }
+
     private class Bridge {
         /** Debug builds only (tests): can the app itself reach this URL? */
         @JavascriptInterface
@@ -666,7 +696,7 @@ public class MainActivity extends Activity {
 
         @JavascriptInterface
         public void switchServer(String url) {
-            if (Prefs.find(MainActivity.this, url) == null) return;
+            if (Prefs.find(MainActivity.this, url) == null || !(onOwnPage() || onCurrentServer())) return;
             // A moment later: a menu closing on the page may still step back in its history, which
             // would otherwise undo this navigation (older pages, served from cache, do that).
             runOnUiThread(() -> web.postDelayed(() -> showServer(url), 350));
@@ -675,6 +705,7 @@ public class MainActivity extends Activity {
         /** Add another server (the setup page); the current one stays signed in. */
         @JavascriptInterface
         public void addServer() {
+            if (!(onOwnPage() || onCurrentServer())) return;
             runOnUiThread(() -> web.postDelayed(() -> {
                 pageReady = false;
                 web.loadUrl(SETUP_URL + "?add=1");
@@ -689,19 +720,20 @@ public class MainActivity extends Activity {
 
         @JavascriptInterface
         public void removeServer(String url) {
+            Prefs.Server target = Prefs.find(MainActivity.this, url);
+            if (target == null) return;
+            boolean own = onOwnPage() || (onCurrentServer() && url.equals(Prefs.server(MainActivity.this)));
             runOnUiThread(() -> {
-                forgetServer(url);
-                Prefs.removeServer(MainActivity.this, url);
-                Notifs.cancelAllMessages(MainActivity.this, url);
-                NotifyService.kick(MainActivity.this);
-                String next = Prefs.server(MainActivity.this);
-                if (next == null) {
-                    NotifyService.stop(MainActivity.this);
-                    web.clearHistory();
-                    web.loadUrl(SETUP_URL);
-                } else {
-                    showServer(next);
+                if (own) {
+                    doRemoveServer(url);
+                    return;
                 }
+                // Another server's page asking: only with the user's yes, in the app's own dialog.
+                new android.app.AlertDialog.Builder(MainActivity.this)
+                        .setMessage("«" + target.name + "» از اپ حذف شود؟")
+                        .setPositiveButton("حذف", (d, w) -> doRemoveServer(url))
+                        .setNegativeButton("لغو", null)
+                        .show();
             });
         }
 
@@ -737,19 +769,6 @@ public class MainActivity extends Activity {
                 } catch (Exception ignored) {
                 }
             }));
-        }
-
-        /** Old name: leaves the current server and adds another one. */
-        @JavascriptInterface
-        public void changeServer() {
-            runOnUiThread(() -> {
-                String cur = Prefs.server(MainActivity.this);
-                if (cur != null) Prefs.removeServer(MainActivity.this, cur);
-                NotifyService.kick(MainActivity.this);
-                Trust.verifiedLeaves.clear();
-                web.clearHistory();
-                web.loadUrl(SETUP_URL);
-            });
         }
 
         @JavascriptInterface
@@ -808,11 +827,13 @@ public class MainActivity extends Activity {
 
         @JavascriptInterface
         public void checkServer(String input) {
+            if (!onOwnPage()) return;
             new Thread(() -> setupReply(check(input))).start();
         }
 
         @JavascriptInterface
         public void useServer(String url, boolean withCa) {
+            if (!onOwnPage()) return;
             runOnUiThread(() -> {
                 String pem = null;
                 try {

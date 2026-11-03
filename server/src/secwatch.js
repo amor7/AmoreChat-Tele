@@ -161,9 +161,13 @@ export function handshakeIp(handshake) {
   return chain.at(-1) || '';
 }
 
-// Old records are not needed after a month.
+// Old records are not needed after a month; expired logins and remembered devices go too, and
+// the activity log keeps one year.
 export function pruneSecurity() {
   run('DELETE FROM auth_failures WHERE at < ?', now() - 30 * 86400000);
+  run('DELETE FROM sessions WHERE expires_at < ?', now());
+  run('DELETE FROM trusted_devices WHERE at < ?', now() - 365 * 86400000);
+  run('DELETE FROM audit_log WHERE created_at < ?', now() - 365 * 86400000);
   run('DELETE FROM auth_flags WHERE at < ?', now() - WINDOW_MS);
   run('DELETE FROM ip_bans WHERE expires_at IS NOT NULL AND expires_at < ?', now());
   banCache = null;

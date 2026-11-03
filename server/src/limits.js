@@ -55,3 +55,29 @@ export function effectiveLimits(user) {
     streamFps: o.stream_fps ?? (settingNumber('max_stream_fps') || 30),
   };
 }
+
+// ---------- Flood guard ----------
+// Per user, in memory: enough for anyone typing (and for a phone sending its offline queue at once),
+// not for a script filling a group. Slow mode in a group still applies on top.
+export const BURSTS = { send: [40, 20_000], react: [60, 20_000], typing: [1, 1500] };
+const bursts = new Map(); // "kind:user[:key]" -> recent times
+export function overBurst(userId, kind, key = '', n = 1) {
+  const [max, windowMs] = BURSTS[kind];
+  const id = `${kind}:${userId}:${key}`;
+  const t = now();
+  const recent = (bursts.get(id) || []).filter((x) => x > t - windowMs);
+  if (recent.length + n > max) {
+    bursts.set(id, recent);
+    return true;
+  }
+  for (let i = 0; i < n; i++) recent.push(t);
+  bursts.set(id, recent);
+  return false;
+}
+export function assertBurst(userId, kind, n = 1) {
+  if (overBurst(userId, kind, '', n)) fail(429, 'خیلی سریع ارسال می‌کنید؛ چند ثانیه صبر کنید');
+}
+setInterval(() => {
+  const t = now();
+  for (const [id, times] of bursts) if (!times.length || times.at(-1) < t - 60_000) bursts.delete(id);
+}, 60_000).unref();
