@@ -52,6 +52,7 @@ jobs:
           cat server.log
           docker logs livekit 2>&1 | tail -80
       - uses: actions/upload-artifact@v4
+        continue-on-error: true  # a full artifact quota must not turn a passing run red
         if: always()
         with:
           retention-days: 3
@@ -179,6 +180,7 @@ jobs:
           CODE=$(grep -oP 'SETUP CODE: \K\S+' crowd-server.log)
           node server/test/crowd-e2e.mjs http://localhost:3103 "$CODE" crowd-server.log
       - uses: actions/upload-artifact@v4
+        continue-on-error: true  # a full artifact quota must not turn a passing run red
         if: always()
         with:
           retention-days: 3
@@ -225,6 +227,7 @@ jobs:
           mkdir -p iso-out && docker cp e2e:/e2e/. iso-out/ 2>/dev/null || true
           $DC logs --tail 80
       - uses: actions/upload-artifact@v4
+        continue-on-error: true  # a full artifact quota must not turn a passing run red
         if: always()
         with:
           retention-days: 3

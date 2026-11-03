@@ -66,6 +66,7 @@ jobs:
           fi
           ls -lh android-dist
       - uses: actions/upload-artifact@v4
+        continue-on-error: true  # a full artifact quota must not turn a passing run red
         if: ${{ !inputs.version }}
         with:
           retention-days: 3
@@ -127,6 +128,7 @@ jobs:
         if: always()
         run: cat server-android.log; tail -40 server-android2.log
       - uses: actions/upload-artifact@v4
+        continue-on-error: true  # a full artifact quota must not turn a passing run red
         if: always()
         with:
           retention-days: 3

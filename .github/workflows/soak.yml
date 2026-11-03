@@ -59,6 +59,7 @@ jobs:
         if: always()
         run: cat soak-out/report.md >> "$GITHUB_STEP_SUMMARY" || true
       - uses: actions/upload-artifact@v4
+        continue-on-error: true  # a full artifact quota must not turn a passing run red
         if: always()
         with:
           retention-days: 3
@@ -114,6 +115,7 @@ jobs:
         if: always()
         run: cat soak-android/report.md >> "$GITHUB_STEP_SUMMARY" || true
       - uses: actions/upload-artifact@v4
+        continue-on-error: true  # a full artifact quota must not turn a passing run red
         if: always()
         with:
           retention-days: 3
