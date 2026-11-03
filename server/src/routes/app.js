@@ -3,6 +3,7 @@ import path from 'node:path';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { addStream, frame, missedEvents, lastMessageId } from '../push.js';
+import { normalizeIp } from '../secwatch.js';
 import { ringingFor } from '../calls.js';
 import { getSetting } from '../settings.js';
 
@@ -117,7 +118,7 @@ export default async function appRoutes(app) {
       'X-Accel-Buffering': 'no',
     });
     res.write(': connected\n\n');
-    const remove = addStream(req.user.id, req.user.session_id, res);
+    const remove = addStream(req.user.id, req.user.session_id, res, { ip: normalizeIp(req.ip), owner: req.user.role === 'owner' });
     // In one go with addStream, so that no message falls between the two.
     const after = Number(req.headers['last-event-id']);
     if (after > 0) for (const event of missedEvents(req.user.id, after)) res.write(frame(event));

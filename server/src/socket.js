@@ -25,10 +25,13 @@ export function setupSocket(app) {
         return next(new Error('bad origin'));
       }
     }
-    if (isBanned(handshakeIp(socket.handshake))) return next(new Error('banned'));
+    const ip = handshakeIp(socket.handshake);
     const user = userFromToken(app.parseCookie(cookie || '')[SESSION_COOKIE]);
+    // The owner gets through a banned IP, so a wrong ban can be undone from the panel.
+    if (isBanned(ip) && user?.role !== 'owner') return next(new Error('banned'));
     if (!user) return next(new Error('unauthorized'));
-    socket.data.user = { id: user.id, name: user.display_name, sessionId: user.session_id };
+    socket.data.ip = ip;
+    socket.data.user = { id: user.id, name: user.display_name, sessionId: user.session_id, owner: user.role === 'owner' };
     next();
   });
 

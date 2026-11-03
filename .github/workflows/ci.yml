@@ -59,7 +59,7 @@ jobs:
           DATA_DIR=/tmp/hs-pen PORT=3105 node server/src/index.js > server-pen.log 2>&1 &
           for i in $(seq 1 30); do curl -sf http://localhost:3105/healthz && break; sleep 1; done
           CODE=$(grep -oP 'SETUP CODE: \K\S+' server-pen.log)
-          node server/test/pentest.mjs http://127.0.0.1:3105 "$CODE"
+          DATA_DIR=/tmp/hs-pen node server/test/pentest.mjs http://127.0.0.1:3105 "$CODE"
           ! grep "\"level\":50" server-pen.log | grep -v "تماس و ویس‌چت روی این سرور فعال نیست"
       - name: Tele access test (who may use Telegram, checks without Telegram)
         run: |

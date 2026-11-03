@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Installs the `amorechat-update` command for the AmoreChat folder given as $1.
+# Installs the `amorechat-update` and `amorechat-unban` commands for the AmoreChat folder given as $1.
 # Called by install.sh and update.sh; safe to run again.
 set -euo pipefail
 DIR="$(cd "${1:-.}" && pwd)"
@@ -18,6 +18,12 @@ else
 fi
 SCRIPT
 chmod 755 /usr/local/bin/amorechat-update
+# Banned your own IP by mistake: `sudo amorechat-unban` lists bans, then `sudo amorechat-unban <IP>` or `--all`.
+cat > /usr/local/bin/amorechat-unban <<SCRIPT
+#!/usr/bin/env bash
+cd "${DIR}" && exec docker compose exec -T app node server/src/unban-cli.js "\$@"
+SCRIPT
+chmod 755 /usr/local/bin/amorechat-unban
 
 # Updates from the admin panel: the app writes data/update/request, systemd runs
 # deploy/panel-update.sh as root (see there). Only on servers with systemd.

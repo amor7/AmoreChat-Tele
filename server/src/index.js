@@ -8,7 +8,7 @@ import rateLimit from '@fastify/rate-limit';
 import { db, get, all, run, now, DATA_DIR, UPLOAD_DIR } from './db.js';
 import { startSweeper } from './sweeper.js';
 import { mediaReady, onMediaUpdate, resumePendingMedia } from './media.js';
-import { toChat } from './realtime.js';
+import { toChat, disconnectIp } from './realtime.js';
 import { loadMessage } from './chats.js';
 import { hasAnyUser } from './settings.js';
 import { userFromToken, SESSION_COOKIE, randomCode } from './auth.js';
@@ -35,7 +35,7 @@ import { refreshEgress, startHealthLoop, stopEgress } from './tele/egress.js';
 import { startAlertLoop } from './tele/alerts.js';
 import { startMirrorLoop } from './tele/mirror.js';
 import { syncOvpn } from './tele/ovpn.js';
-import { isBanned, pruneSecurity } from './secwatch.js';
+import { isBanned, pruneSecurity, onBan } from './secwatch.js';
 import { startVoiceSync } from './voice.js';
 import { startHealth } from './health.js';
 import { startCertCheck } from './certcheck.js';
@@ -78,9 +78,13 @@ app.addHook('preHandler', async (req, reply) => {
   if (badKeys(req.body) || badKeys(req.query)) return reply.code(400).send({ error: 'درخواست نامعتبر' });
 });
 
-// Banned IPs (admin panel → Security) get nothing but this.
+onBan(disconnectIp);
+
+// Banned IPs (admin panel → Security) get nothing but this. The signed-in owner still gets
+// through, so a wrong ban (or an auto-ban after mistyping a password) can be undone from the panel.
 app.addHook('onRequest', async (req, reply) => {
   if (!isBanned(req.ip)) return;
+  if (userFromToken(req.cookies[SESSION_COOKIE])?.role === 'owner') return;
   return reply.code(403).header('content-type', 'text/plain; charset=utf-8').send('دسترسی از این آی‌پی مسدود شده است.');
 });
 

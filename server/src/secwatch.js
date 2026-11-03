@@ -4,7 +4,9 @@
  *  - many wrong passwords from one IP (with the IP, so it can be banned in the admin panel)
  *  - an admin / owner logs in from an IP they never used before
  *  - roles or admin permissions change, an account gets locked, an admin resets a password
- * Banned IPs get no answer from the server at all (except a short "banned" page).
+ * Banned IPs get no answer from the server at all (except a short "banned" page), and their open
+ * connections are dropped. The signed-in owner is never shut out, so a wrong ban can be undone
+ * from the panel; on the server, `sudo amorechat-unban` (unban-cli.js) works too.
  */
 import net from 'node:net';
 import { get, all, run, now } from './db.js';
@@ -53,13 +55,19 @@ export function normalizeIp(ip) {
   if (s.startsWith('::ffff:') && net.isIPv4(s.slice(7))) s = s.slice(7);
   return net.isIP(s) ? s : '';
 }
+// Read again every few seconds, so `amorechat-unban` on the server takes effect without a restart.
 let banCache = null;
+let banCacheAt = 0;
 function bans() {
-  if (!banCache) {
+  if (!banCache || now() - banCacheAt > 5000) {
     banCache = new Map(all('SELECT ip, expires_at FROM ip_bans').map((b) => [b.ip, b.expires_at]));
+    banCacheAt = now();
   }
   return banCache;
 }
+// Called with each newly banned IP (index.js drops its live connections).
+const banHooks = [];
+export const onBan = (fn) => banHooks.push(fn);
 export function isBanned(ip) {
   const key = normalizeIp(ip);
   if (!key) return false;
@@ -81,6 +89,11 @@ export function banIp(ip, { by = null, reason = '', minutes = 0 } = {}) {
     key, String(reason).slice(0, 200), by, now(), minutes > 0 ? now() + minutes * 60000 : null,
   );
   banCache = null;
+  for (const fn of banHooks) {
+    try {
+      fn(key);
+    } catch {}
+  }
   return key;
 }
 export function unbanIp(ip) {

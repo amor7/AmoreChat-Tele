@@ -6,9 +6,9 @@ import { loadMessage } from './chats.js';
 // which is unreachable during international internet shutdowns.
 const streams = new Map(); // userId -> Set({ res, sessionId })
 
-export function addStream(userId, sessionId, res) {
+export function addStream(userId, sessionId, res, { ip = '', owner = false } = {}) {
   if (!streams.has(userId)) streams.set(userId, new Set());
-  const entry = { res, sessionId };
+  const entry = { res, sessionId, ip, owner };
   streams.get(userId).add(entry);
   return () => {
     streams.get(userId)?.delete(entry);
@@ -24,11 +24,11 @@ export function pushTo(userIds, event) {
   for (const id of userIds) for (const s of streams.get(id) || []) s.res.write(data);
 }
 
-// Logged-out devices and banned users lose their stream too.
-export function closeStreams({ userId, sessionIds } = {}) {
+// Logged-out devices, banned users and banned IPs (except the owner's) lose their stream too.
+export function closeStreams({ userId, sessionIds, ip } = {}) {
   for (const [uid, set] of streams) {
     for (const s of set) {
-      if (uid === userId || sessionIds?.includes(s.sessionId)) s.res.end();
+      if (uid === userId || sessionIds?.includes(s.sessionId) || (ip && s.ip === ip && !s.owner)) s.res.end();
     }
   }
 }
