@@ -121,6 +121,11 @@ app.addHook('onSend', async (req, reply) => {
 });
 
 app.setErrorHandler((err, req, reply) => {
+  // The sender went away mid-upload (a dropped connection): theirs, not the server's.
+  if (err.code === 'ERR_STREAM_PREMATURE_CLOSE' || req.raw.aborted) {
+    req.log.warn({ url: req.url }, 'request cut short by the client');
+    return reply.code(400).send({ error: 'ارسال قطع شد' });
+  }
   const code = err.statusCode || 500;
   if (code >= 500) req.log.error(err);
   // `expose`: a 5xx whose message is meant for the user (e.g. Telegram/TDLib refused the login).

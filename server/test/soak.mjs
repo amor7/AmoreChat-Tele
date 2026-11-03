@@ -372,6 +372,7 @@ const light = {
     if (seen !== 1) throw new Error(`queued message delivered ${seen} times`);
   },
   async openByLink(u) {
+    if (u === owner) throw new Error('SKIP'); // the channel is the owner's
     // The direct link, the way someone opens it from a message elsewhere: a full page load.
     await u.page.goto(`${BASE}/@soak_news`, { waitUntil: 'domcontentloaded' });
     await wait(u.page, () => document.querySelector('.modal .btn.primary'), null, 'channel from its link');

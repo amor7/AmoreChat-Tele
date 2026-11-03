@@ -87,7 +87,7 @@ export async function playMessage(m) {
   let before = '';
   for (let page = 0; page < MAX_PAGES; page++) {
     const r = await api('GET', `/chats/${m.chatId}/media?kind=music${before}`).catch(() => null);
-    if (!r?.messages.length) break;
+    if (!r?.messages?.length) break;
     found.push(...r.messages);
     before = `&before=${r.messages.at(-1).id}`;
   }

@@ -276,15 +276,20 @@ export async function onSpeakChanged({ chatId, canSpeak, text }) {
 }
 
 // ---------- Local controls ----------
+// On a weak link these can time out; say so instead of failing silently.
+const weakLink = (e) => {
+  if (e?.name !== 'NotAllowedError') st().showToast('اتصال ضعیف است؛ دوباره امتحان کنید');
+};
+
 export async function setMic(on) {
-  await room?.localParticipant.setMicrophoneEnabled(on);
+  await room?.localParticipant.setMicrophoneEnabled(on).catch(weakLink);
   refresh();
 }
 
 export async function setCamera(on) {
   if (!room) return;
   const q = QUALITY[Math.min(st().rtc?.streamQuality || 720, 720)];
-  await room.localParticipant.setCameraEnabled(on, { resolution: { width: q.width, height: q.height, frameRate: 24 } });
+  await room.localParticipant.setCameraEnabled(on, { resolution: { width: q.width, height: q.height, frameRate: 24 } }).catch(weakLink);
   refresh();
 }
 
