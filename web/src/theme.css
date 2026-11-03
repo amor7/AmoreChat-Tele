@@ -226,10 +226,15 @@ select:focus {
   padding: 6px;
 }
 .ep-tabs button {
+  /* Every group fits on one line, flags included, whatever the width. */
+  flex: 1 1 0;
+  min-width: 0;
+  display: grid;
+  place-items: center;
   border: 0;
   background: none;
   color: var(--muted);
-  padding: 6px;
+  padding: 6px 0;
   border-radius: 10px;
   cursor: pointer;
 }
