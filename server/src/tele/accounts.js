@@ -520,7 +520,7 @@ async function saveData(client) {
 // older addProxy(server, port, enable, type).
 const proxyOf = (ep) =>
   ep.mtproto
-    ? { host: ep.mtproto.server, port: ep.mtproto.port, type: { _: 'proxyTypeMtproto', secret: ep.mtproto.secret } }
+    ? { host: ep.mtproto.server, port: ep.mtproto.port, type: { _: 'proxyTypeMtproto', secret: ep.mtproto.secretHex || ep.mtproto.secret } }
     : { host: ep.host, port: ep.port, type: { _: 'proxyTypeSocks5', username: '', password: '' } };
 async function useProxy(client, ep) {
   const socks = proxyOf(ep);
@@ -563,13 +563,13 @@ onEgressChange(async (ep) => {
 setMtprotoTester(async (mt) => {
   const h = [...live.values()].find((x) => x.client && x.phase === 'ready');
   if (!h) return null;
-  const type = { _: 'proxyTypeMtproto', secret: mt.secret };
+  const type = { _: 'proxyTypeMtproto', secret: mt.secretHex || mt.secret };
   const t0 = Date.now();
   try {
-    await h.client.invoke({ _: 'testProxy', proxy: { _: 'proxy', server: mt.server, port: mt.port, type }, dc_id: 2, timeout: 10 });
+    await h.client.invoke({ _: 'testProxy', proxy: { _: 'proxy', server: mt.server, port: mt.port, type }, dc_id: 2, timeout: 20 });
   } catch (e) {
     if (!/proxy|parameter|field/i.test(String(e?.message || e))) throw e;
-    await h.client.invoke({ _: 'testProxy', server: mt.server, port: mt.port, type, dc_id: 2, timeout: 10 });
+    await h.client.invoke({ _: 'testProxy', server: mt.server, port: mt.port, type, dc_id: 2, timeout: 20 });
   }
   return Date.now() - t0;
 });

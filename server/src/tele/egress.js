@@ -454,14 +454,7 @@ async function probeMtproto(row) {
   }
   const ip = await resolveProxyHost(mt.server, proxyDns());
   if (!ip) return recordHealth(row.id, { ok: false, error: `آدرس ${mt.server} پیدا نشد (DNS)` });
-  if (mtprotoTester) {
-    try {
-      const ms = await mtprotoTester({ ...mt, server: ip });
-      if (ms != null) return recordHealth(row.id, { ok: true, latencyMs: ms });
-    } catch (e) {
-      return recordHealth(row.id, { ok: false, error: `تلگرام از این پروکسی جواب نداد: ${plain(e.message)}`.slice(0, 300) });
-    }
-  }
+  // First whether this server reaches the proxy at all, so the two failures read differently.
   const t0 = Date.now();
   try {
     await new Promise((resolve, reject) => {
@@ -470,9 +463,19 @@ async function probeMtproto(row) {
       s.on('connect', () => (clearTimeout(timer), s.destroy(), resolve()));
       s.on('error', (e) => (clearTimeout(timer), reject(e)));
     });
-    return recordHealth(row.id, { ok: true, latencyMs: Date.now() - t0 });
   } catch (e) {
-    return recordHealth(row.id, { ok: false, error: `سرور پروکسی جواب نداد: ${plain(e.message)}` });
+    return recordHealth(row.id, { ok: false, error: `این سرور به پروکسی نمی‌رسد (${ip}:${mt.port}): ${plain(e.message)}` });
+  }
+  const reached = Date.now() - t0;
+  if (!mtprotoTester) return recordHealth(row.id, { ok: true, latencyMs: reached });
+  try {
+    const ms = await mtprotoTester({ ...mt, server: ip });
+    return recordHealth(row.id, { ok: true, latencyMs: ms ?? reached });
+  } catch (e) {
+    const why = /timeout/i.test(e.message)
+      ? 'پروکسی در دسترس است ولی تلگرام از طریقش جواب نداد؛ معمولاً یعنی پروکسی از کار افتاده، secret اشتباه است، یا این پروکسی فیلتر شده است'
+      : `تلگرام از این پروکسی جواب نداد: ${plain(e.message)}`;
+    return recordHealth(row.id, { ok: false, error: why.slice(0, 300) });
   }
 }
 
