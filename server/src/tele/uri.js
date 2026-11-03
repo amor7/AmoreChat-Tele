@@ -23,7 +23,13 @@ export function parseMtproto(cfg) {
   if (!/^(\d{1,3}(\.\d{1,3}){3}|[a-z0-9-]+(\.[a-z0-9-]+)+)$/i.test(server)) throw bad('آدرس سرور پروکسی MTProto نامعتبر است');
   if (!Number.isInteger(port) || port < 1 || port > 65535) throw bad('پورت پروکسی MTProto نامعتبر است');
   if (!/^[0-9a-f]{32,}$/i.test(secret) && !/^[A-Za-z0-9_-]{22,}={0,2}$/.test(secret)) throw bad('secret پروکسی MTProto نامعتبر است');
-  return { server, port, secret };
+  return { server, port, secret, secretHex: mtprotoSecretHex(secret) };
+}
+// TDLib takes the secret in hex; links also carry it base64url-encoded.
+export function mtprotoSecretHex(secret) {
+  const s = String(secret || '').trim();
+  if (/^[0-9a-f]+$/i.test(s) && s.length % 2 === 0) return s.toLowerCase();
+  return Buffer.from(s.replace(/-/g, '+').replace(/_/g, '/'), 'base64').toString('hex');
 }
 // OpenVPN: a SOCKS port of the ovpn service (see ovpn.js); the tag is "proxy-<id>".
 let ovpnOutboundFn = null;

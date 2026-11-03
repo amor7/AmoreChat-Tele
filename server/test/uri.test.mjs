@@ -69,6 +69,8 @@ for (const link of [
 // Saved as http before: still MTProto.
 assert.equal(outboundFromConfig(`https://t.me/proxy?server=proxy.example.com&port=443&secret=${secret}`, 'http', 't').type, 'mtproto');
 assert.equal(parseMtproto('https://t.me/proxy?server=203.0.113.5&port=443&secret=eeExampleOnlyBase64urlSecret_-').secret, 'eeExampleOnlyBase64urlSecret_-', 'base64url secrets');
+assert.equal(parseMtproto(`tg://proxy?server=proxy.example.com&port=443&secret=${secret}`).secretHex, secret.toLowerCase(), 'hex stays hex');
+assert.equal(parseMtproto('tg://proxy?server=203.0.113.5&port=443&secret=AAECAwQFBgcICQoLDA0ODw').secretHex, '000102030405060708090a0b0c0d0e0f', 'base64url becomes hex for TDLib');
 assert.equal(nameOfConfig(`tg://proxy?server=proxy.example.com&port=443&secret=${secret}`), 'MTProto proxy.example.com');
 for (const broken of ['https://t.me/proxy?server=proxy.example.com&port=0&secret=' + secret, 'https://t.me/proxy?port=443&secret=' + secret, 'https://t.me/proxy?server=proxy.example.com&port=443&secret=x']) {
   assert.throws(() => outboundFromConfig(broken, null, 't'), /MTProto/, broken);
