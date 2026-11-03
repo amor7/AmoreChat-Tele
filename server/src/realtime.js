@@ -26,6 +26,14 @@ export const disconnectSessions = (ids) => {
   closeStreams({ sessionIds: ids });
 };
 
+// A newly banned IP: everyone connected from it is dropped, except the owner.
+export const disconnectIp = (ip) => {
+  for (const socket of io?.sockets.sockets.values() || []) {
+    if (socket.data.ip === ip && !socket.data.user?.owner) socket.disconnect(true);
+  }
+  closeStreams({ ip });
+};
+
 // userId -> number of open sockets
 export const online = new Map();
 export const isOnline = (userId) => (online.get(userId) || 0) > 0;
