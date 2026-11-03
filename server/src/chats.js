@@ -273,13 +273,13 @@ export function listChats(userId) {
     .map((c) => formatSummary(c, userId));
 }
 
-export function postMessage({ chatId, senderId = null, type = 'text', text = '', fileId = null, replyTo = null, forwardedFrom = null }) {
+export function postMessage({ chatId, senderId = null, type = 'text', text = '', fileId = null, replyTo = null, forwardedFrom = null, clientId = null }) {
   const t = now();
   const autoDelete = type === 'system' ? 0 : get('SELECT auto_delete FROM chats WHERE id = ?', chatId)?.auto_delete;
   const mentions = type === 'system' || forwardedFrom ? [] : findMentions(chatId, type === 'call' ? '' : text, replyTo, senderId);
   const id = tx(() => {
     const r = run(
-      'INSERT INTO messages (chat_id, sender_id, type, text, file_id, reply_to, forwarded_from, expires_at, mentions, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      'INSERT INTO messages (chat_id, sender_id, type, text, file_id, reply_to, forwarded_from, expires_at, mentions, client_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
       chatId,
       senderId,
       type,
@@ -289,6 +289,7 @@ export function postMessage({ chatId, senderId = null, type = 'text', text = '',
       forwardedFrom,
       autoDelete ? t + autoDelete * 1000 : null,
       mentions.length ? JSON.stringify(mentions) : null,
+      clientId,
       t,
     );
     const msgId = Number(r.lastInsertRowid);
