@@ -19,10 +19,10 @@ jobs:
       - run: npm run build
       - name: Watchdog (when it restarts, and when it must not)
         run: bash server/test/watchdog.test.sh
-      - name: Proxy links and WireGuard files
-        run: DATA_DIR=/tmp/hs-uri node server/test/uri.test.mjs
-      - name: Names of channels copied from Telegram
-        run: DATA_DIR=/tmp/hs-handles node server/test/handles.test.mjs
+      - name: Lint (undefined names, unused code, React mistakes)
+        run: npm ci --prefix tools --no-audit --no-fund && npm run lint --prefix tools
+      - name: Unit tests (proxy links, WireGuard files, Telegram channel names)
+        run: npm test --prefix tools
       - name: /ca page fingerprint
         run: node server/test/ca-fingerprint.mjs
       - name: HTTPS certificate expiry warning

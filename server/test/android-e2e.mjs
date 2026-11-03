@@ -131,6 +131,14 @@ async function tap(dt, selector) {
   adb(`shell input tap ${Math.round(left + p.x * p.d)} ${Math.round(top + p.y * p.d)}`);
 }
 
+// A real tap on a native view (an app dialog's button) found by its text.
+async function tapText(text, what) {
+  const re = new RegExp(`text="${text}"[^>]*bounds="\\[(\\d+),(\\d+)\\]\\[(\\d+),(\\d+)\\]`);
+  let m = null;
+  await waitUntil(() => (m = adb('exec-out uiautomator dump /dev/tty').match(re)), what);
+  adb(`shell input tap ${Math.round((+m[1] + +m[3]) / 2)} ${Math.round((+m[2] + +m[4]) / 2)}`);
+}
+
 // Active notifications only: dumpsys also lists recently removed ones (archive / history).
 const notifications = () => {
   const all = adb('shell dumpsys notification --noredact');
@@ -338,6 +346,10 @@ try {
     step('leave the second server completely: removed, signed out there, notifications stop');
     const sessionsBefore = (await bob2('GET', '/api/me/sessions')).sessions.length;
     await dt.evaluate("AmoreAndroid.removeServer('http://localhost:3101'), true");
+    // Another server's page can't remove it on its own: the app asks first.
+    await sleep(1500);
+    if (JSON.parse(await dt.evaluate('AmoreAndroid.servers()')).length !== 2) throw new Error('a page removed another server without asking');
+    await tapText('حذف', 'the app asks before removing another server');
     await waitUntil(async () => JSON.parse(await dt.evaluate('AmoreAndroid.servers()')).length === 1, 'only the first server left');
     await waitUntil(async () => (await bob2('GET', '/api/me/sessions')).sessions.length === sessionsBefore - 1, 'the phone signed out on the second server').catch((e) => {
       console.log(adb('logcat -d -s AmoreChat:I'));

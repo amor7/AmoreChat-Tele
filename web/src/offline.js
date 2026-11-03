@@ -96,6 +96,11 @@ export async function flushOutbox() {
         await dropFromOutbox(item.tmpId);
       } catch (e) {
         if (!e.status) break; // still offline: keep the order, try later
+        if (e.status === 429) {
+          // Sending too fast (a long queue at once): the rest in a few seconds, in order.
+          setTimeout(flushOutbox, 8000);
+          break;
+        }
         // Refused (not a member any more, chat locked…): keep it, marked, so it isn't lost.
         useStore.setState((s) => ({ outbox: s.outbox.map((o) => (o.tmpId === item.tmpId ? { ...o, error: e.message } : o)) }));
         await saveOutbox();

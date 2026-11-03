@@ -57,6 +57,7 @@ export default async function adminRoutes(app) {
         locked: !!(u.locked_until && u.locked_until > now()),
         createdAt: u.created_at,
         online: isOnline(u.id),
+        lastSeen: u.last_seen,
       })),
     };
   });

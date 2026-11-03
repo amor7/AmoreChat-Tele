@@ -3,7 +3,7 @@ import { hasSitePerm, hasChatPerm, canPostInChannel } from '../perms.js';
 import { toChat, toAll } from '../realtime.js';
 import { fail, getMember, loadMessage, loadMessages, loadMessagesByIds, postMessage, systemMessage, audit, findMentions, withMine, membersHidden, markRead } from '../chats.js';
 import { requireChat } from './chats.js';
-import { assertAllowed } from '../limits.js';
+import { assertAllowed, assertBurst } from '../limits.js';
 import { deleteMessage } from '../sweeper.js';
 
 const MAX_TEXT = 4000;
@@ -88,6 +88,7 @@ export default async function messageRoutes(app) {
   app.post('/api/messages/:id/react', async (req) => {
     const { m, member } = requireMessage(req, req.params.id);
     if (!member) fail(403, 'شما عضو این گفتگو نیستید');
+    assertBurst(req.user.id, 'react');
     const emoji = String(req.body?.emoji || '').trim();
     if (!emoji || emoji.length > 16 || /[\s<>]/.test(emoji)) fail(400, 'ری‌اکشن نامعتبر');
     const exists = get('SELECT 1 FROM reactions WHERE message_id = ? AND user_id = ? AND emoji = ?', m.id, req.user.id, emoji);
@@ -113,6 +114,7 @@ export default async function messageRoutes(app) {
     const sent = [];
     assertAllowed(req.user, 'send');
     if (m.file_id) assertAllowed(req.user, 'media');
+    assertBurst(req.user.id, 'send', ids.length || 1);
     for (const chatId of ids) {
       const target = getMember(chatId, req.user.id);
       if (!target) continue;
@@ -163,6 +165,7 @@ export default async function messageRoutes(app) {
       if (seen) return { message: loadMessage(seen.id) };
     }
     assertCanPost(req.user, chat, member);
+    assertBurst(req.user.id, 'send');
 
     const text = String(b.text || '').trim();
     if (text.length > MAX_TEXT) fail(400, `متن پیام حداکثر ${MAX_TEXT} کاراکتر است`);

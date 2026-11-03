@@ -327,7 +327,7 @@ function ChatHeader({ chat }) {
 
   let subtitle = '';
   if (typers.length) subtitle = chat.type === 'dm' ? 'در حال نوشتن…' : `${typers.slice(0, 2).join('، ')} در حال نوشتن…`;
-  else if (chat.type === 'dm') subtitle = online ? 'آنلاین' : formatLastSeen(chat.peer?.lastSeen);
+  else if (chat.type === 'dm') subtitle = online ? 'آنلاین' : formatLastSeen(chat.peer?.lastSeen, chat.peer);
   else if (chat.type === 'group' || chat.type === 'channel') subtitle = `${toFa(chat.memberCount)} ${chat.type === 'channel' ? 'مشترک' : 'عضو'}`;
 
   return (

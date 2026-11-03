@@ -525,6 +525,14 @@ const migrations = [
    WHERE config LIKE 'https://t.me/proxy?%' OR config LIKE 't.me/proxy?%' OR config LIKE 'tg://proxy?%'
       OR config LIKE 'http://t.me/proxy?%' OR config LIKE 'https://telegram.me/proxy?%';
   `,
+  // v24: who sees my online status / last seen (everyone | contacts | nobody)
+  `
+  ALTER TABLE users ADD COLUMN last_seen_privacy TEXT NOT NULL DEFAULT 'everyone';
+  `,
+  // v25: bans from a running voice chat survive a restart
+  `
+  CREATE TABLE stage_bans (room TEXT NOT NULL, user_id INTEGER NOT NULL, PRIMARY KEY (room, user_id));
+  `,
 ];
 
 const current = db.prepare('PRAGMA user_version').get().user_version;

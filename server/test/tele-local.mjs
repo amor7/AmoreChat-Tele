@@ -58,18 +58,18 @@ r = await alice.call('POST', '/api/tele/login/phone', { phone: 'abc' });
 assert.equal(r.http, 400);
 
 console.log('- only admins change it');
-r = await bob.call('GET', '/api/admin/tele/access');
+r = await bob.call('GET', '/api/admin/access/tele');
 assert.equal(r.http, 403);
-r = await bob.call('PATCH', '/api/admin/tele/access', { mode: 'none' });
+r = await bob.call('PATCH', '/api/admin/access/tele', { mode: 'none' });
 assert.equal(r.http, 403);
-r = await owner('PATCH', '/api/admin/tele/access', { mode: 'whatever' });
+r = await owner('PATCH', '/api/admin/access/tele', { mode: 'whatever' });
 assert.equal(r.http, 400);
-r = await owner('GET', '/api/admin/tele/access');
+r = await owner('GET', '/api/admin/access/tele');
 assert.equal(r.mode, 'all');
 assert.ok(r.users.find((u) => u.username === 'alice')?.allowed);
 
 console.log('- closed for all (the owner always may)');
-r = await owner('PATCH', '/api/admin/tele/access', { mode: 'none' });
+r = await owner('PATCH', '/api/admin/access/tele', { mode: 'none' });
 assert.equal(r.mode, 'none');
 assert.equal(r.users.find((u) => u.owner).allowed, true);
 assert.equal(await allowed(alice), false);
@@ -86,14 +86,14 @@ r = await alice.call('POST', '/api/tele/disconnect');
 assert.equal(r.http, 200);
 
 console.log('- only the listed users');
-r = await owner('PATCH', '/api/admin/tele/access', { mode: 'allow', add: [alice.id] });
+r = await owner('PATCH', '/api/admin/access/tele', { mode: 'allow', add: [alice.id] });
 assert.deepEqual(r.users.filter((u) => u.listed).map((u) => u.username), ['alice']);
 assert.equal(await allowed(alice), true);
 assert.equal(await allowed(bob), false);
 assert.equal(await allowed(carol), false);
 
 console.log('- everyone but the listed users');
-r = await owner('PATCH', '/api/admin/tele/access', { mode: 'deny', remove: [alice.id], add: [bob.id, 999999, 'x'] });
+r = await owner('PATCH', '/api/admin/access/tele', { mode: 'deny', remove: [alice.id], add: [bob.id, 999999, 'x'] });
 assert.deepEqual(r.users.filter((u) => u.listed).map((u) => u.username), ['bob']);
 assert.equal(await allowed(alice), true);
 assert.equal(await allowed(bob), false);
@@ -102,9 +102,9 @@ assert.equal(await allowed(carol), true);
 console.log('- the general settings route can not change Telegram or security settings');
 r = await owner('PATCH', '/api/admin/settings', { tele_access: 'all', sec_alerts: '0', tele_quota_mb: 'x' });
 assert.equal(r.http, 200);
-assert.equal((await owner('GET', '/api/admin/tele/access')).mode, 'deny');
+assert.equal((await owner('GET', '/api/admin/access/tele')).mode, 'deny');
 assert.equal((await owner('GET', '/api/admin/security')).settings.alerts, true);
-r = await owner('PATCH', '/api/admin/tele/access', { mode: 'all' });
+r = await owner('PATCH', '/api/admin/access/tele', { mode: 'all' });
 assert.equal(await allowed(bob), true);
 
 console.log('- mirrors and mirrored photos');

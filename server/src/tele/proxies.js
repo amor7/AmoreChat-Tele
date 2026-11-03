@@ -3,7 +3,7 @@
  * Stores admin-managed outbound routes used only by Telegram clients.
  * Never falls back to a direct (non-proxied) connection.
  */
-import { get, all, run, now, parseJSON } from '../db.js';
+import { get, all, run, now } from '../db.js';
 import { detectProtocol, outboundFromConfig, nameOfConfig } from './uri.js';
 import { syncOvpn } from './ovpn.js';
 

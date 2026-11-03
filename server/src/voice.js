@@ -1,4 +1,4 @@
-import { get, all, parseJSON } from './db.js';
+import { get, all, run, parseJSON } from './db.js';
 import { toAll, toChat, toUser, toChatExcept } from './realtime.js';
 import { hasSitePerm, hasChatPerm } from './perms.js';
 import { rtcEnabled, listRooms, listParticipants, userIdOf, removeParticipant } from './livekit.js';
@@ -32,12 +32,23 @@ export function isStageAdmin(user, chat, member) {
 }
 
 const stages = new Map(); // room -> { speakers: Set, hands: Map(userId -> raisedAt), bans: Set }
+// Bans from a running voice chat are also kept in the database, so a restart doesn't let them back in.
 export function stageOf(room) {
   let s = stages.get(room);
-  if (!s) stages.set(room, (s = { speakers: new Set(), hands: new Map(), bans: new Set() }));
+  if (!s) {
+    const bans = new Set(all('SELECT user_id FROM stage_bans WHERE room = ?', room).map((r) => r.user_id));
+    stages.set(room, (s = { speakers: new Set(), hands: new Map(), bans }));
+  }
   return s;
 }
-export const endStage = (room) => stages.delete(room);
+export function stageBan(room, userId) {
+  stageOf(room).bans.add(userId);
+  run('INSERT OR IGNORE INTO stage_bans (room, user_id) VALUES (?, ?)', room, userId);
+}
+export function endStage(room) {
+  stages.delete(room);
+  run('DELETE FROM stage_bans WHERE room = ?', room);
+}
 
 function stageAdminIds(chat) {
   return all("SELECT cm.user_id, cm.role, cm.perms, u.role AS site_role, u.admin_perms FROM chat_members cm JOIN users u ON u.id = cm.user_id WHERE cm.chat_id = ? AND (cm.role != 'member' OR u.role != 'user')", chat.id)
@@ -126,7 +137,7 @@ export function applyWebhook(evt) {
       stages.get(room)?.hands.delete(p.userId);
       if (!rooms.get(room)?.size) {
         rooms.delete(room);
-        stages.delete(room); // the voice chat is over: permissions and bans reset
+        endStage(room); // the voice chat is over: permissions and bans reset
       }
       for (const fn of listeners) fn(room, p.userId);
       break;

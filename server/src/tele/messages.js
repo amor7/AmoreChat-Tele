@@ -542,7 +542,7 @@ export async function teleVoiceFile(userId, messageId) {
 /** Sends a recorded voice message: converted to Ogg/Opus (what Telegram plays as a voice message). */
 export async function sendTeleVoice(userId, dialogId, file, { duration = 0, caption = '', replyTo = null } = {}) {
   mediaAccount(userId, 'voice');
-  const out = file.replace(/\.[^.\/]+$/, '') + '.voice.ogg';
+  const out = file.replace(/\.[^./]+$/, '') + '.voice.ogg';
   if (await mediaReady) {
     try {
       await ffmpeg(['-y', '-i', file, '-vn', '-ac', '1', '-c:a', 'libopus', '-b:a', '32k', '-application', 'voip', out]);

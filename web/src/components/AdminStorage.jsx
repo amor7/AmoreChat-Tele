@@ -131,10 +131,11 @@ export default function AdminStorage({ start }) {
             disabled={busy}
             title="بعد از حذف پیام و فایل زیاد، فضای خالی دیتابیس را به دیسک برمی‌گرداند"
             onClick={async () => {
+              if (!confirm('تا پایان فشرده‌سازی (روی دیتابیس بزرگ چند دقیقه) برنامه برای همه جواب نمی‌دهد. ادامه؟')) return;
               setBusy(true);
               try {
                 const r = await api('POST', '/admin/storage/compact', {}, { timeout: 10 * 60000 });
-                showToast(`${formatSize(Math.max(0, r.saved))} آزاد شد`);
+                showToast(r.nothingToDo ? 'دیتابیس فضای خالی قابل‌توجهی ندارد؛ کاری لازم نبود' : `${formatSize(Math.max(0, r.saved))} آزاد شد`);
                 reload();
               } catch (e) {
                 showToast(e.message);

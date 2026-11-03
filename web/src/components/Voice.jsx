@@ -31,7 +31,7 @@ import { hasChatPerm, toFa } from '../util';
 import Avatar from './Avatar';
 import Ping from './Ping';
 import CallView from './CallView';
-import { VolumeSlider, StagePanel, isStageAdmin } from './VoiceTools';
+import { VolumeSlider, StagePanel } from './VoiceTools';
 import { useBackClose } from '../backnav';
 import { useSmartFit } from '../smartFit';
 import {
@@ -435,7 +435,7 @@ export function RoomView() {
             ) : (
               <div className="filmstrip">
                 {others.map((t) => (
-                  <MeetTile {...tileProps(t, 'strip')} />
+                  <MeetTile key={t.key} {...tileProps(t, 'strip')} />
                 ))}
               </div>
             )}

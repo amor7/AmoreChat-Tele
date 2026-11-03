@@ -18,7 +18,8 @@ import {
 import { fail, addMember, ensureEmergencyChannel, ensureSavedChat, systemMessage, audit, joinAutoChats } from '../chats.js';
 import { noteLoginFailure, noteLogin } from '../secwatch.js';
 import { checkTotp, useRecoveryCode, passwordProblem, deviceName } from '../security.js';
-import { isOnline } from '../realtime.js';
+import { presenceOf, presenceAudience, LAST_SEEN_MODES } from '../presence.js';
+import { toUser, disconnectSessions } from '../realtime.js';
 import { mediaReady } from '../media.js';
 import { spendLookup, isUserStaff, searchAcquaintances, knowsUser } from '../lookup.js';
 import { rtcEnabled } from '../livekit.js';
@@ -41,7 +42,11 @@ const WRONG_LOGIN = 'نام کاربری یا رمز عبور اشتباه اس�
 const DEVICE_COOKIE = 'ac_device';
 const DEVICE_MS = 365 * 24 * 3600 * 1000;
 const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
-const deviceFails = new Map(); // "user:token hash" → { n, until }
+const deviceFails = new Map(); // "user:token hash" → { n, until, at }
+// Forgotten once the lock (if any) has passed and nothing has gone wrong for a while.
+setInterval(() => {
+  for (const [k, d] of deviceFails) if ((d.until || 0) < now() && d.at < now() - LOCK_MS) deviceFails.delete(k);
+}, 10 * 60 * 1000).unref();
 function trustedDevice(user, req) {
   const token = req.cookies[DEVICE_COOKIE];
   if (!user || !token) return null;
@@ -59,6 +64,7 @@ function noteFailedLogin(user, req) {
   if (device) {
     const d = deviceFails.get(device) || { n: 0, until: 0 };
     d.n += 1;
+    d.at = now();
     if (d.n >= LOCK_AFTER) Object.assign(d, { n: 0, until: now() + LOCK_MS });
     deviceFails.set(device, d);
     return;
@@ -133,7 +139,11 @@ export default async function authRoutes(app) {
     if (hasAnyUser() && handleTaken(username)) fail(409, 'این نام کاربری قبلاً گرفته شده');
 
     const hash = await hashPassword(password);
+    // Checked again here: another sign-up may have used the same invite or name while hashing.
     const userId = tx(() => {
+      if (firstUser && hasAnyUser()) fail(409, 'حساب مالک همین الان ساخته شد؛ با کد دعوت ثبت‌نام کنید');
+      if (inv && !checkInvite(inv.code)) fail(403, 'کد دعوت نامعتبر یا منقضی است');
+      if (!firstUser && handleTaken(username)) fail(409, 'این نام کاربری قبلاً گرفته شده');
       if (inv) run('UPDATE invites SET uses = uses + 1 WHERE id = ?', inv.id);
       const r = run(
         'INSERT INTO users (username, display_name, password_hash, role, created_at, last_seen) VALUES (?, ?, ?, ?, ?, ?)',
@@ -210,6 +220,8 @@ export default async function authRoutes(app) {
 
   app.post('/api/auth/logout', { config: { public: true } }, async (req, reply) => {
     destroySession(req.cookies[SESSION_COOKIE]);
+    // This device's open connections end too (otherwise they kept getting messages until a reconnect).
+    if (req.user?.session_id) disconnectSessions([req.user.session_id]);
     reply.clearCookie(SESSION_COOKIE, { path: '/' });
     return { ok: true };
   });
@@ -230,8 +242,19 @@ export default async function authRoutes(app) {
   });
 
   app.patch('/api/me', async (req) => {
-    const { displayName, bio, avatar } = req.body || {};
+    const { displayName, bio, avatar, lastSeenPrivacy } = req.body || {};
     const u = req.user;
+    if (lastSeenPrivacy !== undefined) {
+      if (!LAST_SEEN_MODES.includes(lastSeenPrivacy)) fail(400, 'گزینه نامعتبر است');
+      const before = presenceAudience(u.id);
+      run('UPDATE users SET last_seen_privacy = ? WHERE id = ?', lastSeenPrivacy, u.id);
+      // Whoever has this user on screen sees the change now (shown again, or "recently").
+      const me = { ...u, last_seen_privacy: lastSeenPrivacy };
+      for (const id of new Set([...before, ...presenceAudience(u.id)])) {
+        const viewer = get('SELECT id, last_seen_privacy FROM users WHERE id = ?', id);
+        toUser(id, 'presence', { userId: u.id, ...presenceOf(viewer, me, true) });
+      }
+    }
     if (displayName !== undefined) {
       const name = String(displayName).trim().slice(0, 64);
       if (!name) fail(400, 'نام نمایشی خالی است');
@@ -267,13 +290,13 @@ export default async function authRoutes(app) {
       const exact = get('SELECT * FROM users WHERE banned = 0 AND lower(username) = lower(?) AND id != ?', q.replace(/^@/, ''), req.user.id);
       if (exact && !users.some((u) => u.id === exact.id)) users.unshift(exact);
     }
-    return { users: users.map((u) => ({ ...publicUser(u), online: isOnline(u.id) })) };
+    return { users: users.map((u) => ({ ...publicUser(u), ...presenceOf(req.user, u) })) };
   });
 
   app.get('/api/users/:id', async (req) => {
     const u = get('SELECT * FROM users WHERE id = ?', Number(req.params.id));
     // A profile by its number only for people you share a chat with (no walking through ids).
     if (!u || (u.id !== req.user.id && !isUserStaff(req.user) && !knowsUser(req.user.id, u.id))) fail(404, 'کاربر پیدا نشد');
-    return { user: { ...publicUser(u), online: isOnline(u.id), banned: !!u.banned } };
+    return { user: { ...publicUser(u), ...presenceOf(req.user, u), banned: !!u.banned } };
   });
 }

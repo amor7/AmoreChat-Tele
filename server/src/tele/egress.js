@@ -234,7 +234,9 @@ export const stopEgress = () => serial(stopNow);
 /** Starts sing-box with a config file; resolves once its SOCKS port accepts connections. */
 function startSingBox(bin, file, port, { onExit } = {}) {
   return new Promise((resolve, reject) => {
-    const proc = spawn(bin, ['run', '-c', file], { stdio: ['ignore', 'pipe', 'pipe'], env: process.env });
+    // Only what a program needs to run: not the app's secrets (Telegram session key, LiveKit…).
+    const env = Object.fromEntries(['PATH', 'HOME', 'TZ', 'LANG', 'TMPDIR'].filter((k) => process.env[k]).map((k) => [k, process.env[k]]));
+    const proc = spawn(bin, ['run', '-c', file], { stdio: ['ignore', 'pipe', 'pipe'], env });
     let stderr = '';
     let settled = false;
     const fail = (msg) => {

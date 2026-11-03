@@ -1,7 +1,7 @@
 import { assertAllowed } from '../limits.js';
 import { hasSitePerm } from '../perms.js';
 import { fail, audit } from '../chats.js';
-import { listProxies, getProxy, createProxy, updateProxy, deleteProxy, getRoutePolicy, setRoutePolicy, publicProxy, PROTOCOL_HINTS, ROUTE_MODES } from '../tele/proxies.js';
+import { listProxies, createProxy, updateProxy, deleteProxy, getRoutePolicy, setRoutePolicy, PROTOCOL_HINTS, ROUTE_MODES } from '../tele/proxies.js';
 import { probeViaEgress, probeAll, egressStatus, ensureEgress, stopEgress, refreshEgress, liveTunnelError } from '../tele/egress.js';
 import { splitConfigs, outboundFromForm } from '../tele/uri.js';
 import { ovpnConfig, looksLikeOvpn } from '../tele/ovpn.js';
@@ -428,7 +428,6 @@ export default async function teleRoutes(app) {
     return accessView(accessList(req));
   };
   app.get('/api/admin/access/:list', getAccess);
-  app.get('/api/admin/tele/access', getAccess);
   const patchAccess = async (req) => {
     needTeleAdmin(req);
     const list = accessList(req);
@@ -447,7 +446,6 @@ export default async function teleRoutes(app) {
     return accessView(list);
   };
   app.patch('/api/admin/access/:list', patchAccess);
-  app.patch('/api/admin/tele/access', patchAccess);
   app.patch('/api/admin/tele/quota', async (req) => {
     needTeleAdmin(req);
     const mb = Number(req.body?.defaultMb);

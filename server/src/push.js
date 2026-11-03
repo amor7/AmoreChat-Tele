@@ -9,7 +9,14 @@ const streams = new Map(); // userId -> Set({ res, sessionId })
 export function addStream(userId, sessionId, res, { ip = '', owner = false } = {}) {
   if (!streams.has(userId)) streams.set(userId, new Set());
   const entry = { res, sessionId, ip, owner };
-  streams.get(userId).add(entry);
+  const set = streams.get(userId);
+  // A phone keeps one; a handful covers several devices. More is a leak or abuse: the oldest go.
+  while (set.size >= 8) {
+    const oldest = set.values().next().value;
+    set.delete(oldest);
+    oldest.res.end();
+  }
+  set.add(entry);
   return () => {
     streams.get(userId)?.delete(entry);
     if (!streams.get(userId)?.size) streams.delete(userId);

@@ -30,7 +30,9 @@ export function formatListTime(t) {
 
 export const sameDay = (a, b) => startOfDay(a) === startOfDay(b);
 
-export function formatLastSeen(t) {
+// `who`: the user object, when it may carry a hidden last seen (only "recently" or "long ago").
+export function formatLastSeen(t, who) {
+  if (who?.lastSeenHidden) return who.recently ? 'اخیراً آنلاین بوده' : 'آخرین بازدید: خیلی وقت پیش';
   if (!t) return 'آخرین بازدید: خیلی وقت پیش';
   const mins = Math.floor((Date.now() - t) / 60000);
   if (mins < 1) return 'لحظاتی پیش آنلاین بود';

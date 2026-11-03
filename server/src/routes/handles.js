@@ -92,6 +92,8 @@ export default async function handleRoutes(app) {
     tx(() => {
       run('UPDATE users SET username = ? WHERE id = ?', row.handle, u.id);
       run('DELETE FROM reserved_names WHERE handle = ?', row.handle);
+      // The old name stays out of reach, so nobody else can take it and pass for this person.
+      run('INSERT OR IGNORE INTO reserved_names (handle, note, created_at) VALUES (?, ?, ?)', u.username, `نام قبلی کاربر ${u.id}`, now());
     });
     audit(req.user.id, 'handle.gift', u.id, { handle: row.handle, from: u.username });
     systemMessage(ensureSavedChat(u.id), `🎁 نام کاربری شما به @${row.handle} تغییر کرد. از این پس با همین نام وارد شوید.`);

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { api } from '../api';
 import { useStore } from '../store';
-import { hasSitePerm, SITE_PERM_LABELS, ADMIN_PRESETS, ROLE_LABELS, formatDateTime, formatSize, formatLastSeen, toFa } from '../util';
+import { SITE_PERM_LABELS, ADMIN_PRESETS, ROLE_LABELS, formatDateTime, formatSize, formatLastSeen, toFa } from '../util';
 import Avatar from './Avatar';
 import { LimitsEditor } from './AdminRtc';
 import { TriangleAlert, SlidersHorizontal } from 'lucide-react';

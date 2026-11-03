@@ -5,7 +5,7 @@ import { effectiveLimits } from '../limits.js';
 import { toUser, toChat } from '../realtime.js';
 import { fail, getChat, getMember, addMember, audit, membersHidden } from '../chats.js';
 import { rtcEnabled, accessToken, verifyWebhook, removeParticipant, muteSources, deleteRoom, revokePublish, userIdOf } from '../livekit.js';
-import { applyWebhook, chatRoom, chatIdOfRoom, roomParticipants, activeRooms, isStage, isStageAdmin, stageOf, endStage, stageSpeaker, stageAdminsOf, broadcastRoom, roomStateFor } from '../voice.js';
+import { applyWebhook, chatRoom, chatIdOfRoom, roomParticipants, activeRooms, isStage, isStageAdmin, stageOf, stageBan, endStage, stageSpeaker, stageAdminsOf, broadcastRoom, roomStateFor } from '../voice.js';
 import { startCall, acceptCall, endCall, getCall, userCall, callRoom, listCalls } from '../calls.js';
 
 const ROOM_TYPES = ['group', 'channel', 'voice'];
@@ -168,7 +168,7 @@ export default async function rtcRoutes(app) {
       }
       if (action === 'dismiss_hand') stage.hands.delete(targetId);
       if (action === 'kick') {
-        if (req.body?.ban) stage.bans.add(targetId);
+        if (req.body?.ban) stageBan(room, targetId);
         stage.speakers.delete(targetId);
         stage.hands.delete(targetId);
       }
