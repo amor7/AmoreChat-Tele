@@ -519,6 +519,12 @@ const migrations = [
   ALTER TABLE messages ADD COLUMN client_id TEXT;
   CREATE UNIQUE INDEX messages_client ON messages (chat_id, sender_id, client_id) WHERE client_id IS NOT NULL;
   `,
+  // v23: MTProto links added before they were known were saved as HTTP proxies
+  `
+  UPDATE tele_proxies SET protocol = 'mtproto', last_status = 'unknown', last_error = ''
+   WHERE config LIKE 'https://t.me/proxy?%' OR config LIKE 't.me/proxy?%' OR config LIKE 'tg://proxy?%'
+      OR config LIKE 'http://t.me/proxy?%' OR config LIKE 'https://telegram.me/proxy?%';
+  `,
 ];
 
 const current = db.prepare('PRAGMA user_version').get().user_version;

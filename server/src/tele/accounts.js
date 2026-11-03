@@ -4,7 +4,7 @@ import crypto from 'node:crypto';
 import { get, all, run, now, DATA_DIR } from '../db.js';
 import { settingNumber } from '../settings.js';
 import { ACCESS_MODES, accessMode, accessAllowed } from '../access.js';
-import { ensureEgress, egressStatus } from './egress.js';
+import { ensureEgress, egressStatus, onEgressChange, setMtprotoTester } from './egress.js';
 import { teleAlert } from './alerts.js';
 
 const SESSIONS_ROOT = path.join(DATA_DIR, 'tele-sessions');
@@ -515,10 +515,16 @@ async function saveData(client) {
   }
   await client.invoke({ _: 'setOption', name: 'online', value: { _: 'optionValueBoolean', value: false } }).catch(() => {});
 }
-// Fail closed: without the local SOCKS proxy TDLib would reach Telegram directly, so a failure here
-// aborts the login. Newer TDLib takes addProxy(proxy, enable, comment), older addProxy(server, port, enable, type).
-async function useProxy(client, socks) {
-  const type = { _: 'proxyTypeSocks5', username: '', password: '' };
+// Fail closed: without the local SOCKS proxy (or the MTProto proxy) TDLib would reach Telegram
+// directly, so a failure here aborts the login. Newer TDLib takes addProxy(proxy, enable, comment),
+// older addProxy(server, port, enable, type).
+const proxyOf = (ep) =>
+  ep.mtproto
+    ? { host: ep.mtproto.server, port: ep.mtproto.port, type: { _: 'proxyTypeMtproto', secret: ep.mtproto.secret } }
+    : { host: ep.host, port: ep.port, type: { _: 'proxyTypeSocks5', username: '', password: '' } };
+async function useProxy(client, ep) {
+  const socks = proxyOf(ep);
+  const { type } = socks;
   // The session database keeps proxies: reuse ours instead of adding a copy on every open, and
   // drop any other proxy so TDLib can never pick one that bypasses the tunnel.
   try {
@@ -526,7 +532,7 @@ async function useProxy(client, socks) {
     let ours = null;
     for (const p of proxies) {
       const pr = p.proxy || p;
-      if (!ours && pr.server === socks.host && pr.port === socks.port && pr.type?._ === 'proxyTypeSocks5') ours = p;
+      if (!ours && pr.server === socks.host && pr.port === socks.port && pr.type?._ === type._ && (pr.type.secret || '') === (type.secret || '')) ours = p;
       else await client.invoke({ _: 'removeProxy', proxy_id: p.id }).catch(() => {});
     }
     if (ours) {
@@ -546,6 +552,27 @@ async function useProxy(client, socks) {
     }
   }
 }
+
+// The tunnel switched between MTProto and the local SOCKS proxy: open connections follow at once.
+onEgressChange(async (ep) => {
+  for (const h of live.values()) {
+    if (h.client) await useProxy(h.client, ep).catch((e) => console.warn('[tele] switching proxy:', e?.message || e));
+  }
+});
+// MTProto check through any open, signed-in connection (an MTProto handshake with Telegram).
+setMtprotoTester(async (mt) => {
+  const h = [...live.values()].find((x) => x.client && x.phase === 'ready');
+  if (!h) return null;
+  const type = { _: 'proxyTypeMtproto', secret: mt.secret };
+  const t0 = Date.now();
+  try {
+    await h.client.invoke({ _: 'testProxy', proxy: { _: 'proxy', server: mt.server, port: mt.port, type }, dc_id: 2, timeout: 10 });
+  } catch (e) {
+    if (!/proxy|parameter|field/i.test(String(e?.message || e))) throw e;
+    await h.client.invoke({ _: 'testProxy', server: mt.server, port: mt.port, type, dc_id: 2, timeout: 10 });
+  }
+  return Date.now() - t0;
+});
 
 // ---------- The account's sessions on Telegram (every app and device logged in to it) ----------
 const sessionError = (e) => {

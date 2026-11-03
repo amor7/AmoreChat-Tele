@@ -8,6 +8,23 @@
 const ALLOWED_TYPES = new Set(['socks', 'http', 'shadowsocks', 'vless', 'vmess', 'trojan', 'wireguard', 'hysteria', 'hysteria2', 'tuic', 'anytls', 'shadowtls', 'ssh']);
 
 const bad = (msg) => Object.assign(new Error(msg), { statusCode: 400 });
+
+// MTProto: Telegram's own proxy kind, shared as t.me/proxy?… or tg://proxy?…. sing-box can't speak it,
+// so TDLib connects to it directly (egress.js / accounts.js).
+const MTPROTO_LINK = /^(?:(?:https?:\/\/)?(?:t\.me|telegram\.me)\/proxy|tg:\/\/proxy)\?/i;
+export const isMtprotoLink = (cfg) => MTPROTO_LINK.test(String(cfg || '').trim());
+export function parseMtproto(cfg) {
+  const s = String(cfg || '').trim();
+  if (!isMtprotoLink(s)) throw bad('لینک پروکسی MTProto باید به شکل t.me/proxy?server=…&port=…&secret=… باشد');
+  const q = new URLSearchParams(s.slice(s.indexOf('?') + 1));
+  const server = (q.get('server') || '').trim();
+  const port = Number(q.get('port'));
+  const secret = (q.get('secret') || '').trim();
+  if (!/^(\d{1,3}(\.\d{1,3}){3}|[a-z0-9-]+(\.[a-z0-9-]+)+)$/i.test(server)) throw bad('آدرس سرور پروکسی MTProto نامعتبر است');
+  if (!Number.isInteger(port) || port < 1 || port > 65535) throw bad('پورت پروکسی MTProto نامعتبر است');
+  if (!/^[0-9a-f]{32,}$/i.test(secret) && !/^[A-Za-z0-9_-]{22,}={0,2}$/.test(secret)) throw bad('secret پروکسی MTProto نامعتبر است');
+  return { server, port, secret };
+}
 // OpenVPN: a SOCKS port of the ovpn service (see ovpn.js); the tag is "proxy-<id>".
 let ovpnOutboundFn = null;
 export const setOvpnOutbound = (fn) => (ovpnOutboundFn = fn);
@@ -340,6 +357,8 @@ export function outboundFromConfig(cfg, protocol, tag) {
   } else {
     if (/^\s*(client|remote\s+\S+)/im.test(s) && /<ca>/i.test(s)) throw bad('این فایل OpenVPN است؛ در «افزودن» زبانه OpenVPN را بزنید');
     const p = protocol && protocol !== 'other' ? protocol : detectProtocol(s);
+    // Checked first: a t.me link also starts with https:// and is not an HTTP proxy.
+    if (isMtprotoLink(s) || p === 'mtproto') return { type: 'mtproto', tag, ...parseMtproto(s) };
     if (p === 'wireguard' || /\[Interface\]/i.test(s)) o = parseWireGuard(s);
     else if (/^socks/i.test(s) || p === 'socks5' || p === 'socks4' || /^[a-z0-9.-]+:\d+[:@]/i.test(s)) {
       const link = normalizeProxyLink(s);
@@ -376,6 +395,7 @@ export function detectProtocol(cfg) {
     }
     return 'other';
   }
+  if (isMtprotoLink(s)) return 'mtproto';
   if (s.startsWith('vless://')) return 'vless';
   if (s.startsWith('vmess://')) return 'vmess';
   if (s.startsWith('trojan://')) return 'trojan';
@@ -407,6 +427,13 @@ export function nameOfConfig(cfg) {
       if (j.ps) return String(j.ps).slice(0, 80);
     } catch {
       /* */
+    }
+  }
+  if (isMtprotoLink(s)) {
+    try {
+      return `MTProto ${parseMtproto(s).server}`.slice(0, 80);
+    } catch {
+      return 'MTProto';
     }
   }
   if (/\[Interface\]/i.test(s)) {

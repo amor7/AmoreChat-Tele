@@ -307,6 +307,7 @@ function FormatGuide() {
     ['Shadowsocks', 'ss://BASE64(method:password)@host:8388#name'],
     ['Hysteria2', 'hy2://PASSWORD@host:443?sni=host&obfs=salamander&obfs-password=X#name'],
     ['TUIC', 'tuic://UUID:PASSWORD@host:443?sni=host&congestion_control=bbr#name'],
+    ['MTProto (پروکسی خود تلگرام)', 'https://t.me/proxy?server=proxy.example.com&port=443&secret=SECRET   ·   tg://proxy?…'],
     ['WireGuard', 'کل فایل .conf: از [Interface] تا آخر [Peer] (چند فایل پشت سر هم = چند پروکسی)'],
     ['اشتراک (subscription)', 'متن base64 لینک اشتراک'],
   ];
@@ -325,6 +326,7 @@ function FormatGuide() {
           ))}
         </tbody>
       </table>
+      <p className="hint">MTProto فقط برای تلگرام است و تلگرام مستقیم از آن وصل می‌شود؛ تونل در آن حالت لازم نیست.</p>
       <p className="hint">
         کاراکترهای خاص در یوزر/پسورد را کد کنید: <code dir="ltr">@ → %40</code> · <code dir="ltr">: → %3A</code> · <code dir="ltr"># → %23</code> · <code dir="ltr">/ → %2F</code>. در فرم دستی لازم نیست.
       </p>
