@@ -4,6 +4,7 @@ import { useStore } from '../store';
 import { formatDateTime, formatSize, toFa, copyText } from '../util';
 import { DatabaseBackup, Download, Megaphone, Volume2, Users as UsersIcon } from 'lucide-react';
 import { useLoad } from './AdminPanelsA1';
+import { QrButton } from './QrCode';
 
 export function Backups() {
   const showToast = useStore((s) => s.showToast);
@@ -145,6 +146,7 @@ export function Invites() {
                   کپی لینک
                 </button>
               )}
+              {!expired && <QrButton value={link(i.code)} title="کد QR لینک دعوت" />}
               <button className="btn sm danger" onClick={() => api('DELETE', `/admin/invites/${i.id}`).then(load)}>
                 حذف
               </button>

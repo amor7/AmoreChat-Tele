@@ -1,3 +1,5 @@
+import { watchedUpload, watchedDownload } from './transfer';
+
 export class ApiError extends Error {
   constructor(message, status, data = {}) {
     super(message);
@@ -34,9 +36,72 @@ export async function api(method, url, body, { timeout = 20000 } = {}) {
   return data;
 }
 
+export const CANCELLED = -1;
+
+// The server's JSON answer, or { error } the way api() reports it.
+function parseAnswer(status, text, fallback) {
+  let data = {};
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch {
+    if (status >= 200 && status < 300) throw new ApiError('پاسخ سرور ناقص رسید', 0);
+  }
+  if (status < 200 || status >= 300) throw new ApiError(data.error || fallback, status, data);
+  return data;
+}
+
+export const LATE = 'پاسخ سرور دیر شد؛ ممکن است فرستاده شده باشد — قبل از ارسال دوباره چت را نگاه کنید';
+const TRANSFER_ERRORS = {
+  cancel: ['ارسال لغو شد', CANCELLED],
+  stall: ['ارسال متوقف شد؛ اتصال خیلی کند یا قطع است', 0],
+  network: ['ارتباط با سرور قطع شد', 0],
+  late: [LATE, 0],
+};
+
+// A one-shot form upload to the Telegram bridge (photo, voice, file), with progress. Fails when
+// the upload stops moving, not after a fixed total time; see transfer.js for the two clocks.
+// `url` is under /api, like api().
+export async function teleUpload(url, formData, { onProgress, signal, stallMs = 45000, responseMs = 5 * 60 * 1000, errorText = 'ارسال ناموفق بود' } = {}) {
+  const xhr = new XMLHttpRequest();
+  xhr.open('POST', '/api' + url);
+  xhr.withCredentials = true;
+  xhr.setRequestHeader('x-requested-with', 'amorechat');
+  let r;
+  try {
+    r = await watchedUpload(xhr, formData, { onProgress, signal, stallMs, responseMs });
+  } catch (e) {
+    const [msg, status] = TRANSFER_ERRORS[e.kind] || TRANSFER_ERRORS.network;
+    throw new ApiError(msg, status);
+  }
+  // Status 0 with no answer: the browser dropped it (offline, blocked); treat like a lost answer.
+  if (!r.status) throw new ApiError(LATE, 0);
+  return parseAnswer(r.status, r.text, errorText);
+}
+
+const DOWNLOAD_ERRORS = {
+  cancel: ['دانلود لغو شد', CANCELLED],
+  connect: ['ارتباط با سرور برقرار نشد', 0],
+  late: ['پاسخ سرور دیر شد؛ دوباره امتحان کنید', 0],
+  stall: ['دانلود متوقف شد؛ اتصال خیلی کند یا قطع است', 0],
+  broken: ['ارتباط با سرور قطع شد', 0],
+};
+
+// A media download from the Telegram bridge as a Blob. Same headers and errors as api(); gives
+// up only when the server is silent too long or the data stops arriving, never mid-progress.
+export async function teleDownload(url, { signal, stallMs = 45000, responseMs = 5 * 60 * 1000, errorText = 'دانلود ناموفق بود' } = {}) {
+  let r;
+  try {
+    r = await watchedDownload(fetch, '/api' + url, { credentials: 'same-origin', headers: { 'x-requested-with': 'amorechat' } }, { signal, stallMs, responseMs });
+  } catch (e) {
+    const [msg, status] = DOWNLOAD_ERRORS[e.kind] || DOWNLOAD_ERRORS.broken;
+    throw new ApiError(msg, status);
+  }
+  if (!r.ok) parseAnswer(r.status, r.text, errorText);
+  return r.blob;
+}
+
 export const fileUrl = (id, download = false) => `/api/files/${id}${download ? '?download=1' : ''}`;
 
-export const CANCELLED = -1;
 
 // One chunk over XHR (fetch has no upload progress).
 function putChunk(id, chunk, offset, onLoaded, signal) {
@@ -91,12 +156,37 @@ function pause(ms, signal) {
 // Resumable upload: the file goes up in 4 MB chunks. If the connection drops (or the server
 // restarts) it waits, asks the server how much arrived, and continues from there.
 // onStatus('waiting' | null) lets the UI say "waiting for the connection…".
-export async function upload(blob, { name, meta = {}, onProgress, onStatus, signal } = {}) {
-  const cleanMeta = Object.fromEntries(Object.entries(meta).filter(([, v]) => v != null));
-  const session = await api('POST', '/uploads', { name: name || blob.name || 'file', size: blob.size, mime: blob.type || 'application/octet-stream', meta: cleanMeta });
-  const { id, chunkSize } = session;
-  let offset = session.offset;
+// resumeId continues a session started earlier (e.g. before a reload; onSession(id) reports each
+// new one so the caller can keep it). A session the server no longer has starts over.
+// maxFailures: give up after that many failed chunks in a row (default: never) with a temporary
+// error (status 0, or the server's 5xx / 408); the session stays, so resumeId continues it later.
+const UPLOAD_CHUNK = 4 * 1024 * 1024; // the server's chunk size (its body limit allows no more)
+export async function upload(blob, { name, meta = {}, onProgress, onStatus, signal, resumeId, onSession, maxFailures = 0 } = {}) {
+  let id = null;
+  let chunkSize = UPLOAD_CHUNK;
+  let offset = 0;
+  if (resumeId) {
+    try {
+      const s = await api('GET', `/uploads/${resumeId}`);
+      if (s.size === blob.size && Number.isFinite(s.offset)) {
+        id = resumeId;
+        offset = s.offset;
+      } else {
+        api('DELETE', `/uploads/${resumeId}`).catch(() => {});
+      }
+    } catch (e) {
+      if (e.status !== 404) throw e;
+    }
+  }
+  if (!id) {
+    const cleanMeta = Object.fromEntries(Object.entries(meta).filter(([, v]) => v != null));
+    const session = await api('POST', '/uploads', { name: name || blob.name || 'file', size: blob.size, mime: blob.type || 'application/octet-stream', meta: cleanMeta });
+    ({ id, chunkSize } = session);
+    offset = session.offset;
+    onSession?.(id);
+  }
   let wait = 1000;
+  let failures = 0;
   for (;;) {
     if (signal?.aborted) {
       api('DELETE', `/uploads/${id}`).catch(() => {});
@@ -106,6 +196,7 @@ export async function upload(blob, { name, meta = {}, onProgress, onStatus, sign
       const r = await putChunk(id, blob.slice(offset, offset + chunkSize), offset, (loaded) => onProgress?.(blob.size ? Math.min(1, (offset + loaded) / blob.size) : 1), signal);
       onStatus?.(null);
       wait = 1000;
+      failures = 0;
       if (r.file) return r.file;
       offset = r.offset;
     } catch (e) {
@@ -119,6 +210,10 @@ export async function upload(blob, { name, meta = {}, onProgress, onStatus, sign
       }
       // A real refusal (too big, quota, expired…): stop. Network trouble / server down: keep trying.
       if (e.status && e.status < 500 && e.status !== 408 && e.status !== 429) throw e;
+      if (maxFailures && ++failures >= maxFailures) {
+        onStatus?.(null);
+        throw new ApiError(e.message, e.status >= 500 || e.status === 408 ? e.status : 0);
+      }
       onStatus?.('waiting');
       await pause(wait, signal);
       wait = Math.min(wait * 2, 15000);

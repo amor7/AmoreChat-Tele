@@ -6,6 +6,7 @@ import { settingNumber } from '../settings.js';
 import { ACCESS_MODES, accessMode, accessAllowed } from '../access.js';
 import { ensureEgress, egressStatus, onEgressChange, setMtprotoTester } from './egress.js';
 import { teleAlert } from './alerts.js';
+import { safeInterval } from '../timers.js';
 
 const SESSIONS_ROOT = path.join(DATA_DIR, 'tele-sessions');
 const live = new Map();
@@ -57,22 +58,30 @@ export async function liveClient(account, { ignoreQuota = false, ignoreAccess = 
 }
 export const isLive = (accountId) => !!live.get(Number(accountId))?.client;
 
-setInterval(async () => {
+safeInterval('tele sweep', Number(process.env.TELE_SWEEP_MS) || 60000, async () => {
+  // One account failing (a broken row, a usage write) must not skip the rest; the first error
+  // is rethrown at the end so safeInterval still logs it.
+  let firstError = null;
   for (const [id, h] of live) {
-    await flushUsage(id);
-    // Over the monthly cap: close the connection (an open one keeps receiving updates).
-    const account = get('SELECT * FROM tele_accounts WHERE id = ?', id);
-    if (account && overQuota(account)) {
-      noteOverQuota(account);
-      closeLive(id);
-      continue;
+    try {
+      await flushUsage(id);
+      // Over the monthly cap: close the connection (an open one keeps receiving updates).
+      const account = get('SELECT * FROM tele_accounts WHERE id = ?', id);
+      if (account && overQuota(account)) {
+        noteOverQuota(account);
+        closeLive(id);
+        continue;
+      }
+      if (account) noteNearQuota(account);
+      // A login left at the code/password step is dropped after half an hour.
+      const limit = h.phase === 'ready' ? IDLE_MS : 30 * 60000;
+      if (Date.now() - (h.lastUsed || 0) > limit) closeLive(id);
+    } catch (e) {
+      firstError ??= e;
     }
-    if (account) noteNearQuota(account);
-    // A login left at the code/password step is dropped after half an hour.
-    const limit = h.phase === 'ready' ? IDLE_MS : 30 * 60000;
-    if (Date.now() - (h.lastUsed || 0) > limit) closeLive(id);
   }
-}, Number(process.env.TELE_SWEEP_MS) || 60000).unref();
+  if (firstError) throw firstError;
+});
 
 // ---------- Who may use Telegram ----------
 // The setting tele_access: everyone, nobody, only the listed users, or everyone but them. The owner

@@ -11,3 +11,32 @@
 - تصمیم: `.claude/team/` با استثنا در `.gitignore` (`.claude/*` + `!.claude/team/`) commit می‌شود؛ بقیه‌ی `.claude/` همچنان ignore است.
 - دلیل: حفظ حافظه‌ی تیم بین سیستم‌ها و جلسه‌ها.
 - توجه: ریپو public است؛ در این فایل‌ها هرگز راز، IP سرور واقعی یا اطلاعات کاربران نوشته نشود.
+
+## 2026-11-23 سخت‌کردن ffmpeg (v1.0.40)
+- تصمیم: لیست سفید demuxer با `-format_whitelist mov,matroska,avi,mpegts,flv,ogg,mp3,wav,flac,aac,amr` + `-protocol_whitelist file` + رد فایل‌هایی که header‌شان playlist/manifest است (`#EXTM3U`، `ffconcat`، `<?xml`، `<MPD`، `<smil`). timeout بر اساس نوع: probe/thumb 60s؛ صدا clamp(مدت×0.5s، 2m، 30m)؛ ویدیو max(15m، مدت×6) با سقف 2h؛ نامعلوم 60m. خروجی فقط از `opts.out` پاک می‌شود (هرگز آخرین آرگومان).
+- دلیل: m3u8/concat جعلی می‌تواند فایل محلی یا شبکه‌ی داخلی را بخواند؛ فایل خراب نباید سرور ضعیف را قفل کند؛ پاک کردن «آخرین آرگومان» می‌توانست فایل غلط را حذف کند.
+- هزینه‌ی پذیرفته‌شده: aiff/asf(wma)/ac3 در whitelist نیستند.
+
+## 2026-11-23 خطای پردازش‌نشده در سرور
+- تصمیم: `unhandledRejection` فقط لاگ می‌شود و سرور ادامه می‌دهد؛ `uncaughtException` لاگ و `shutdown(1)` (docker restart). (پیش‌فرض پیشنهادی، تأییدشده توسط کاربر.)
+- دلیل: rejection یک تایمر پس‌زمینه نباید کل سرور را بخواباند، ولی وضعیت بعد از exception نامعلوم است.
+
+## 2026-11-23 capabilityهای کانتینر
+- تصمیم: `caddy`: `cap_drop: ALL` + `NET_BIND_SERVICE` + `DAC_READ_SEARCH` (برای certs سفارشی)؛ `app`: `cap_drop: ALL` بدون `cap_add`؛ `ovpn` دست‌نخورده.
+
+## 2026-11-23 چک فضای دیسک پیش از نصب/آپدیت (`deploy/disk-check.sh`)
+- تصمیم: کد خروج 4 و پیام فارسی؛ کف‌ها: Docker سه برابر حجم بخش‌های load‌شده با کف 300MB، پروژه 150MB+DB؛ override با `SKIP_DISK_CHECK=1` یا `AMORECHAT_MIN_FREE_MB` از env یا `.env` بدون `source`.
+- دلیل: دیسک پر وسط `docker load`/rollback سرور را نیمه‌خراب می‌کند؛ `.env` نباید اجرا شود (امنیت) و آپدیت پنل env شل ندارد.
+
+## 2026-11-23 منطق خالص وب بدون import
+- تصمیم: ماژول‌های منطق خالص وب (`drafts.js`، `outbox-rules.js`، `transfer.js`) «بدون import» نوشته می‌شوند تا با `node --test` از `server/test` تست شوند.
+- دلیل: وب تست‌رانر ندارد. هزینه: تست‌های web در `server/test` هستند.
+
+## 2026-11-23 صف آفلاین و ویس
+- تصمیم: ترتیب فقط داخل هر چت حفظ می‌شود؛ 408/5xx بعد از ۸ تلاش و ۱۰ دقیقه → `refused`؛ ویس به‌صورت ArrayBuffer در کلید جدای IndexedDB (سقف ۲۰ ویس/50MB)؛ upload داخل outbox با `maxFailures=4` و resume.
+
+## 2026-11-23 پیش‌نویس و پاک‌سازی محلی
+- تصمیم: پیش‌نویس در localStorage با کلید `amore.draft.u{uid}:{chat|tele}:{id}`؛ `wipeLocal()` هنگام خروج دستی outbox، پیش‌نویس‌ها و cache رسانه را پاک می‌کند.
+
+## 2026-11-23 CI: timeout و concurrency
+- تصمیم: `timeout-minutes` = ۳ تا ۵ برابر بیشینه‌ی زمان واقعی با کف ۱۰ دقیقه؛ `release` و `release-tag` بدون cancel-in-progress؛ `android.yml` دست‌نخورده (`workflow_call`).

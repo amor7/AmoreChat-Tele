@@ -6,6 +6,7 @@ import { settingNumber } from '../settings.js';
 import { getAccountForUser, liveClient, listDialogs, upsertDialog, onTeleUpdate, assertQuota, overQuota } from './accounts.js';
 import { ensureEgress } from './egress.js';
 import { ffmpeg, mediaReady } from '../media.js';
+import { safeInterval } from '../timers.js';
 
 const UPLOADS = path.join(DATA_DIR, 'tele-uploads');
 export const mediaMaxBytes = () => (settingNumber('tele_media_max_mb') || 5) * 1048576;
@@ -395,7 +396,7 @@ export async function flushQueue() {
     flushing = false;
   }
 }
-setInterval(() => flushQueue().catch(() => {}), Number(process.env.TELE_QUEUE_MS) || 10000).unref();
+safeInterval('tele queue', Number(process.env.TELE_QUEUE_MS) || 10000, flushQueue);
 
 /** Takes back a message that is still waiting for the tunnel. */
 export function cancelQueued(userId, messageId) {
@@ -531,7 +532,7 @@ export async function teleVoiceFile(userId, messageId) {
   const m4a = src + '.m4a';
   if (!fs.existsSync(m4a) && (await mediaReady)) {
     try {
-      await ffmpeg(['-y', '-i', src, '-vn', '-ac', '1', '-c:a', 'aac', '-b:a', '48k', '-movflags', '+faststart', m4a]);
+      await ffmpeg(['-y', '-i', src, '-vn', '-ac', '1', '-c:a', 'aac', '-b:a', '48k', '-movflags', '+faststart', m4a], { kind: 'voice', out: m4a, duration: media.duration });
     } catch {
       fs.rmSync(m4a, { force: true });
     }
@@ -545,7 +546,7 @@ export async function sendTeleVoice(userId, dialogId, file, { duration = 0, capt
   const out = file.replace(/\.[^./]+$/, '') + '.voice.ogg';
   if (await mediaReady) {
     try {
-      await ffmpeg(['-y', '-i', file, '-vn', '-ac', '1', '-c:a', 'libopus', '-b:a', '32k', '-application', 'voip', out]);
+      await ffmpeg(['-y', '-i', file, '-vn', '-ac', '1', '-c:a', 'libopus', '-b:a', '32k', '-application', 'voip', out], { kind: 'voice', out, duration });
     } catch {
       throw Object.assign(new Error('فایل صوتی قابل تبدیل نبود'), { statusCode: 400 });
     } finally {

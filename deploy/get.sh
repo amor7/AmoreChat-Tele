@@ -27,6 +27,43 @@ if [ -f "${DIR}/docker-compose.yml" ]; then
   exit 1
 fi
 
+# Free space before the ~200 MB bundle is downloaded: a full disk would leave a cut-off bundle
+# that install.sh then fails on. Run through curl|bash, so a small copy of the check is kept here;
+# keep in sync with deploy/disk-check.sh (install.sh then checks again with the real bundle size).
+if [ "${SKIP_DISK_CHECK:-}" = "1" ]; then
+  echo "!! هشدار: بررسی فضای دیسک رد شد (SKIP_DISK_CHECK=1)." >&2
+else
+  short=""
+  # Install folder: the ~200 MB bundle + 20 % + 150 MB for the code. Docker: the bundle unpacks
+  # to about 3x (a fresh install always loads all of it). A hung daemon is given 10 s.
+  DROOT=""
+  if command -v docker >/dev/null 2>&1; then
+    if command -v timeout >/dev/null 2>&1; then
+      DROOT=$(timeout 10 docker info -f '{{.DockerRootDir}}' 2>/dev/null || true)
+    else
+      DROOT=$(docker info -f '{{.DockerRootDir}}' 2>/dev/null || true)
+    fi
+  fi
+  # <min_mb> <path>: the nearest existing parent is measured (df -Pk also works on busybox).
+  for pair in "400 ${DIR}" "600 ${DROOT}"; do
+    need=${pair%% *}; p=${pair#* }
+    [ -n "$p" ] || continue
+    case "${AMORECHAT_MIN_FREE_MB:-}" in ''|*[!0-9]*) ;; *) need=$AMORECHAT_MIN_FREE_MB ;; esac
+    while [ ! -e "$p" ] && [ "$p" != "/" ] && [ "$p" != "." ]; do p=$(dirname "$p"); done
+    free=$(df -Pk "$p" 2>/dev/null | awk 'NR==2 { print int($4 / 1024) }' || true)
+    case "$free" in ''|*[!0-9]*) continue ;; esac
+    if [ "$free" -lt "$need" ]; then
+      echo "!! فضای دیسک کافی نیست: ${p}   آزاد: ${free} MB   لازم: حدود ${need} MB" >&2
+      short=1
+    fi
+  done
+  if [ -n "$short" ]; then
+    echo "   هیچ چیزی نصب نشد. فضا آزاد کنید (docker image prune -f، rm -rf /var/cache/amorechat)" >&2
+    echo "   یا با مسئولیت خودتان: ... | sudo SKIP_DISK_CHECK=1 bash   (یا عدد دیگر: sudo AMORECHAT_MIN_FREE_MB=... bash)" >&2
+    exit 4
+  fi
+fi
+
 BASE="https://github.com/${REPO}/releases/download/${TAG}"
 echo ">> Installing AmoreChat-Tele ${TAG} into ./${DIR}"
 mkdir -p "$DIR"

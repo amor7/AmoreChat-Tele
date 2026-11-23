@@ -28,6 +28,26 @@ if ! command -v docker >/dev/null 2>&1; then
   fi
 fi
 
+# Free space before any question is asked or image loaded (see deploy/disk-check.sh); exit 4.
+if [ -f deploy/disk-check.sh ]; then
+  . deploy/disk-check.sh
+  # Images unpack to roughly 3x the bundle's size (floor 300 MB, as in update.sh); without a
+  # bundle they are built here from base images and npm packages, which needs about 1 GB.
+  BUNDLE_MB=$(amore_size_mb amorechat-offline-*.tar.gz)
+  if [ "$BUNDLE_MB" -gt 0 ]; then
+    DOCKER_NEED=$(( BUNDLE_MB * 3 ))
+    [ "$DOCKER_NEED" -ge 300 ] || DOCKER_NEED=300
+  else
+    DOCKER_NEED=1024
+  fi
+  if DOCKER_ROOT=$(amore_docker_root); then
+    amore_disk_check 150 "$PWD" "$DOCKER_NEED" "$DOCKER_ROOT" || exit 4
+  else
+    echo "!! هشدار: Docker در دسترس نیست؛ فضای پوشه‌ی Docker بررسی نشد." >&2
+    amore_disk_check 150 "$PWD" || exit 4
+  fi
+fi
+
 # ask "question" default: asks on the terminal (the question always shows, also when the script
 # is piped or its output redirected); no terminal = the default answer.
 ask() {

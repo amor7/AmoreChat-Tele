@@ -18,6 +18,7 @@ import { ensureEgress } from './egress.js';
 import { contentText, mediaMaxBytes, fileMaxBytes, fileInfo, voiceInfo, senderOf } from './messages.js';
 import { accessAllowed } from '../access.js';
 import { assignMirrorHandle } from '../handles.js';
+import { safeInterval } from '../timers.js';
 
 const bad = (code, m) => Object.assign(new Error(m), { statusCode: code, expose: true });
 
@@ -330,10 +331,10 @@ export async function createMirror(user, { tgChatId, chatId = null, newTitle = '
 
 export function startMirrorLoop() {
   let last = 0;
-  setInterval(() => {
+  safeInterval('tele mirror', Number(process.env.TELE_MIRROR_CHECK_MS) || 30000, () => {
     const every = Math.max(1, settingNumber('tele_mirror_minutes') || 5) * 60000;
     if (Date.now() - last < every || !get('SELECT 1 FROM tele_mirrors WHERE enabled = 1')) return;
     last = Date.now();
-    runMirrors().catch(() => {});
-  }, Number(process.env.TELE_MIRROR_CHECK_MS) || 30000).unref();
+    return runMirrors();
+  });
 }

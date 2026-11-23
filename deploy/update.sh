@@ -50,14 +50,88 @@ if [ "$CURRENT" != "$TAG" ] && [ "$LOWEST" = "${TAG#v}" ]; then
   [ "$ok" = "y" ] || [ "$ok" = "Y" ] || exit 1
 fi
 
+TMP=$(mktemp -d)
+trap 'rm -rf "$TMP"' EXIT
+BASE="https://github.com/${REPO}/releases/download/${TAG}"
+CACHE=/var/cache/amorechat
+jval() { grep -m1 "\"$1\"" "$2" | sed -E 's/.*: *"([^"]*)".*/\1/'; }
+
+# Free space, before the backup, the rollback copy and `docker load` write anything. The helper
+# is found next to the code being updated (this script may run from a temp copy); installs from
+# before it existed just skip the check. Exit 4 = nothing was changed (the panel shows "failed").
+if [ -f deploy/disk-check.sh ]; then
+  . deploy/disk-check.sh
+  # The manifest says which image parts this update loads (same rules as the image section
+  # below); online it is fetched now (a few hundred bytes) and reused there.
+  PRE_MANIFEST=""
+  if [ -n "$LOCAL" ]; then
+    [ -f "$LOCAL/manifest.json" ] && PRE_MANIFEST="$LOCAL/manifest.json"
+  elif [ "$(uname -m)" = "x86_64" ] && curl -fsSL --retry 3 --max-time 60 -o "$TMP/manifest.json" "${BASE}/manifest.json" 2>/dev/null; then
+    PRE_MANIFEST="$TMP/manifest.json"
+  fi
+  # update_parts: the release files that will really be loaded, one per line.
+  update_parts() {
+    local m="$PRE_MANIFEST" img need_deps=""
+    if [ -z "$m" ]; then
+      echo amorechat-offline-amd64.tar.gz
+      return 0
+    fi
+    docker image inspect "amorechat-runtime:$(jval runtime "$m")" >/dev/null 2>&1 || echo "amorechat-runtime-$(jval runtime "$m")-amd64.tar.gz"
+    for img in caddy livekit; do
+      docker image inspect "$(jval "$img" "$m")" >/dev/null 2>&1 || docker image inspect "$(jval "${img}Id" "$m")" >/dev/null 2>&1 || need_deps=1
+    done
+    [ -z "$need_deps" ] || echo "amorechat-deps-$(jval deps "$m")-amd64.tar.gz"
+    echo amorechat-app.tar.gz
+  }
+  # part_mb <file>: its size in MB (rounded up): from the folder offline, online the
+  # Content-Length of the release download (after redirects); nothing when it can't be known.
+  part_mb() {
+    if [ -n "$LOCAL" ]; then
+      [ -f "$LOCAL/$1" ] && amore_size_mb "$LOCAL/$1"
+      return 0
+    fi
+    local len
+    len=$(curl -fsSIL --max-time 20 "${BASE}/$1" 2>/dev/null | tr -d '\r' | awk 'tolower($1) == "content-length:" { n = $2 } END { print n + 0 }' || true)
+    case "$len" in ''|0|*[!0-9]*) return 0 ;; esac
+    echo $(( (len + 1048575) / 1048576 ))
+  }
+  LOAD_MB=0     # gzip size of everything `docker load`/`docker build` will unpack
+  DOWNLOAD_MB=0 # what still has to be downloaded into the cache
+  KNOWN=1
+  for part in $(update_parts); do
+    mb=$(part_mb "$part")
+    if [ -z "$mb" ]; then KNOWN=""; continue; fi
+    LOAD_MB=$(( LOAD_MB + mb ))
+    # Already downloaded completely (kept from an earlier try): nothing more goes to the cache.
+    if [ -z "$LOCAL" ] && ! { [ -f "$CACHE/$part" ] && gzip -t "$CACHE/$part" 2>/dev/null; }; then
+      DOWNLOAD_MB=$(( DOWNLOAD_MB + mb ))
+    fi
+  done
+  # A size that can't be known (no answer from the release, a part missing from the folder):
+  # assume the full bundle (~200 MB).
+  [ -n "$KNOWN" ] || { LOAD_MB=200; DOWNLOAD_MB=200; }
+  # Images unpack to roughly 3x their gzip size. A usual app-only update is a few MB; the floor
+  # is the room a build needs around it.
+  DOCKER_NEED=$(( LOAD_MB * 3 ))
+  [ "$DOCKER_NEED" -ge 300 ] || DOCKER_NEED=300
+  # Project folder: the database backup (as big as the database) + the new code and its rollback
+  # copy (that one is in the cache folder, usually on the same disk, where needs are added up).
+  PROJECT_NEED=$(( 150 + $(amore_size_mb data/amorechat.db) ))
+  # Cache: downloads are kept there (resumable), plus 20 %; offline nothing is downloaded.
+  CACHE_NEED=0
+  [ -n "$LOCAL" ] || CACHE_NEED=$(( (DOWNLOAD_MB * 12 + 9) / 10 ))
+  if DOCKER_ROOT=$(amore_docker_root); then
+    amore_disk_check "$PROJECT_NEED" "$PWD" "$CACHE_NEED" "$CACHE" "$DOCKER_NEED" "$DOCKER_ROOT" || exit 4
+  else
+    echo "!! هشدار: Docker در دسترس نیست؛ فضای پوشه‌ی Docker بررسی نشد." >&2
+    amore_disk_check "$PROJECT_NEED" "$PWD" "$CACHE_NEED" "$CACHE" || exit 4
+  fi
+fi
+
 if docker compose ps --status running --services 2>/dev/null | grep -qx app; then
   echo ">> Backing up the database..."
   docker compose exec -T app node server/src/backup-cli.js </dev/null || echo "!! Backup failed, continuing"
 fi
-
-TMP=$(mktemp -d)
-trap 'rm -rf "$TMP"' EXIT
-BASE="https://github.com/${REPO}/releases/download/${TAG}"
 
 # Release signature: SHA256SUMS signed with the project's key. It is checked with the key of the
 # version installed NOW (before anything new is unpacked), and every file used below must match it,
@@ -91,8 +165,6 @@ check() {
     exit 1
   fi
 }
-CACHE=/var/cache/amorechat
-
 if [ -n "$LOCAL" ]; then
   cp "$LOCAL/amorechat-source.tar.gz" "$TMP/source.tar.gz"
 else
@@ -176,12 +248,10 @@ get() {
   rm -f "$out" # broken beyond resuming: start over next time
   return 1
 }
-jval() { grep -m1 "\"$1\"" "$2" | sed -E 's/.*: *"([^"]*)".*/\1/'; }
-
 MANIFEST=""
 if [ -n "$LOCAL" ]; then
   [ -f "$LOCAL/manifest.json" ] && MANIFEST="$LOCAL/manifest.json"
-elif [ "$(uname -m)" = "x86_64" ] && curl -fsSL --retry 3 -o "$TMP/manifest.json" "${BASE}/manifest.json"; then
+elif [ "$(uname -m)" = "x86_64" ] && { [ -s "$TMP/manifest.json" ] || curl -fsSL --retry 3 -o "$TMP/manifest.json" "${BASE}/manifest.json"; }; then
   MANIFEST="$TMP/manifest.json"
 fi
 [ -n "$MANIFEST" ] && check manifest.json "$MANIFEST"

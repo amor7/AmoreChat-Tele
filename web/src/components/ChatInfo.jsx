@@ -15,6 +15,7 @@ import {
 } from '../util';
 import { Modal, UserSearch } from './Modals';
 import Avatar from './Avatar';
+import { QrButton } from './QrCode';
 import { NotifyMute, MediaGallery } from './ChatExtras';
 import { Camera, Settings, Link, UserPlus, VolumeX, MessageCircle, Timer } from 'lucide-react';
 
@@ -169,7 +170,8 @@ function InfoHeader({ chat, canEdit }) {
               onClick={async () => (await copyText(`${location.origin}/@${chat.handle}`)) && useStore.getState().showToast('لینک کپی شد')}
             >
               کپی لینک
-            </button>
+            </button>{' '}
+            <QrButton value={`${location.origin}/@${chat.handle}`} title="کد QR لینک" />
           </div>
         )}
         {chat.originalHandle && (
@@ -346,6 +348,7 @@ function InviteLinks({ chatId, isPublic }) {
             <button className="btn sm" onClick={async () => (await copyText(link(i.code))) && showToast('کپی شد')}>
               کپی
             </button>
+            <QrButton value={link(i.code)} title="کد QR لینک دعوت" />
             <button className="btn sm danger" onClick={() => api('DELETE', `/chats/${chatId}/invites/${i.code}`).then(load)}>
               لغو
             </button>

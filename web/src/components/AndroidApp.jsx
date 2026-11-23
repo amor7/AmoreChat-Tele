@@ -6,6 +6,8 @@ import { postBlockReason, formatSize, faDigits } from '../util';
 import { isAndroidApp, isAndroidBrowser, appInfo, setBackgroundConnection, openBatterySettings, openNotificationSettings, openFullScreenSettings, changeServer, installAppUpdate, multiServer, appServers, addServer, removeServer, appLockSupported, appLockOn, setAppLock } from '../native';
 import { Modal } from './Modals';
 import Avatar from './Avatar';
+import QrCode from './QrCode';
+import { plainHttpUrl } from '../transfer';
 
 // ---------- "Share to AmoreChat" from the gallery or another app: pick the chat ----------
 export function ShareTarget({ files, text, onClose }) {
@@ -77,6 +79,22 @@ export function AndroidSettings() {
         <a className="btn wide" href="/app">
           <Smartphone size={17} /> دانلود اپ اندروید (اعلان بدون نیاز به گوگل)
         </a>
+      </>
+    );
+  }
+  // A computer: offer the app to the user's phone as a QR code. Plain http, so a phone that
+  // doesn't trust the server's internal certificate yet can still download it.
+  if (!isAndroidApp && server) {
+    const url = plainHttpUrl(location, '/app');
+    return (
+      <>
+        <h4>اپ اندروید</h4>
+        <div className="inline-form">
+          <QrCode value={url} title="دانلود اپ اندروید" />
+          <p className="muted">
+            برای نصب اپ اندروید ({formatSize(server.size)})، این کد را با دوربین گوشی اسکن کنید یا در مرورگر گوشی باز کنید: <span dir="ltr">{url}</span>
+          </p>
+        </div>
       </>
     );
   }

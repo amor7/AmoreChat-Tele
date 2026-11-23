@@ -2341,3 +2341,79 @@ input.music-bar-seek:hover::-moz-range-thumb {
   letter-spacing: 0.35em;
   text-align: center;
 }
+
+/* QR codes for links (QrCode.jsx). The image carries its own white quiet zone; the white
+   background keeps it scannable in dark themes too. */
+.qr-thumb {
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: zoom-in;
+  line-height: 0;
+}
+.qr-code {
+  image-rendering: pixelated;
+  background: #fff;
+  border-radius: 6px;
+}
+.qr-backdrop {
+  z-index: 61; /* may open from inside another dialog or over the lightbox */
+}
+.qr-modal {
+  max-width: 380px;
+}
+.qr-modal-body {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  text-align: center;
+}
+.qr-big {
+  width: min(320px, 78vw);
+  height: auto;
+  aspect-ratio: 1;
+}
+.qr-value {
+  word-break: break-all;
+  font-size: 13px;
+  user-select: all;
+}
+
+/* Unsent text in a chat list: "Draft: …" in place of the last message, like Telegram. */
+.draft-label {
+  color: var(--danger);
+}
+.chat-item.active .draft-label {
+  color: inherit;
+  font-weight: 600;
+}
+
+/* Online but the outbox isn't empty yet: count + "send now", in the offline bar's place. */
+.queue-bar {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+.queue-flush {
+  background: none;
+  border: 0;
+  padding: 0 8px;
+  min-height: 36px;
+  min-width: 36px;
+  font: inherit;
+  color: inherit;
+  text-decoration: underline;
+  cursor: pointer;
+  border-radius: 6px;
+}
+.queue-flush:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 2px;
+}
+
+/* A voice that couldn't be queued on this device: sending, or failed with retry / delete. */
+.composer-bar.voice-retry .bar-body {
+  border-inline-start-color: var(--danger);
+}

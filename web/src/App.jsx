@@ -13,7 +13,7 @@ import Modals from './components/Modals';
 import { VoiceBar, RoomView, IncomingCall, useAutoExpandCalls } from './components/Voice';
 import { MusicBar } from './components/Music';
 import { initNative } from './native';
-import { saveBoot, loadBoot, startOutbox } from './offline';
+import { saveBoot, loadBoot, startOutbox, flushOutbox } from './offline';
 import { useAppUpdateCheck } from './components/AndroidApp';
 
 function parseHash() {
@@ -122,7 +122,7 @@ function Main() {
 
   return (
     <div className={`layout ${activeChatId || tele?.dialogId ? 'has-chat' : ''}`}>
-      {!connected && <OfflineBar />}
+      {connected ? <QueueBar /> : <OfflineBar />}
       <EmergencyBanner />
       <div className="voice-area">
         <VoiceBar />
@@ -147,9 +147,30 @@ function Main() {
 function OfflineBar() {
   const queued = useStore((s) => s.outbox.filter((o) => !o.error).length);
   return (
-    <div className="offline-bar">
+    <div className="offline-bar" role="status" aria-live="polite">
       آفلاین — پیام‌های ذخیره‌شده نمایش داده می‌شوند؛ در حال تلاش برای اتصال…
       {queued > 0 && ` (${queued.toLocaleString('fa-IR')} پیام در صف ارسال)`}
+    </div>
+  );
+}
+
+// Online, but messages are still waiting (a voice uploading on a slow link, a server hiccup): the
+// same bar, only after a few seconds so a normal send doesn't flash it, with a way to push now.
+function QueueBar() {
+  const queued = useStore((s) => s.outbox.filter((o) => !o.error).length);
+  const [show, setShow] = useState(false);
+  useEffect(() => {
+    if (!queued) return setShow(false);
+    const t = setTimeout(() => setShow(true), 8000);
+    return () => clearTimeout(t);
+  }, [queued > 0]); // eslint-disable-line react-hooks/exhaustive-deps
+  if (!queued || !show) return null;
+  return (
+    <div className="offline-bar queue-bar" role="status" aria-live="polite">
+      {queued.toLocaleString('fa-IR')} پیام در صف ارسال
+      <button className="queue-flush" onClick={() => flushOutbox()}>
+        حالا بفرست
+      </button>
     </div>
   );
 }

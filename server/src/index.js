@@ -7,7 +7,8 @@ import fastifyStatic from '@fastify/static';
 import rateLimit from '@fastify/rate-limit';
 import { db, get, all, run, now, DATA_DIR, UPLOAD_DIR } from './db.js';
 import { startSweeper } from './sweeper.js';
-import { mediaReady, onMediaUpdate, resumePendingMedia } from './media.js';
+import { mediaReady, onMediaUpdate, resumePendingMedia, killAllFfmpeg } from './media.js';
+import { setTimerLogger } from './timers.js';
 import { toChat, disconnectIp } from './realtime.js';
 import { loadMessage } from './chats.js';
 import { hasAnyUser } from './settings.js';
@@ -50,6 +51,37 @@ const app = Fastify({
   // Only Caddy (docker network) or a local proxy may set X-Forwarded-For; clients can't fake their IP.
   trustProxy: 'loopback, linklocal, uniquelocal',
   bodyLimit: 1024 * 1024,
+});
+const logError = (msg, err) => (err === undefined ? app.log.error(msg) : app.log.error(err instanceof Error ? err : { err }, msg));
+setTimerLogger(logError);
+
+// One way out for signals and crashes: stop child processes (ffmpeg, the tunnel) so nothing is
+// left running against the data folder, then close. The hard timer covers a close that hangs.
+let stopping = null;
+function shutdown(code) {
+  stopping ??= (async () => {
+    // 8 s: under Docker's default 10 s stop grace, so the exit is ours, not a SIGKILL.
+    setTimeout(() => process.exit(code), 8_000).unref();
+    killAllFfmpeg();
+    await stopEgress().catch(() => {});
+    await app.close().catch(() => {});
+    try {
+      db.close();
+    } catch {}
+    process.exit(code);
+  })();
+  return stopping;
+}
+// A stray rejection (some promise nobody awaited) is a bug to log, not a reason to drop every user.
+process.on('unhandledRejection', (e) => logError('unhandled rejection', e));
+// After an uncaught exception the process state is unknown: log it and restart cleanly.
+process.on('uncaughtException', (e) => {
+  try {
+    app.log.fatal(e instanceof Error ? e : { err: e }, 'uncaught exception');
+  } catch {
+    console.error('uncaught exception', e);
+  }
+  shutdown(1);
 });
 
 await app.register(cookie);
@@ -230,11 +262,4 @@ onMediaUpdate((fileId) => {
 resumePendingMedia();
 mediaReady.then((ok) => !ok && app.log.warn('ffmpeg not found: voice/video conversion disabled'));
 
-for (const sig of ['SIGINT', 'SIGTERM']) {
-  process.on(sig, async () => {
-    await stopEgress().catch(() => {});
-    await app.close();
-    db.close();
-    process.exit(0);
-  });
-}
+for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => shutdown(0));

@@ -10,9 +10,17 @@ on:
         description: 'Release title'
         required: true
         default: 'AmoreChat-Tele 1.0.0'
+
+# Tags are made one after another, never cancelled half way.
+concurrency:
+  group: release-tag
+  cancel-in-progress: false
+
 jobs:
   release:
     runs-on: ubuntu-latest
+    # Only tags and creates a release (seconds); anything longer is a hang.
+    timeout-minutes: 10
     permissions:
       contents: write
     steps:

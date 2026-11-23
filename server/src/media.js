@@ -2,6 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { get, all, run, parseJSON, UPLOAD_DIR } from './db.js';
+import { isUnsafeHeader, withInputGuards, ffmpegInputs, ffmpegTimeout } from './media-guard.js';
+import { logBackground } from './timers.js';
 
 const FFMPEG = process.env.FFMPEG_PATH || 'ffmpeg';
 export const VIDEO_QUALITIES = [360, 720];
@@ -16,21 +18,82 @@ export const mediaReady = new Promise((resolve) => {
   });
 });
 
-export function ffmpeg(args) {
+// Running ffmpeg processes, so shutdown can stop them instead of leaving them to finish alone.
+const activeFfmpeg = new Set();
+export function killAllFfmpeg() {
+  for (const p of activeFfmpeg) {
+    try {
+      p.kill('SIGKILL');
+    } catch {}
+  }
+  activeFfmpeg.clear();
+}
+
+async function assertNotPlaylist(file) {
+  let fh;
+  try {
+    fh = await fs.promises.open(file, 'r');
+  } catch {
+    return; // missing/unreadable: ffmpeg reports that itself, as before
+  }
+  try {
+    const { buffer, bytesRead } = await fh.read(Buffer.alloc(64), 0, 64, 0);
+    if (isUnsafeHeader(buffer.subarray(0, bytesRead))) {
+      throw Object.assign(new Error('ffmpeg input refused: playlist file'), { stderr: '' });
+    }
+  } finally {
+    await fh.close();
+  }
+}
+
+/**
+ * Runs ffmpeg on local files only. opts.kind ('probe', 'thumb', 'voice', 'music', 'audio',
+ * 'video') and opts.duration (seconds) set the time limit; opts.out is the output file, removed
+ * if the run fails or times out. It is never guessed from args: for a probe the last argument
+ * is the user's own input file.
+ */
+export async function ffmpeg(args, { kind, out, duration } = {}) {
+  for (const input of ffmpegInputs(args)) await assertNotPlaylist(input);
+  const full = withInputGuards(args);
+  const limit = ffmpegTimeout(kind, duration);
   return new Promise((resolve, reject) => {
     // Lower priority on Linux so transcoding never starves the chat server.
-    const [cmd, argv] = process.platform === 'linux' ? ['nice', ['-n', '10', FFMPEG, ...args]] : [FFMPEG, args];
+    // nice execs ffmpeg, so the PID (and the signals below) are ffmpeg's own.
+    const [cmd, argv] = process.platform === 'linux' ? ['nice', ['-n', '10', FFMPEG, ...full]] : [FFMPEG, full];
     const p = spawn(cmd, argv, { stdio: ['ignore', 'ignore', 'pipe'] });
+    activeFfmpeg.add(p);
     let stderr = '';
+    let timedOut = false;
+    let killTimer = null;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      logBackground(`ffmpeg timeout: ${kind || 'unknown'} run passed ${Math.round(limit / 1000)} s, stopping it`);
+      p.kill('SIGTERM');
+      killTimer = setTimeout(() => p.kill('SIGKILL'), 5000);
+      killTimer.unref();
+    }, limit);
+    timer.unref();
+    let done = false;
+    const finish = (err, value) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      clearTimeout(killTimer);
+      activeFfmpeg.delete(p);
+      if (err) {
+        if (out) fs.rmSync(out, { force: true });
+        reject(err);
+      } else resolve(value);
+    };
     p.stderr.on('data', (d) => {
       stderr = (stderr + d).slice(-20000);
     });
-    p.on('error', reject);
+    p.on('error', (e) => finish(e));
     p.on('exit', (code) => {
-      if (code === 0) return resolve(stderr);
-      const err = new Error(`ffmpeg exited ${code}: ${stderr.slice(-500)}`);
+      if (code === 0 && !timedOut) return finish(null, stderr);
+      const err = new Error(timedOut ? 'ffmpeg timeout' : `ffmpeg exited ${code}: ${stderr.slice(-500)}`);
       err.stderr = stderr;
-      reject(err);
+      finish(err);
     });
   });
 }
@@ -39,7 +102,7 @@ export function ffmpeg(args) {
 async function probe(abs) {
   let info = '';
   try {
-    info = await ffmpeg(['-hide_banner', '-i', abs]);
+    info = await ffmpeg(['-hide_banner', '-i', abs], { kind: 'probe' });
   } catch (e) {
     info = e.stderr || '';
   }
@@ -66,7 +129,7 @@ export async function processVoice(fileId) {
   if (!ffmpegAvailable || f.mime === 'audio/mp4' || f.mime === 'audio/aac' || f.mime === 'audio/mpeg') return;
   const out = f.path + '.m4a';
   try {
-    await ffmpeg(['-y', '-i', abs(f.path), '-vn', '-ac', '1', '-c:a', 'aac', '-b:a', '48k', '-movflags', '+faststart', abs(out)]);
+    await ffmpeg(['-y', '-i', abs(f.path), '-vn', '-ac', '1', '-c:a', 'aac', '-b:a', '48k', '-movflags', '+faststart', abs(out)], { kind: 'voice', out: abs(out), duration: f.duration });
     removeRel(f.path);
     run("UPDATE files SET path = ?, mime = 'audio/mp4', size = ? WHERE id = ?", out, sizeOf(out), f.id);
   } catch {
@@ -85,7 +148,7 @@ export async function processMusic(fileId) {
   const src = abs(f.path);
   let info = '';
   try {
-    info = await ffmpeg(['-hide_banner', '-i', src]);
+    info = await ffmpeg(['-hide_banner', '-i', src], { kind: 'probe' });
   } catch (e) {
     info = e.stderr || '';
   }
@@ -94,7 +157,7 @@ export async function processMusic(fileId) {
   let thumb = null;
   if (/Stream #.*: Video:/.test(info)) {
     const out = f.path + '.thumb.jpg';
-    await ffmpeg(['-y', '-i', src, '-an', '-frames:v', '1', '-vf', 'scale=480:-2', '-q:v', '5', abs(out)])
+    await ffmpeg(['-y', '-i', src, '-an', '-frames:v', '1', '-vf', 'scale=480:-2', '-q:v', '5', abs(out)], { kind: 'thumb', out: abs(out) })
       .then(() => (thumb = out))
       .catch(() => {});
   }
@@ -143,7 +206,7 @@ async function processVideo(fileId, maxQuality) {
   const thumb = f.path + '.thumb.jpg';
   const at = meta.duration ? Math.min(1, meta.duration / 2) : 0;
   try {
-    await ffmpeg(['-y', '-ss', String(at), '-i', src, '-frames:v', '1', '-vf', 'scale=480:-2', '-q:v', '5', abs(thumb)]);
+    await ffmpeg(['-y', '-ss', String(at), '-i', src, '-frames:v', '1', '-vf', 'scale=480:-2', '-q:v', '5', abs(thumb)], { kind: 'thumb', out: abs(thumb) });
     run('UPDATE files SET thumb = ? WHERE id = ?', thumb, f.id);
   } catch {
     /* audio-only or unreadable stream: no poster */
@@ -170,7 +233,7 @@ async function processVideo(fileId, maxQuality) {
       '-c:a', 'aac', '-b:a', q <= 360 ? '64k' : '96k', '-ac', '2',
       '-movflags', '+faststart',
       abs(out),
-    ]);
+    ], { kind: 'video', out: abs(out), duration: meta.duration });
     const w = landscape ? Math.round((meta.width * q) / meta.height / 2) * 2 : q;
     const h = landscape ? q : Math.round((meta.height * q) / meta.width / 2) * 2;
     variants.push({ q, path: out, size: sizeOf(out), width: w, height: h });
