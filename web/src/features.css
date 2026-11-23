@@ -1679,8 +1679,10 @@ input.music-seek::-moz-range-thumb {
   background: var(--accent);
 }
 
-/* The bar: one line, with a thin line of progress on its lower edge */
+/* The bar: one line, with a thin line of progress on its lower edge. Laid out left to right like
+   Telegram Desktop: play controls on the left, then the title, the rest on the right. */
 .music-bar {
+  direction: ltr;
   position: relative;
   display: flex;
   align-items: center;

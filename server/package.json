@@ -1,7 +1,7 @@
 {
   "name": "amorechat-server",
   "private": true,
-  "version": "1.0.38",
+  "version": "1.0.39",
   "type": "module",
   "main": "src/index.js",
   "scripts": {
