@@ -1,6 +1,6 @@
 # AmoreChat-Tele — حافظه‌ی تیم
 
-> ساخته‌شده با /onboard در 2026-11-23 (نسخه‌ی 1.0.39). بخش‌هایی که با (حدس) علامت خورده‌اند تأیید نشده‌اند.
+> ساخته‌شده با /onboard در 2026-11-23 (نسخه‌ی 1.0.39؛ به‌روزشده برای 1.0.40). بخش‌هایی که با (حدس) علامت خورده‌اند تأیید نشده‌اند.
 
 ## خلاصه
 پیام‌رسان فارسی self-hosted (چت، گروه، کانال، تماس، ویس‌چت، استریم، موزیک؛ وب PWA + اپ اندروید) با «پل تلگرام» (Tele):
@@ -37,13 +37,15 @@
 | `server/src/db.js` | SQLite، cache prepared statement، **migrationها (آرایه، فقط append)** |
 | `server/src/tele/` | پل تلگرام: `accounts.js` (نشست/TDLib)، `messages.js`، `egress.js`/`proxies.js`/`uri.js`/`ovpn.js` (خروجی)، `mirror.js` (کپی کانال)، `explore.js`، `alerts.js`، `access.js` |
 | `server/src/routes/tele.js` | API تلگرام |
+| `server/src/{timers,media-guard}.js` | `timers.js`: حلقه‌های پس‌زمینه‌ی امن (خطا حلقه را نمی‌کشد)؛ `media-guard.js`: محافظ ffmpeg (فقط فایل محلی و فرمت مجاز، سقف زمانی) |
 | `server/*-cli.js` | backup، reset-password، unban |
 | `server/ovpn/*.sh` | سرویس OpenVPN مخصوص Tele |
 | `server/test/` | unit (`*.test.mjs`) و اسکریپت‌های e2e |
 | `web/src/` | `main.jsx`→`App.jsx`، `store.js` (zustand)، `api.js`، `socket.js`، `rtc.js`؛ کامپوننت‌ها در `components/` (Tele: `TeleView`، `TeleAdmin`، `TeleProxyForm`، `TeleForward`) |
+| `web/src/{drafts,outbox-rules,transfer}.js`، `components/QrCode.jsx` | پیش‌نویس ماندگار، قواعد صف آفلاین (متن/ویس)، منطق انتقال/آپلود؛ QR لینک‌ها |
 | `android/` | اپ Java: `MainActivity`، `CallService`، `MusicService`، `NotifyService`، `Updater`، assets `setup.html`/`offline.html` |
 | `tools/` | پکیج Node جدا برای eslint و اجرای unit test (عمداً جدا تا runtime id عوض نشود) |
-| `deploy/` | نصب، آپدیت آفلاین، watchdog، امضای release، Caddyfile، livekit.yaml |
+| `deploy/` | نصب، آپدیت آفلاین، watchdog، امضای release، Caddyfile، livekit.yaml؛ `disk-check.sh` چک فضای دیسک پیش از نصب/آپدیت (کد خروج ۴) |
 | `docs/` | `OFFLINE-INSTALL.md`، `TELE-SETUP.md`، `TELE-ARCHITECTURE.md` |
 | `.github/workflows/` | ci، ci-e2e، android، release، release-tag، security، soak، tele-e2e، tele-login |
 
@@ -80,10 +82,10 @@ docker compose -f docker-compose.isolated.yml ...   # تست بدون اینتر
 - **زنجیره‌ی release**: امضا با `deploy/release-signing.pub` و `verify-release.sh`؛ نصب یک‌خطی `curl | sudo bash` از `deploy/get.sh`.
 - نسخه در سه package.json تکرار شده (ریشه، server، web).
 
-متغیرهای محیطی (فقط نام): `DOMAIN`، `TLS_MODE` (auto/internal/custom/off)، `ALSO_IP`، `ALLOW_HTTP`، `BACKUP_KEEP`، `LOG_LEVEL`، `PUBLIC_IP`، `LIVEKIT_API_SECRET`، `TELEGRAM_API_ID`، `TELEGRAM_API_HASH`، `SING_BOX_PATH`، `TELE_SOCKS_PORT`، `TELE_IDLE_MINUTES`، `TELE_SESSION_KEY`؛ در compose ولی نه در `.env.example`: `BACKUP_MIRROR_DIR`، `LIVEKIT_API_KEY`.
+متغیرهای محیطی (فقط نام): `DOMAIN`، `TLS_MODE` (auto/internal/custom/off)، `ALSO_IP`، `ALLOW_HTTP`، `BACKUP_KEEP`، `LOG_LEVEL`، `PUBLIC_IP`، `LIVEKIT_API_SECRET`، `TELEGRAM_API_ID`، `TELEGRAM_API_HASH`، `SING_BOX_PATH`، `TELE_SOCKS_PORT`، `TELE_IDLE_MINUTES`، `TELE_SESSION_KEY`، `BACKUP_MIRROR_DIR`، `SKIP_DISK_CHECK`، `AMORECHAT_MIN_FREE_MB` (سه تای آخر کامنت‌شده در `.env.example`)؛ در compose ولی نه در `.env.example`: `LIVEKIT_API_KEY`.
 
 ## تست‌ها
-- unit فقط دو فایل: `server/test/handles.test.mjs`، `uri.test.mjs` (`node --test` از طریق `tools/test.mjs`).
+- unit: `server/test/{handles,uri,timers,media-guard,drafts,outbox-rules,transfer}.test.mjs` (`node --test` از طریق `tools/test.mjs`).
 - e2e زیاد و بدون فریم‌ورک (smoke، account، pentest، storage، rtc-api، tele-local، ...) + puppeteer (ui/rtc/crowd/soak) + shell (ovpn-e2e، recovery-e2e، watchdog، netem) + تلگرام واقعی روی test DC (`tele-e2e.yml`).
 - پوشش unit بسیار کم: منطق tele و کل `web/src` تست واحد ندارند؛ ابزار coverage نیست.
 

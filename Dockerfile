@@ -3,8 +3,10 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 COPY server/package.json server/
 COPY web/package.json web/
-RUN npm install --no-audit --no-fund \
-  && npm install -w server tdl@^8.1.0 prebuilt-tdlib@^0.1008069.0 --no-audit --no-fund
+# npm ci installs exactly what package-lock.json pins (reproducible release builds). The lock
+# already carries tdl, prebuilt-tdlib and its per-platform @prebuilt-tdlib/linux-* binaries.
+# Dev dependencies stay: vite needs them for `npm run build`; they are pruned below.
+RUN npm ci --no-audit --no-fund
 COPY . .
 RUN npm run build && npm prune --omit=dev && mkdir -p android-dist
 

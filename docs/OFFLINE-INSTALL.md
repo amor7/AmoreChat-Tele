@@ -181,7 +181,7 @@ sudo DOMAIN=chat.example.ir TLS_MODE=internal ALSO_IP=1 bash deploy/install.sh
 ```bash
 sudo docker compose ps
 ```
-باید سه سرویس `app`، `caddy` و `livekit` در حالت **running** باشند.
+باید چهار سرویس `app`، `caddy`، `livekit` و `ovpn` در حالت **running** باشند (`ovpn` فقط برای تونل‌های OpenVPN تلگرام است و بدون فایل OpenVPN فقط منتظر می‌ماند).
 
 ---
 

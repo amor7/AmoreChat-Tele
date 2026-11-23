@@ -3,6 +3,12 @@ data/
 web/dist/
 dist/
 .env
+.env.*
+!.env.example
+*.pem
+*.key
+*.jks
+*.keystore
 *.log
 offline-bundle/
 data-test/
