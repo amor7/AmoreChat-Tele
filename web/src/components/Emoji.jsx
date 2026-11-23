@@ -6,11 +6,25 @@ import { Clock, Smile, Heart, Hand, Users, Leaf, Utensils, Trophy, Plane, Lamp, 
 const strip = (s) => s.replace(/️/g, '');
 const useEmojiData = create(() => ({ index: null, list: [], cols: 1, rows: 1 }));
 
+// The sprite is about 1 MB. On a slow or broken connection a half-loaded image used to show only
+// its upper part, so many emoji came out blank. Now the picture is fully loaded and decoded first;
+// until then (or if it fails) emoji show as the device's own characters, and the next use retries.
+const SPRITE = '/emoji/noto.webp';
 let loading = null;
 export function loadEmoji() {
-  loading ||= fetch('/emoji/noto.json')
-    .then((r) => r.json())
-    .then((d) => {
+  loading ||= Promise.all([
+    fetch('/emoji/noto.json').then((r) => {
+      if (!r.ok) throw new Error(r.status);
+      return r.json();
+    }),
+    new Promise((ok, fail) => {
+      const img = new Image();
+      img.onload = () => (img.decode ? img.decode().then(ok, ok) : ok());
+      img.onerror = fail;
+      img.src = SPRITE;
+    }),
+  ])
+    .then(([d]) => {
       const index = new Map(d.emoji.map(([ch], i) => [strip(ch), i]));
       useEmojiData.setState({ index, list: d.emoji, cols: d.cols, rows: d.rows });
     })
@@ -124,6 +138,7 @@ export function pushRecent(ch) {
 
 export function EmojiPicker({ onPick, onClose }) {
   const list = useEmojiData((s) => s.list);
+  const ready = useEmojiData((s) => !!s.index);
   const [recent] = useState(getRecent);
   const [tab, setTab] = useState(recent.length ? 'recent' : 'smileys');
   const ref = useRef(null);
@@ -146,6 +161,7 @@ export function EmojiPicker({ onPick, onClose }) {
   return (
     <div className="emoji-picker" ref={ref} role="dialog" aria-label="انتخاب ایموجی">
       <div className="ep-grid">
+        {!ready && tab !== 'recent' && <p className="ep-loading muted">در حال بارگذاری ایموجی‌ها…</p>}
         {items.map((ch) => (
           <button
             key={ch}

@@ -204,6 +204,12 @@ select:focus {
   gap: 2px;
   align-content: start;
 }
+.ep-loading {
+  grid-column: 1 / -1;
+  margin: 24px 0;
+  text-align: center;
+  font-size: 13px;
+}
 .ep-item {
   border: 0;
   background: none;
