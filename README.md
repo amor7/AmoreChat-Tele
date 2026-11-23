@@ -258,7 +258,7 @@ sudo bash deploy/install.sh
 </div>
 
 ```bash
-npm install
+npm ci
 npm run dev:server   # port 3000
 npm run dev:web      # port 5173
 ```
