@@ -9,7 +9,8 @@ data-test/
 data-ui/
 data-kbd/
 data-test.log
-.claude/
+.claude/*
+!.claude/team/
 /Caddyfile
 certs/
 android-signing/
