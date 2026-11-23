@@ -4,9 +4,17 @@ on:
     branches: [main]
   pull_request:
 
+# A newer push to the same PR replaces the old run; on main every commit is kept and checked.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   rtc-e2e:
     runs-on: ubuntu-latest
+    # Per-job limits: recent green runs took under 8 min; these leave room for cold caches and
+    # slow mirrors but stop a hung job long before GitHub's 6 h default.
+    timeout-minutes: 15
     env:
       LIVEKIT_API_KEY: amorechat
       LIVEKIT_API_SECRET: ci-secret-0123456789abcdefghijklmnopqrstuv
@@ -64,6 +72,7 @@ jobs:
 
   docker-offline:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     strategy:
       matrix:
         ubuntu: ['22.04', '24.04']
@@ -84,6 +93,7 @@ jobs:
 
   small-updates:
     runs-on: ubuntu-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -153,6 +163,7 @@ jobs:
 
   crowd:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     env:
       LIVEKIT_API_KEY: amorechat
       LIVEKIT_API_SECRET: ci-secret-0123456789abcdefghijklmnopqrstuv
@@ -191,6 +202,7 @@ jobs:
 
   isolated:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     env:
       DC: docker compose -p iso -f docker-compose.yml -f docker-compose.isolated.yml
     steps:

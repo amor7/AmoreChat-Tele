@@ -245,7 +245,11 @@ export async function compressImage(file, maxDim = 1600, quality = 0.82) {
   const canvas = document.createElement('canvas');
   canvas.width = w;
   canvas.height = h;
-  canvas.getContext('2d').drawImage(bitmap, 0, 0, w, h);
+  const ctx = canvas.getContext('2d');
+  // JPEG has no transparency: without a background, a transparent PNG would turn black.
+  ctx.fillStyle = '#fff';
+  ctx.fillRect(0, 0, w, h);
+  ctx.drawImage(bitmap, 0, 0, w, h);
   bitmap.close();
   const blob = await new Promise((ok) => canvas.toBlob(ok, 'image/jpeg', quality));
   return { blob, width: w, height: h };

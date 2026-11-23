@@ -13,9 +13,17 @@ on:
 permissions:
   contents: read
 
+# A newer push to the same PR replaces the old run; on main every commit is kept and checked.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
   packages:
     runs-on: ubuntu-latest
+    # Per-job limits: recent green runs took under 8 min; these leave room for cold caches and
+    # slow mirrors but stop a hung job long before GitHub's 6 h default.
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -28,6 +36,7 @@ jobs:
 
   image:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - name: Build the image

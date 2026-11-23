@@ -2,6 +2,7 @@
 // In a normal browser every function here is a no-op.
 import { useStore } from './store';
 import { leavingPage } from './backnav';
+import { wipeLocal } from './offline';
 
 const bridge = typeof window !== 'undefined' ? window.AmoreAndroid : undefined;
 export const isAndroidApp = !!bridge;
@@ -55,6 +56,8 @@ export async function removeServer(url) {
   if (appServers().find((s) => s.current)?.url === url) {
     const { api } = await import('./api');
     await api('POST', '/auth/logout', null, { timeout: 4000 }).catch(() => {});
+    // Unsent text, the outbox and cached messages stay on the phone otherwise (this server's page storage).
+    await wipeLocal();
   }
   bridge?.removeServer?.(url);
 }

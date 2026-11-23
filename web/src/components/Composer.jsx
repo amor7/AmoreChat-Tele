@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
-import { api, upload, CANCELLED } from '../api';
+import { api, upload, CANCELLED, LATE } from '../api';
 import { useStore, dataSaverNow } from '../store';
 import { emitTyping, resetTyping, isChatMuted } from '../socket';
-import { enqueue, flushOutbox, newClientId } from '../offline';
+import { enqueue, enqueueVoice, flushOutbox, newClientId } from '../offline';
+import { loadDraft, clearDraft } from '../drafts';
+import { useDraftSaver } from '../useDrafts';
 import { EmojiPicker, RichText } from './Emoji';
 import PreviewIcon from './PreviewIcon';
 import Avatar from './Avatar';
@@ -17,7 +19,12 @@ export default function Composer({ chat, droppedFile, onDroppedHandled }) {
   const replyTo = useStore((s) => s.replyTo);
   const editing = useStore((s) => s.editing);
   const showToast = useStore((s) => s.showToast);
-  const [text, setText] = useState('');
+  const uid = me?.id || 0;
+  // What was being written here last time (kept on this device, see drafts.js).
+  const [text, setText] = useState(() => loadDraft(uid, 'chat', chat.id));
+  const saver = useDraftSaver(uid, 'chat', chat.id);
+  const editMode = useRef(false); // the box holds a message being edited, not the draft
+  const sendsInFlight = useRef(0); // sent text stays the draft until the server (or outbox) has it
   const [busy, setBusy] = useState(false);
   const [pending, setPending] = useState(null);
   const [recording, setRecording] = useState(false);
@@ -40,12 +47,26 @@ export default function Composer({ chat, droppedFile, onDroppedHandled }) {
   const fileRef = useRef(null);
   const mention = useMentions(chat, text, inputRef);
 
+  // Keep the draft. Declared before the editing effect on purpose (effects run in order): on the
+  // render that leaves edit mode the box is still empty, and that must not erase the draft.
+  useEffect(() => {
+    if (editing || editMode.current) return;
+    if (!text.trim() && sendsInFlight.current) return saver.cancel();
+    saver.set(text);
+  }, [text, editing]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (editing) {
+      // The draft being typed is saved as is; the box shows the message being edited.
+      if (!editMode.current) saver.flush();
+      editMode.current = true;
       setText(editing.text);
       inputRef.current?.focus();
+    } else if (editMode.current) {
+      // Edit finished or cancelled: the draft comes back.
+      editMode.current = false;
+      setText(loadDraft(uid, 'chat', chat.id));
     }
-  }, [editing]);
+  }, [editing]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (replyTo) inputRef.current?.focus();
   }, [replyTo]);
@@ -53,7 +74,8 @@ export default function Composer({ chat, droppedFile, onDroppedHandled }) {
   const draft = useStore((s) => (s.draftText?.chatId === chat.id ? s.draftText.text : null));
   useEffect(() => {
     if (draft == null) return;
-    setText(draft);
+    // Added after what was already written there, not in its place.
+    setText((cur) => (cur.trim() ? `${cur.replace(/\s+$/, '')}\n${draft}` : draft));
     useStore.setState({ draftText: null });
     inputRef.current?.focus();
   }, [draft]);
@@ -86,6 +108,19 @@ export default function Composer({ chat, droppedFile, onDroppedHandled }) {
     const edit = editing;
     const reply = replyTo;
     if (edit && busy) return;
+    if (!edit) {
+      // Until it is sent or queued, the text stays saved: a crash meanwhile doesn't lose it.
+      saver.set(t);
+      saver.flush();
+      sendsInFlight.current++;
+    }
+    const chatId = chat.id;
+    const settled = (delivered) => {
+      if (edit) return;
+      sendsInFlight.current--;
+      // Only if the stored draft is still this text (not something typed since).
+      if (delivered && loadDraft(uid, 'chat', chatId) === t) clearDraft(uid, 'chat', chatId);
+    };
     setText('');
     resetTyping(chat.id);
     useStore.setState({ replyTo: null, editing: null, ...(edit ? {} : { sentAt: Date.now() }) });
@@ -105,14 +140,24 @@ export default function Composer({ chat, droppedFile, onDroppedHandled }) {
           const { message } = await api('POST', `/chats/${chat.id}/messages`, { text: t, replyTo: reply?.id, clientId });
           useStore.getState().addMessage(message);
         }
+        settled(true);
       } catch (e) {
         if (!e.status && !edit) {
-          await enqueue(chat.id, t, reply?.id, clientId).catch(() => {});
+          await enqueue(chat.id, t, reply?.id, clientId).then(
+            () => settled(true),
+            () => settled(false),
+          );
         } else {
+          settled(false);
           showToast(e.message);
-          // Not sent: give the text back (unless something new was typed meanwhile).
-          setText((cur) => cur || t);
-          if (edit || reply) useStore.setState({ editing: edit, replyTo: reply });
+          if (edit) {
+            // Back into edit mode with the text as the user changed it (the draft stays aside).
+            useStore.setState({ editing: { ...edit, text: t } });
+          } else {
+            // Not sent: give the text back (unless something new was typed meanwhile).
+            setText((cur) => cur || t);
+            if (reply) useStore.setState({ replyTo: reply });
+          }
         }
       }
       useStore.setState({ sentAt: edit ? useStore.getState().sentAt : Date.now() });
@@ -140,9 +185,28 @@ export default function Composer({ chat, droppedFile, onDroppedHandled }) {
     }
   }
 
+  // A finished recording: into the outbox (kept on this device until sent), so the recorder
+  // closes at once and nothing waits on the network here.
+  async function onVoice(v) {
+    const reply = replyTo?.id ?? null;
+    useStore.setState({ replyTo: null, sentAt: Date.now() });
+    const clientId = newClientId();
+    try {
+      await enqueueVoice({ chatId: chat.id, blob: v.blob, duration: v.duration, waveform: v.waveform, replyTo: reply, clientId });
+      flushOutbox();
+    } catch (e) {
+      // Queue full or storage refused: send it directly; on failure it stays in memory with a retry.
+      if (e.full) showToast(`${e.message}؛ این پیام مستقیم ارسال می‌شود`);
+      const item = { id: clientId, chatId: chat.id, ...v, replyTo: reply, clientId, fileId: null, error: null, sending: false };
+      setDirect((list) => [...list, item]);
+      sendVoiceDirect(item);
+    }
+  }
+
   const bar = editing || replyTo;
   return (
     <div className="composer-wrap">
+      <DirectVoices chatId={chat.id} />
       {bar && (
         <div className="composer-bar">
           <span className="bar-icon">{editing ? <Pencil size={20} /> : <Reply size={20} />}</span>
@@ -236,7 +300,7 @@ export default function Composer({ chat, droppedFile, onDroppedHandled }) {
           {emojiOpen && <EmojiPicker onPick={insertEmoji} onClose={() => setEmojiOpen(false)} />}
         </div>
       </div>
-      {recording && <VoiceRecorder chat={chat} onDone={() => setRecording(false)} />}
+      {recording && <VoiceRecorder onRecorded={onVoice} onDone={() => setRecording(false)} />}
       {pending && <SendFileDialog file={pending} chat={chat} onClose={() => setPending(null)} />}
     </div>
   );
@@ -311,13 +375,13 @@ function pickAudioMime() {
 
 const MAX_VOICE_SECONDS = 15 * 60;
 
-function VoiceRecorder({ chat, onDone }) {
-  const replyTo = useStore((s) => s.replyTo);
+function VoiceRecorder({ onRecorded, onDone }) {
   const showToast = useStore((s) => s.showToast);
   const [seconds, setSeconds] = useState(0);
   const [level, setLevel] = useState(0);
   const [sending, setSending] = useState(false);
   const rec = useRef(null);
+  const done = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -334,9 +398,9 @@ function VoiceRecorder({ chat, onDone }) {
         const recorder = new MediaRecorder(stream, mimeType ? { mimeType, audioBitsPerSecond: 32000 } : undefined);
         const chunks = [];
         recorder.ondataavailable = (e) => e.data.size && chunks.push(e.data);
-        rec.current = { recorder, chunks, stream };
-        recorder.start(250);
         const start = Date.now();
+        rec.current = { recorder, chunks, stream, start };
+        recorder.start(250);
         timer = setInterval(() => {
           const s = Math.floor((Date.now() - start) / 1000);
           setSeconds(s);
@@ -370,35 +434,36 @@ function VoiceRecorder({ chat, onDone }) {
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Hands the recording over and closes; sending happens elsewhere (see onVoice), so this never
+  // stays stuck on "sending…" over a slow link. Guarded: the time limit calls it on every tick.
   async function finish(send) {
+    if (done.current) return;
+    done.current = true;
     const r = rec.current;
     if (!r) return onDone();
     if (!send) {
-      r.recorder.stop();
+      if (r.recorder.state === 'recording') r.recorder.stop();
       return onDone();
     }
     setSending(true);
-    await new Promise((ok) => {
-      r.recorder.onstop = ok;
-      r.recorder.stop();
-    });
-    r.stream.getTracks().forEach((t) => t.stop());
-    const blob = new Blob(r.chunks, { type: r.recorder.mimeType || 'audio/webm' });
-    if (blob.size < 1000) {
-      onDone();
-      return;
-    }
     try {
-      const { waveform, duration } = await computeWaveform(blob);
-      const ext = blob.type.includes('mp4') ? 'm4a' : blob.type.includes('ogg') ? 'ogg' : 'webm';
-      const file = await upload(blob, { name: `voice.${ext}`, meta: { voice: 1, wave: waveform, dur: duration?.toFixed(2) } });
-      const { message } = await api('POST', `/chats/${chat.id}/messages`, { fileId: file.id, type: 'voice', replyTo: replyTo?.id });
-      useStore.getState().addMessage(message);
-      useStore.setState({ replyTo: null, sentAt: Date.now() });
+      await new Promise((ok) => {
+        r.recorder.onstop = ok;
+        if (r.recorder.state === 'recording') r.recorder.stop();
+        else ok();
+      });
+      r.stream.getTracks().forEach((t) => t.stop());
+      const blob = new Blob(r.chunks, { type: r.recorder.mimeType || 'audio/webm' });
+      if (blob.size < 1000) return;
+      // Some WebViews never finish decoding: the waveform is a nicety, not worth waiting for.
+      const elapsed = (Date.now() - r.start) / 1000;
+      const wave = await Promise.race([computeWaveform(blob), new Promise((ok) => setTimeout(() => ok({ waveform: null, duration: null }), 5000))]);
+      onRecorded({ blob, waveform: wave.waveform, duration: wave.duration || elapsed });
     } catch (e) {
       showToast(e.message);
+    } finally {
+      onDone();
     }
-    onDone();
   }
 
   return (
@@ -415,6 +480,83 @@ function VoiceRecorder({ chat, onDone }) {
       </button>
     </div>
   );
+}
+
+// Voices that couldn't be kept in the outbox (queue full, storage refused): sent straight away,
+// and when that fails kept in memory with "send again / delete" so a recording is never lost
+// without the user knowing. Module level: survives switching chats (not a reload).
+let directVoices = []; // { id, chatId, blob, duration, waveform, replyTo, clientId, fileId, error, sending }
+const directListeners = new Set();
+const directAborts = new Map();
+function setDirect(fn) {
+  directVoices = fn(directVoices);
+  directListeners.forEach((l) => l());
+}
+const subscribeDirect = (l) => {
+  directListeners.add(l);
+  return () => directListeners.delete(l);
+};
+const patchDirect = (id, patch) => setDirect((list) => list.map((x) => (x.id === id ? { ...x, ...patch } : x)));
+
+async function sendVoiceDirect(v) {
+  patchDirect(v.id, { sending: true, error: null });
+  const ac = new AbortController();
+  directAborts.set(v.id, ac);
+  try {
+    let fileId = directVoices.find((x) => x.id === v.id)?.fileId;
+    if (!fileId) {
+      const type = v.blob.type || '';
+      const ext = type.includes('mp4') ? 'm4a' : type.includes('ogg') ? 'ogg' : 'webm';
+      const file = await upload(v.blob, { name: `voice.${ext}`, meta: { voice: 1, wave: v.waveform, dur: v.duration?.toFixed(2) }, signal: ac.signal });
+      fileId = file.id;
+      patchDirect(v.id, { fileId }); // a retry only posts the message
+    }
+    // Same clientId on every try: a post whose answer got lost isn't made twice.
+    const { message } = await api('POST', `/chats/${v.chatId}/messages`, { fileId, type: 'voice', replyTo: v.replyTo, clientId: v.clientId });
+    useStore.getState().addMessage(message);
+    useStore.setState({ sentAt: Date.now() });
+    setDirect((list) => list.filter((x) => x.id !== v.id));
+  } catch (e) {
+    if (e.status === CANCELLED) return;
+    patchDirect(v.id, { sending: false, error: e.message });
+    // A lost answer may mean it was sent: look at the chat first (the message itself says so).
+    useStore.getState().showToast(e.message === LATE ? `پیام صوتی: ${LATE}` : `پیام صوتی ارسال نشد: ${e.message} — «ارسال دوباره» را بزنید`);
+  } finally {
+    directAborts.delete(v.id);
+  }
+}
+
+function DirectVoices({ chatId }) {
+  const all = useSyncExternalStore(subscribeDirect, () => directVoices);
+  const list = all.filter((v) => v.chatId === chatId);
+  if (!list.length) return null;
+  return list.map((v) => (
+    <div key={v.id} className="composer-bar voice-retry">
+      <span className="bar-icon">
+        <Mic size={20} />
+      </span>
+      <span className="bar-body">
+        <b>{v.sending ? 'در حال ارسال پیام صوتی…' : 'پیام صوتی ارسال نشد'}</b>
+        {v.error && <span className="preview">{v.error}</span>}
+      </span>
+      {!v.sending && (
+        <button className="btn sm" onClick={() => sendVoiceDirect(v)}>
+          ارسال دوباره
+        </button>
+      )}
+      <button
+        className="icon-btn"
+        aria-label="حذف پیام صوتی"
+        onClick={() => {
+          if (!confirm('این پیام صوتی حذف شود؟')) return;
+          directAborts.get(v.id)?.abort();
+          setDirect((l) => l.filter((x) => x.id !== v.id));
+        }}
+      >
+        <X size={20} />
+      </button>
+    </div>
+  ));
 }
 
 function SendFileDialog({ file, chat, onClose }) {

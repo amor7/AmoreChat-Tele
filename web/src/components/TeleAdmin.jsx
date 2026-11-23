@@ -3,6 +3,7 @@ import { api } from '../api';
 import { useStore } from '../store';
 import { toFa, faDigits, formatDateTime } from '../util';
 import TeleAddProxy from './TeleProxyForm';
+import { QrButton } from './QrCode';
 import { RefreshCw, Trash2, Activity, Power, BellRing, BarChart3, Copy, UserCheck, FileDown, LineChart, Plus, CircleCheck, Circle, TriangleAlert, ChevronLeft } from 'lucide-react';
 
 // Sub-pages of the Telegram and VPN tabs, so each shows one thing at a time.
@@ -989,6 +990,7 @@ function TeleMirrors() {
                         <button type="button" className="btn sm" onClick={() => copy(inviteLink(m.inviteCode))}>
                           <Copy size={14} /> کپی
                         </button>
+                        <QrButton value={inviteLink(m.inviteCode)} title="کد QR لینک دعوت" />
                         <button type="button" className="btn sm" disabled={busy} onClick={() => confirm('لینک تازه ساخته شود؟ لینک قبلی دیگر کار نمی‌کند (کسانی که عضو شده‌اند می‌مانند).') && act(() => api('POST', `/admin/tele/mirrors/${m.id}/invite`), 'لینک تازه ساخته شد')}>
                           لینک تازه
                         </button>

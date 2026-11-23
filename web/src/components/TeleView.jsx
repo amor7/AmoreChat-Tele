@@ -1,8 +1,10 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { api } from '../api';
-import { useStore } from '../store';
-import { colorFor, formatDay, formatListTime, formatTime, sameDay, toFa, faDigits } from '../util';
+import { api, teleUpload, teleDownload } from '../api';
+import { useStore, useDataSaver, dataSaverNow } from '../store';
+import { colorFor, formatDay, formatListTime, formatTime, sameDay, toFa, faDigits, compressImage, formatSize } from '../util';
 import Avatar from './Avatar';
+import { loadDraft } from '../drafts';
+import { useDrafts, useDraftSaver, draftPreview } from '../useDrafts';
 import { ArrowRight, Check, LogOut, Megaphone, Plus, RefreshCw, Search, SendHorizontal, Users, X, CircleMinus, Reply, ImagePlus, Mic, Play, Forward, Trash2, ShieldCheck, Paperclip, FileText, Film, Download, UserPlus, Lock, MessageSquare, DoorOpen, MoreVertical, Send, TriangleAlert } from 'lucide-react';
 
 // Telegram, in the same look as the app's own chats: chat list on the side, the open chat beside it.
@@ -32,6 +34,7 @@ export default function TeleView({ dialogId }) {
   const [finding, setFinding] = useState(false);
   const phone = usePhoneLayout();
   const showToast = useStore((s) => s.showToast);
+  const drafts = useDrafts(useStore((s) => s.me?.id || 0), 'tele');
 
   const load = () => api('GET', '/tele/status').then(setStatus).catch((e) => showToast(e.message));
   const account = status?.account;
@@ -203,7 +206,7 @@ export default function TeleView({ dialogId }) {
               ) : (
                 <li key={d.id}>
                   <a href={`#/tele/${d.id}`} className={`chat-item ${d.id === dialogId ? 'active' : ''}`}>
-                    <DialogBody d={d} withUnread />
+                    <DialogBody d={d} withUnread draft={d.id !== dialogId && drafts[d.id]} />
                   </a>
                 </li>
               ),
@@ -258,7 +261,7 @@ export default function TeleView({ dialogId }) {
   );
 }
 
-function DialogBody({ d, withUnread }) {
+function DialogBody({ d, withUnread, draft }) {
   const Icon = KIND_ICON[d.kind];
   return (
     <>
@@ -272,10 +275,17 @@ function DialogBody({ d, withUnread }) {
           {d.lastAt && <span className="time">{formatListTime(d.lastAt)}</span>}
         </div>
         <div className="row">
-          <span className="preview">
-            {d.lastOut && d.lastText ? 'شما: ' : ''}
-            {(d.lastText || '').split('\n')[0]}
-          </span>
+          {draft ? (
+            <span className="preview">
+              <span className="draft-label">پیش‌نویس: </span>
+              {draftPreview(draft)}
+            </span>
+          ) : (
+            <span className="preview">
+              {d.lastOut && d.lastText ? 'شما: ' : ''}
+              {(d.lastText || '').split('\n')[0]}
+            </span>
+          )}
           {withUnread && d.unread > 0 && <span className="badge">{toFa(d.unread)}</span>}
         </div>
       </div>
@@ -569,8 +579,14 @@ function TeleChat({ dialog, onChanged, onRemove, allowMedia, allowVoice, allowFi
   const [notice, setNotice] = useState('');
   const [hasMore, setHasMore] = useState(true);
   const [loadingOlder, setLoadingOlder] = useState(false);
-  const [draft, setDraft] = useState('');
+  const uid = useStore((s) => s.me?.id || 0);
+  // Unsent text survives a reload or switching chats (see drafts.js); cleared once sent.
+  const [draft, setDraft] = useState(() => loadDraft(uid, 'tele', dialog.id));
+  const saver = useDraftSaver(uid, 'tele', dialog.id);
+  useEffect(() => saver.set(draft), [draft, saver]);
   const [sending, setSending] = useState(false);
+  // A voice whose send failed: kept here (memory only) to send again or delete.
+  const [failedVoice, setFailedVoice] = useState(null);
   const [replyTo, setReplyTo] = useState(null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [q, setQ] = useState('');
@@ -618,9 +634,13 @@ function TeleChat({ dialog, onChanged, onRemove, allowMedia, allowVoice, allowFi
 
   useEffect(() => {
     fetchLatest(true);
-    const t = setInterval(() => visible() && fetchLatest(false), 5000);
-    return () => clearInterval(t);
   }, [dialog.id]); // eslint-disable-line
+  // Data saver: check a third as often (each check is a request on a slow or metered link).
+  const dataSaver = useDataSaver();
+  useEffect(() => {
+    const t = setInterval(() => visible() && fetchLatest(false), dataSaver ? 15000 : 5000);
+    return () => clearInterval(t);
+  }, [dialog.id, dataSaver]); // eslint-disable-line
 
   const loadOlder = async () => {
     const oldest = messages?.find((m) => m.tgMsgId);
@@ -656,9 +676,9 @@ function TeleChat({ dialog, onChanged, onRemove, allowMedia, allowVoice, allowFi
     if (el.scrollTop < 60) loadOlder();
   };
 
-  const sent = (message) => {
+  const sent = (message, { keepDraft = false } = {}) => {
     if (message?.kind === 'queued') showToast('تلگرام الان وصل نیست؛ پیام در صف است و با وصل شدن خودش فرستاده می‌شود');
-    setDraft('');
+    if (!keepDraft) setDraft('');
     setReplyTo(null);
     stick.current = true;
     setMessages((cur) => withOlder(cur, [message]));
@@ -679,15 +699,27 @@ function TeleChat({ dialog, onChanged, onRemove, allowMedia, allowVoice, allowFi
   // A photo, with the text box as its caption.
   const sendPhoto = async (file) => {
     if (!file) return;
-    if (file.size > mediaMaxMb * 1048576) return showToast(`حداکثر حجم عکس ${toFa(mediaMaxMb)} مگابایت است`);
     setSending(true);
     try {
+      // Smaller photo = less to push over a slow link and through the server's tunnel. The
+      // original is sent when the browser can't decode it (HEIC) or runs out of memory; a GIF
+      // stays untouched to keep its animation.
+      let blob = file;
+      let name = file.name || 'photo.jpg';
+      if (file.type !== 'image/gif') {
+        try {
+          const c = dataSaverNow() ? await compressImage(file, 1280, 0.7) : await compressImage(file);
+          if (c.blob && c.blob.size < file.size) {
+            blob = c.blob;
+            name = (file.name || 'photo').replace(/\.\w+$/, '') + '.jpg';
+          }
+        } catch {}
+      }
+      if (blob.size > mediaMaxMb * 1048576) return showToast(`حداکثر حجم عکس ${toFa(mediaMaxMb)} مگابایت است`);
       const qs = new URLSearchParams({ caption: draft.trim(), ...(replyTo ? { replyTo: String(replyTo.tgMsgId) } : {}) });
       const body = new FormData();
-      body.append('file', file);
-      const res = await fetch(`/api/tele/dialogs/${dialog.id}/photo?${qs}`, { method: 'POST', body, credentials: 'same-origin', headers: { 'x-requested-with': 'amorechat' } });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || 'ارسال عکس ناموفق بود');
+      body.append('file', blob, name);
+      const data = await teleUpload(`/tele/dialogs/${dialog.id}/photo?${qs}`, body, { errorText: 'ارسال عکس ناموفق بود' });
       sent(data.message);
     } catch (e) {
       showToast(e.message);
@@ -706,11 +738,13 @@ function TeleChat({ dialog, onChanged, onRemove, allowMedia, allowVoice, allowFi
       const qs = new URLSearchParams({ duration: String(Math.max(1, Math.round(seconds))), ...(replyTo ? { replyTo: String(replyTo.tgMsgId) } : {}) });
       const body = new FormData();
       body.append('file', blob, `voice.${blob.type.includes('mp4') ? 'm4a' : blob.type.includes('ogg') ? 'ogg' : 'webm'}`);
-      const res = await fetch(`/api/tele/dialogs/${dialog.id}/voice?${qs}`, { method: 'POST', body, credentials: 'same-origin', headers: { 'x-requested-with': 'amorechat' } });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || 'ارسال پیام صوتی ناموفق بود');
-      sent(data.message);
+      const data = await teleUpload(`/tele/dialogs/${dialog.id}/voice?${qs}`, body, { errorText: 'ارسال پیام صوتی ناموفق بود' });
+      setFailedVoice(null);
+      // A voice has no caption: what is in the text box (typed before a retry) stays.
+      sent(data.message, { keepDraft: true });
     } catch (e) {
+      // Kept to send again: re-recording a lost voice is worse than a retry button.
+      setFailedVoice({ blob, seconds, error: e.message });
       showToast(e.message);
     } finally {
       setSending(false);
@@ -725,9 +759,7 @@ function TeleChat({ dialog, onChanged, onRemove, allowMedia, allowVoice, allowFi
       const qs = new URLSearchParams({ caption: draft.trim(), ...(replyTo ? { replyTo: String(replyTo.tgMsgId) } : {}) });
       const body = new FormData();
       body.append('file', file);
-      const res = await fetch(`/api/tele/dialogs/${dialog.id}/file?${qs}`, { method: 'POST', body, credentials: 'same-origin', headers: { 'x-requested-with': 'amorechat' } });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || 'ارسال فایل ناموفق بود');
+      const data = await teleUpload(`/tele/dialogs/${dialog.id}/file?${qs}`, body, { errorText: 'ارسال فایل ناموفق بود' });
       sent(data.message);
     } catch (e) {
       showToast(e.message);
@@ -890,12 +922,34 @@ function TeleChat({ dialog, onChanged, onRemove, allowMedia, allowVoice, allowFi
               </button>
             </div>
           )}
+          {failedVoice && (
+            <div className="composer-bar voice-retry">
+              <span className="bar-icon">
+                <Mic size={20} />
+              </span>
+              <span className="bar-body">
+                <b>{sending ? 'در حال ارسال پیام صوتی…' : 'پیام صوتی ارسال نشد'}</b>
+                {failedVoice.error && <span className="preview">{failedVoice.error}</span>}
+              </span>
+              <button className="btn sm" disabled={sending} onClick={() => sendVoice(failedVoice.blob, failedVoice.seconds)}>
+                ارسال دوباره
+              </button>
+              <button
+                className="icon-btn"
+                aria-label="حذف پیام صوتی"
+                disabled={sending}
+                onClick={() => confirm('این پیام صوتی حذف شود؟') && setFailedVoice(null)}
+              >
+                <X size={20} />
+              </button>
+            </div>
+          )}
           {recording ? (
             <TeleRecorder onSend={sendVoice} onCancel={() => setRecording(false)} maxSeconds={600} />
           ) : (
           <div className="composer">
             {allowVoice && !draft.trim() ? (
-              <button className="send-btn" aria-label="ضبط پیام صوتی" title="ضبط پیام صوتی" disabled={sending} onClick={() => setRecording(true)}>
+              <button className="send-btn" aria-label="ضبط پیام صوتی" title="ضبط پیام صوتی" disabled={sending || !!failedVoice} onClick={() => setRecording(true)}>
                 <Mic size={20} />
               </button>
             ) : (
@@ -1142,9 +1196,7 @@ function TelePhoto({ m }) {
     if (state === 'loading' || src) return;
     setState('loading');
     try {
-      const res = await fetch(`/api/tele/messages/${m.id}/photo`, { credentials: 'same-origin', headers: { 'x-requested-with': 'amorechat' } });
-      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'دانلود عکس ناموفق بود');
-      setSrc(URL.createObjectURL(await res.blob()));
+      setSrc(URL.createObjectURL(await teleDownload(`/tele/messages/${m.id}/photo`, { errorText: 'دانلود عکس ناموفق بود' })));
       setState('idle');
     } catch (e) {
       setError(e.message);
@@ -1158,7 +1210,7 @@ function TelePhoto({ m }) {
       ) : (
         <>
           {m.photo.mini ? <img className="blur" src={`data:image/jpeg;base64,${m.photo.mini}`} alt="" /> : <span className="tele-photo-empty" />}
-          <span className="tele-photo-cta">{state === 'loading' ? 'در حال دانلود…' : state === 'error' ? error : '📷 دانلود عکس'}</span>
+          <span className="tele-photo-cta">{state === 'loading' ? 'در حال دانلود…' : state === 'error' ? error : `📷 دانلود عکس${m.photo.size ? ` (${formatSize(m.photo.size)})` : ''}`}</span>
         </>
       )}
     </button>
@@ -1176,9 +1228,7 @@ function TeleVoice({ m }) {
     if (state === 'loading') return;
     setState('loading');
     try {
-      const res = await fetch(`/api/tele/messages/${m.id}/voice`, { credentials: 'same-origin', headers: { 'x-requested-with': 'amorechat' } });
-      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'دانلود پیام صوتی ناموفق بود');
-      setSrc(URL.createObjectURL(await res.blob()));
+      setSrc(URL.createObjectURL(await teleDownload(`/tele/messages/${m.id}/voice`, { errorText: 'دانلود پیام صوتی ناموفق بود' })));
       setState('idle');
     } catch (e) {
       setError(e.message);
@@ -1207,9 +1257,7 @@ function TeleFile({ m }) {
     if (state === 'loading') return;
     setState('loading');
     try {
-      const res = await fetch(`/api/tele/messages/${m.id}/file${playable ? '?inline=1' : ''}`, { credentials: 'same-origin', headers: { 'x-requested-with': 'amorechat' } });
-      if (!res.ok) throw new Error((await res.json().catch(() => ({}))).error || 'دانلود فایل ناموفق بود');
-      const url = URL.createObjectURL(await res.blob());
+      const url = URL.createObjectURL(await teleDownload(`/tele/messages/${m.id}/file${playable ? '?inline=1' : ''}`, { errorText: 'دانلود فایل ناموفق بود' }));
       if (playable) {
         setSrc(url);
       } else {

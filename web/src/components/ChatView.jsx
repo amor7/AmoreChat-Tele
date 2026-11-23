@@ -12,7 +12,7 @@ import PreviewIcon from './PreviewIcon';
 import { ArrowLeft, ChevronDown, Timer, Phone, Video, Mic, Search, Pin, PinOff, Reply, Forward, Copy, Pencil, Flag, Trash2, Plus, Eye, BellOff, Send } from 'lucide-react';
 import { startCall, joinVoice } from '../rtc';
 import { isChatMuted } from '../socket';
-import { outboxMessage, retryOutbox, dropFromOutbox } from '../offline';
+import { outboxMessage, retryOutbox, dropFromOutbox, voiceUrl, loadVoiceUrl, releaseVoiceUrls } from '../offline';
 import { useBackClose } from '../backnav';
 
 export default function ChatView({ chatId }) {
@@ -279,17 +279,37 @@ export default function ChatView({ chatId }) {
   );
 }
 
-// Messages written offline: waiting (⏳) or refused by the server (tap to retry / delete).
+// Messages written offline: waiting (⏳, tap to cancel) or refused by the server (tap to retry / delete).
 function Outbox({ chat, me }) {
   const items = useStore((s) => s.outbox).filter((o) => o.chatId === chat.id);
+  // Queued voices play from this device: after a reload their audio is read back from storage.
+  const [, setLoaded] = useState(0);
+  const missing = items.filter((o) => o.kind === 'voice' && !voiceUrl(o.clientId));
+  useEffect(() => {
+    let live = true;
+    for (const o of missing) loadVoiceUrl(o).then((url) => live && url && setLoaded((n) => n + 1));
+    return () => {
+      live = false;
+    };
+  }, [missing.map((o) => o.clientId).join()]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Leaving the chat frees the audio kept in memory for playback.
+  useEffect(() => releaseVoiceUrls, []);
   if (!items.length) return null;
   return (
     <div className="outbox">
       {items.map((o) => (
         <div
           key={o.tmpId}
-          onClick={() => {
-            if (!o.error) return;
+          onClick={(e) => {
+            if (!o.error) {
+              // Playing a queued voice is not a request to cancel it.
+              if (e.target.closest?.('button, a, input, .wave')) return;
+              // Still waiting (e.g. a voice uploading on a slow link): it can be taken back. A
+              // voice upload in progress is stopped; a text already on its way may still arrive.
+              const what = o.kind === 'voice' ? 'پیام صوتی' : 'پیام';
+              if (confirm(`این ${what} هنوز ارسال نشده است. ارسالش لغو و از صف حذف شود؟`)) dropFromOutbox(o.tmpId);
+              return;
+            }
             if (confirm(`ارسال نشد: ${o.error}\nدوباره تلاش شود؟ (لغو = حذف پیام)`)) retryOutbox(o.tmpId);
             else dropFromOutbox(o.tmpId);
           }}

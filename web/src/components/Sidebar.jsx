@@ -9,7 +9,8 @@ import { Menu, SquarePen, UserRound, Compass, Shield, LogOut, Users, Megaphone, 
 import { useStore } from '../store';
 import { api } from '../api';
 import { disconnectSocket, isChatMuted } from '../socket';
-import { clearOffline } from '../offline';
+import { wipeLocal } from '../offline';
+import { useDrafts, draftPreview } from '../useDrafts';
 import { formatListTime, messagePreview, toFa, hasSitePerm } from '../util';
 import Avatar from './Avatar';
 import Ping from './Ping';
@@ -28,6 +29,7 @@ export default function Sidebar() {
   const me = useStore((s) => s.me);
   const siteName = useStore((s) => s.config.siteName);
   const activeChatId = useStore((s) => s.activeChatId);
+  const drafts = useDrafts(me.id, 'chat');
   const openModal = useStore((s) => s.openModal);
   const [query, setQuery] = useState('');
   const [menu, setMenu] = useState(false);
@@ -68,12 +70,12 @@ export default function Sidebar() {
   const list = useMemo(() => {
     const q = query.trim().toLowerCase();
     return Object.values(chats)
-      // A private chat with no message yet is listed only while it is open (like Telegram).
-      .filter((c) => c.type !== 'dm' || c.lastMessage || c.id === activeChatId)
+      // A private chat with no message yet is listed only while it is open or has a draft (like Telegram).
+      .filter((c) => c.type !== 'dm' || c.lastMessage || c.id === activeChatId || drafts[c.id])
       .filter((c) => (q ? true : inFolder(folder, c)))
       .filter((c) => !q || c.title.toLowerCase().includes(q) || c.peer?.username?.toLowerCase().includes(q))
       .sort(sortChats);
-  }, [chats, query, folder, activeChatId]);
+  }, [chats, query, folder, activeChatId, drafts]);
 
   // Long-press (phones) or right-click (desktop) on a chat: pin, mute, read, folders.
   const itemProps = (c) => ({
@@ -112,8 +114,7 @@ export default function Sidebar() {
 
   async function logout() {
     await api('POST', '/auth/logout').catch(() => {});
-    await clearOffline().catch(() => {});
-    await globalThis.caches?.delete('files').catch(() => {});
+    await wipeLocal();
     disconnectSocket();
     location.hash = '';
     location.reload();
@@ -176,6 +177,7 @@ export default function Sidebar() {
         )}
         {list.map((c) => {
           const last = c.lastMessage;
+          const draft = c.id !== activeChatId && drafts[c.id];
           const sender = last?.sender && c.type === 'group' ? (last.sender.id === me.id ? 'شما: ' : last.sender.displayName + ': ') : '';
           return (
             <li key={c.id}>
@@ -191,11 +193,18 @@ export default function Sidebar() {
                     {last && <span className="time">{formatListTime(last.createdAt)}</span>}
                   </div>
                   <div className="row">
-                    <span className="preview">
-                      {sender}
-                      <PreviewIcon m={last} />
-                      <RichText text={messagePreview(last)} size={16} />
-                    </span>
+                    {draft ? (
+                      <span className="preview">
+                        <span className="draft-label">پیش‌نویس: </span>
+                        <RichText text={draftPreview(draft)} size={16} />
+                      </span>
+                    ) : (
+                      <span className="preview">
+                        {sender}
+                        <PreviewIcon m={last} />
+                        <RichText text={messagePreview(last)} size={16} />
+                      </span>
+                    )}
                     {c.unreadMentions > 0 && <span className="badge mention">@</span>}
                     {c.unread > 0 && <span className={`badge ${isChatMuted(c) ? 'quiet' : ''}`}>{toFa(c.unread)}</span>}
                     {!c.unread && c.pinnedAt && <Pin size={14} className="pin-mark" aria-label="سنجاق‌شده" />}

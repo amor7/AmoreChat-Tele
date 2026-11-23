@@ -1,8 +1,21 @@
+# Every service rotates its own log: the default json-file driver never deletes, so a long
+# outage (no admin around to clean up) would slowly fill the disk with logs.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: '10m'
+    max-file: '3'
+
 services:
   app:
     image: amorechat:latest
     build: .
     restart: unless-stopped
+    logging: *logging
+    # The app runs as a normal user and needs no Linux capabilities; dropping them all (and
+    # blocking setuid gains) limits what a bug in a parsed file or in TDLib could do.
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
     environment:
       - LOG_LEVEL=${LOG_LEVEL:-info}
       - BACKUP_KEEP=${BACKUP_KEEP:-14}
@@ -39,6 +52,7 @@ services:
     depends_on:
       - app
     restart: unless-stopped
+    logging: *logging
     user: root
     cap_add:
       - NET_ADMIN
@@ -53,6 +67,7 @@ services:
   livekit:
     image: livekit/livekit-server:v1.13.7
     restart: unless-stopped
+    logging: *logging
     command: --config /etc/livekit.yaml --node-ip ${PUBLIC_IP:-127.0.0.1}
     environment:
       - 'LIVEKIT_KEYS=amorechat: ${LIVEKIT_API_SECRET:-}'
@@ -67,6 +82,15 @@ services:
     # Pinned (like LiveKit): updates only download it again when a release moves to a newer one.
     image: caddy:2.11.7-alpine
     restart: unless-stopped
+    logging: *logging
+    cap_drop: [ALL]
+    # The caddy binary carries the cap_net_bind_service file capability (for ports 80/443);
+    # without it in the bounding set the kernel refuses to exec it at all.
+    # DAC_READ_SEARCH: with TLS_MODE=custom the admin's ./certs/key.pem is often owned by
+    # another user with mode 600; without DAC_OVERRIDE even root in the container can't open
+    # it and Caddy won't start. This one only lets it read (and list), never write.
+    cap_add: [NET_BIND_SERVICE, DAC_READ_SEARCH]
+    security_opt: ['no-new-privileges:true']
     depends_on:
       - app
     ports:

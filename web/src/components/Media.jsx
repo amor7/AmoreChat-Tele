@@ -59,7 +59,8 @@ export function VoicePlayer({ file, mine }) {
       </div>
       <audio
         ref={audio}
-        src={fileUrl(file.id)}
+        // A voice still in the outbox plays from this device (its URL may not be ready yet).
+        src={file.local ? file.localUrl || undefined : fileUrl(file.id)}
         preload="metadata"
         onPlay={() => setPlaying(true)}
         onPause={() => setPlaying(false)}

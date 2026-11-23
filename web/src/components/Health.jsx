@@ -3,6 +3,8 @@ import { Cpu, MemoryStick, HardDrive, ArrowDownUp, Users, Phone, AudioLines, Tri
 import { api } from '../api';
 import { useStore } from '../store';
 import { formatSize, formatDateTime, toFa } from '../util';
+import { plainHttpUrl } from '../transfer';
+import QrCode from './QrCode';
 
 const RANGES = [
   ['1h', '۱ ساعت'],
@@ -183,6 +185,15 @@ export default function Health() {
                 : `${data.cert.issuer || 'گواهی'} — معتبر تا ${formatDateTime(data.cert.notAfter)} (${toFa(data.cert.daysLeft)} روز مانده)`}
               {data.cert.mode === 'auto' && ' · تمدید خودکار حدود ۳۰ روز قبل از پایان؛ اگر به ۲۰ روز برسد هشدار می‌گیرید.'}
             </p>
+          )}
+          {data.cert.mode === 'internal' && (
+            // Plain http on purpose: a phone that doesn't trust the internal CA yet can't open https.
+            <div className="inline-form">
+              <QrCode value={plainHttpUrl(location, '/ca')} title="نصب گواهی سرور روی گوشی" />
+              <p className="muted">
+                برای نصب گواهی روی گوشی‌ها این کد را با دوربین گوشی اسکن کنید (<span dir="ltr">{plainHttpUrl(location, '/ca')}</span>).
+              </p>
+            </div>
           )}
         </>
       )}
