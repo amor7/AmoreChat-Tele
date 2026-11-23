@@ -1,5 +1,7 @@
 # AmoreChat-Tele Changelog
 
+> این فایل متوقف شده؛ تغییرات از نسخه‌ی 1.0.9 به بعد در [CHANGELOG.md](CHANGELOG.md) است.
+
 ## [1.0.8] — 2026-10-29
 
 - فرم دستی (`TeleProxyForm.jsx`) → `outboundFromForm()` با اعتبارسنجی همه فیلدها؛ ذخیره به‌صورت JSON sing-box

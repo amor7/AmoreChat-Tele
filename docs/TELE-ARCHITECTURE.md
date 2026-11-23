@@ -1,6 +1,6 @@
-# Tele integration architecture (draft)
+# Tele integration architecture
 
-This document records the implementation boundaries for adding Telegram user-account integration to AmoreChat. It is a design note, not a claim that Telegram integration is already implemented.
+This document describes the design and module boundaries of the Telegram user-account integration (Tele) in AmoreChat. It is implemented in `server/src/tele/` (plus `server/src/routes/tele.js`) and in the web client's `web/src/components/Tele*.jsx`; the sections below are the rules that code is meant to follow, and the milestone list records what is done.
 
 ## Goals
 
@@ -46,18 +46,20 @@ Treat protocol support as adapter-specific and verify each implementation with i
 - Do not claim OpenVPN, WireGuard, or every V2Ray URI is supported until parsing, lifecycle, health checks, and no-direct-fallback behavior are tested for that adapter.
 - Keep endpoint secrets encrypted at rest and redact them from API responses and logs.
 
-## First implementation milestones
+## Implementation milestones
 
-1. Add schema and migration for Telegram account metadata, selected dialogs, proxy inventory, and routing policy (without storing plaintext auth secrets).
-2. Add admin APIs/UI for proxy entries and policy selection, plus a route-health test that is explicitly non-fallback.
-3. Add the isolated Telegram session manager and login lifecycle.
-4. Add per-user dialog selection and bounded history sync.
-5. Add message send/receive mapping and media handling with idempotency.
-6. Add tests for authorization boundaries, route failure, proxy failover, and ensuring no direct egress.
+Status as checked against the code (the tests in item 6 are only partly there).
 
-## Out of scope for the initial milestone
+1. Done: schema and migrations for Telegram accounts, dialogs, messages, proxy inventory and routing policy (`tele_*` tables in `server/src/db.js`).
+2. Done: admin APIs/UI for proxy entries and routing policy (`tele/proxies.js`, `TeleAdmin.jsx`, `TeleProxyForm.jsx`), and a route-health probe through the candidate route (`probeViaEgress`, `probeAll` in `tele/egress.js`).
+3. Done: isolated per-account Telegram session manager and login lifecycle, with encrypted sessions and a disconnect action (`tele/accounts.js`, `disconnectAccount`).
+4. Done: per-user dialog selection and bounded history sync (`setDialogSelected`, `syncDialogMessages`).
+5. Done: send/receive mapping for text, photos, voice and files, with an offline retry queue (`tele/messages.js`, `flushQueue`). Not re-verified here: the idempotency/deduplication behavior.
+6. Partly done: authorization boundaries are covered by `server/test/tele-e2e.mjs` (real Telegram test DC), and proxy link parsing by `server/test/uri.test.mjs`. Dedicated tests for route failure, proxy failover and "no direct egress" were not found.
+
+## Out of scope
 
 - Telegram Secret Chats (they are device-specific and not available through the ordinary client API sync model).
-- Telegram voice/video calls.
+- Telegram voice/video calls. (Voice messages are supported; calls are not.)
 - Full mirroring of every dialog by default; users must opt in per dialog.
-- Merging Telegram messages into native AmoreChat chats.
+- Merging Telegram messages into native AmoreChat chats. (A single message can be forwarded between Tele and a native chat in both directions, but the two stay separate stores.)

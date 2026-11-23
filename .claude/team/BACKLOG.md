@@ -3,9 +3,8 @@
 > موارد از onboarding 2026-11-23. «تأییدشده» = در کد دیده شد؛ بقیه گزارش ایجنت‌ها و هنوز بررسی دقیق نشده‌اند.
 
 ## باگ‌ها
-- [مهم · تأییدشده] `Dockerfile:6-7` از `npm install` (نه `npm ci`) استفاده می‌کند و بعد `tdl`/`prebuilt-tdlib` را با بازه‌ی `^` دوباره نصب می‌کند → build تکرارپذیر نیست و ممکن است با lock و `Dockerfile.runtime` (که `npm ci` دارد) فرق کند. برای پروژه‌ای که بسته‌ی آفلاین منتشر می‌کند مهم است.
 
-> انجام‌شده در v1.0.40 (حذف شد): سخت‌کردن ffmpeg، چرخش لاگ Docker، چک دیسک نصب/آپدیت، safeInterval/unhandledRejection، TeleView هم‌سطح چت داخلی، ویس در صف آفلاین، پیش‌نویس ماندگار، QR (از ایده‌ها).
+> انجام‌شده در v1.0.40 (حذف شد): build تکرارپذیر Docker با `npm ci`، سخت‌کردن ffmpeg، چرخش لاگ Docker، چک دیسک نصب/آپدیت، safeInterval/unhandledRejection، TeleView هم‌سطح چت داخلی، ویس در صف آفلاین، پیش‌نویس ماندگار، QR (از ایده‌ها).
 
 ## ریسک‌ها (از /ideas 2026-11-23، بررسی‌شده توسط skeptic)
 - [متوسط · v1.0.40] probe در `media.js` از رویداد `'exit'` به‌جای `'close'` استفاده می‌کند (از قبل در این branch) → stderr ممکن است ناقص بماند.
@@ -31,8 +30,7 @@
 - [مهم] actionهای GitHub به tag (`@v4`) پین شده‌اند نه SHA، و `release.yml` دسترسی نوشتن دارد؛ `tele-e2e.yml` روی PR اجرا می‌شود و از secretها کلید cache می‌سازد → پین SHA و محدود کردن رویدادها. (بخش `timeout-minutes` و `concurrency` در v1.0.40 انجام شد؛ پین SHA و محدودسازی رویدادها باقی است.)
 - [جزئی] گاردی برای ویرایش اشتباه migrationهای قدیمی در `server/src/db.js` نیست (مثلاً تست که hash ورودی‌های قدیمی ثابت بماند).
 - [جزئی] `TeleView.jsx` (~1258 خط) و `TeleAdmin.jsx` (~1043 خط) و `routes/tele.js` (وابسته به routeهای دیگر) → شکستن تدریجی هنگام تغییرات بعدی. هنگام شکستن: فراخوانی‌های `api` تلگرام (~۴۳ در Tele*.jsx) به `web/src/teleApi.js`، و `requireChat`/`assertCanPost`/`registerFile` از `routes/{chats,messages,files}.js` به ماژول دامنه منتقل شوند تا route از route دیگر import نکند.
-- [جزئی] `.env.example` متغیرهای `BACKUP_MIRROR_DIR` و `LIVEKIT_API_KEY` را که compose استفاده می‌کند ندارد.
-- [جزئی] `docs/TELE-ARCHITECTURE.md:3` هنوز می‌گوید «draft… not a claim that Telegram integration is already implemented»، در حالی که پیاده‌سازی شده.
+- [جزئی] `.env.example` متغیر `LIVEKIT_API_KEY` را که compose استفاده می‌کند ندارد (در compose ثابت `amorechat` است، پس شاید لازم نباشد).
 
 ## ایده‌ها
 - [کم] UI تلگرام با polling کار می‌کند (هر 5/10/60 ثانیه) در حالی که Socket.IO هست؛ در مقیاس <۵۰ کاربر اولویت پایین، ولی روی نت کند push مصرف داده را کم می‌کند.
