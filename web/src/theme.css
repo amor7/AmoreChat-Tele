@@ -1,66 +1,4 @@
 /* AmoreChat visual theme: loaded after styles.css / voice.css and overrides them. */
-:root {
-  --bg: #eef1f8;
-  --panel: #ffffff;
-  --panel-2: #f4f6fb;
-  --border: #e3e7f1;
-  --text: #121628;
-  --muted: #6b7390;
-  --accent: #6366f1;
-  --accent-2: #a855f7;
-  --accent-soft: #e8e9ff;
-  --grad: linear-gradient(135deg, #6366f1 0%, #8b5cf6 55%, #a855f7 100%);
-  --danger: #e11d48;
-  --ok: #10b981;
-  --bubble-in: #ffffff;
-  --bubble-out: var(--grad);
-  --bubble-out-text: #ffffff;
-  --chat-bg: #e9ecf6;
-  --hover: #f1f3fa;
-  --shadow: 0 12px 40px rgb(30 34 70 / 0.16);
-  --shadow-sm: 0 2px 10px rgb(30 34 70 / 0.08);
-  --glass: rgb(255 255 255 / 0.78);
-  --radius: 16px;
-}
-@media (prefers-color-scheme: dark) {
-  :root:not([data-mode]) {
-    --bg: #0b0e1a;
-    --panel: #121729;
-    --panel-2: #0f1424;
-    --border: #222a44;
-    --text: #e6e8f5;
-    --muted: #8f97b8;
-    --accent: #818cf8;
-    --accent-2: #c084fc;
-    --accent-soft: #252b55;
-    --grad: linear-gradient(135deg, #6366f1 0%, #7c3aed 60%, #9333ea 100%);
-    --bubble-in: #1b2138;
-    --chat-bg: #0d1120;
-    --hover: #1a2036;
-    --shadow: 0 12px 40px rgb(0 0 0 / 0.55);
-    --shadow-sm: 0 2px 10px rgb(0 0 0 / 0.35);
-    --glass: rgb(18 23 41 / 0.8);
-  }
-}
-:root[data-mode='dark'] {
-  --bg: #0b0e1a;
-  --panel: #121729;
-  --panel-2: #0f1424;
-  --border: #222a44;
-  --text: #e6e8f5;
-  --muted: #8f97b8;
-  --accent: #818cf8;
-  --accent-2: #c084fc;
-  --accent-soft: #252b55;
-  --grad: linear-gradient(135deg, #6366f1 0%, #7c3aed 60%, #9333ea 100%);
-  --bubble-in: #1b2138;
-  --chat-bg: #0d1120;
-  --hover: #1a2036;
-  --shadow: 0 12px 40px rgb(0 0 0 / 0.55);
-  --shadow-sm: 0 2px 10px rgb(0 0 0 / 0.35);
-  --glass: rgb(18 23 41 / 0.8);
-}
-
 body {
   background: var(--bg);
   letter-spacing: -0.005em;
@@ -85,7 +23,7 @@ body {
 .btn.primary {
   background: var(--grad);
   border: 0;
-  box-shadow: 0 6px 18px color-mix(in srgb, var(--accent) 35%, transparent);
+  box-shadow: var(--glow-accent);
 }
 .btn.primary:hover {
   filter: brightness(1.06);
@@ -279,7 +217,7 @@ select:focus {
 }
 .chat-item.active {
   background: var(--grad);
-  box-shadow: 0 6px 20px color-mix(in srgb, var(--accent) 30%, transparent);
+  box-shadow: var(--glow-accent);
 }
 .chat-item .title {
   display: inline-flex;
@@ -305,7 +243,7 @@ select:focus {
 }
 .fab {
   background: var(--grad);
-  box-shadow: 0 10px 28px color-mix(in srgb, var(--accent) 45%, transparent);
+  box-shadow: var(--glow-accent-lg);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -383,10 +321,10 @@ select:focus {
 }
 .msg-row.mine .reply-quote {
   background: rgb(255 255 255 / 0.16);
-  border-inline-start-color: #fff;
+  border-inline-start-color: var(--bubble-out-text);
 }
 .msg-row.mine .reply-quote b {
-  color: #fff;
+  color: var(--bubble-out-text);
 }
 .msg-row.mine .file-icon,
 .msg-row.mine .play-btn {
@@ -396,11 +334,11 @@ select:focus {
   background: rgb(255 255 255 / 0.4);
 }
 .msg-row.mine .wave span.on {
-  background: #fff;
+  background: var(--bubble-out-text);
 }
 .msg-row.mine .speed {
   background: rgb(255 255 255 / 0.2);
-  color: #fff;
+  color: var(--bubble-out-text);
 }
 .msg-row.mine .bubble.deleted {
   background: var(--panel-2);
@@ -410,7 +348,7 @@ select:focus {
   display: inline-flex;
 }
 .ticks.read {
-  color: #67e8f9;
+  color: var(--tick-read);
 }
 .msg-row:not(.mine) .ticks.read {
   color: var(--accent);
@@ -477,7 +415,7 @@ select:focus {
 }
 .send-btn {
   background: var(--grad);
-  box-shadow: 0 6px 16px color-mix(in srgb, var(--accent) 40%, transparent);
+  box-shadow: var(--glow-accent);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -531,7 +469,7 @@ select:focus {
 /* ---------- Modals ---------- */
 .modal-backdrop {
   backdrop-filter: blur(4px);
-  background: rgb(10 12 30 / 0.4);
+  background: var(--overlay);
 }
 .modal {
   border-radius: 22px;
@@ -576,7 +514,7 @@ select:focus {
 }
 .pill.ok {
   background: color-mix(in srgb, var(--ok) 15%, transparent);
-  color: var(--ok);
+  color: var(--ok-text);
 }
 .pill.no {
   background: color-mix(in srgb, var(--danger) 13%, transparent);
@@ -607,13 +545,13 @@ select:focus {
 }
 .chip-btn.active {
   background: var(--grad);
-  color: #fff;
+  color: var(--on-accent);
   border-color: transparent;
 }
 
 /* ---------- Voice / calls ---------- */
 .voice-bar {
-  background: linear-gradient(135deg, #059669, #10b981);
+  background: linear-gradient(135deg, var(--ok-strong), var(--ok));
 }
 .ctl {
   display: flex;
@@ -629,8 +567,8 @@ select:focus {
   background: var(--grad);
 }
 .ctl.hangup {
-  background: linear-gradient(135deg, #e11d48, #f43f5e);
-  box-shadow: 0 8px 22px rgb(225 29 72 / 0.4);
+  background: linear-gradient(135deg, var(--hangup), var(--hangup-2));
+  box-shadow: var(--glow-hangup);
 }
 .vc-name {
   display: flex;
@@ -645,7 +583,7 @@ select:focus {
   height: 28px;
   border-radius: 50%;
   background: var(--grad);
-  color: #fff;
+  color: var(--on-accent);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -657,7 +595,7 @@ select:focus {
   font-weight: 500;
 }
 .room-view {
-  background: radial-gradient(circle at 20% 0%, #1e1b4b, #0b0e1a 60%);
+  background: radial-gradient(circle at 20% 0%, var(--stage-2), var(--stage) 60%);
 }
 .room-head small {
   display: inline-flex;
@@ -689,7 +627,7 @@ select:focus {
   height: 100%;
   border-radius: 18px;
   overflow: hidden;
-  background: linear-gradient(160deg, #1e2442, #141830);
+  background: linear-gradient(160deg, var(--stage-tile), var(--stage-tile-2));
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -699,7 +637,7 @@ select:focus {
   transition: outline-color 0.15s, transform 0.15s;
 }
 .mtile.speaking {
-  outline-color: #34d399;
+  outline-color: var(--speaking);
   box-shadow: 0 0 24px rgb(52 211 153 / 0.35);
 }
 .mtile.grid:hover,
@@ -733,7 +671,7 @@ select:focus {
   background: rgb(0 0 0 / 0.5);
   backdrop-filter: blur(8px);
   font-size: 13px;
-  color: #fff;
+  color: var(--text-on-media);
   white-space: nowrap;
   overflow: hidden;
 }
@@ -742,7 +680,7 @@ select:focus {
   text-overflow: ellipsis;
 }
 .muted-icon {
-  color: #fb7185;
+  color: var(--danger-on-dark);
   flex-shrink: 0;
 }
 .mtile.strip .mtile-label {
@@ -758,7 +696,7 @@ select:focus {
   inset-inline-start: 10px;
   width: auto;
   background: rgb(0 0 0 / 0.55);
-  color: #fff;
+  color: var(--text-on-media);
   border: 0;
   border-radius: 10px;
   padding: 4px 10px;
@@ -772,7 +710,7 @@ select:focus {
 .watch-btn {
   position: absolute;
   inset: 0;
-  background: radial-gradient(circle at 50% 40%, #312e81, #0f1225);
+  background: radial-gradient(circle at 50% 40%, var(--stage-3), var(--stage-watch));
   font-size: 15px;
 }
 .watch-cta {
@@ -783,7 +721,7 @@ select:focus {
   padding: 8px 16px;
   border-radius: 999px;
   margin-top: 6px;
-  box-shadow: 0 8px 22px rgb(99 102 241 / 0.4);
+  box-shadow: var(--glow-accent-lg);
 }
 .room-stage.spot {
   display: flex;
@@ -814,7 +752,7 @@ select:focus {
   width: 200px;
   aspect-ratio: 16 / 10;
   z-index: 2;
-  box-shadow: 0 10px 30px rgb(0 0 0 / 0.5);
+  box-shadow: var(--shadow-lg);
   border-radius: 18px;
 }
 @media (max-width: 767px) {
@@ -860,7 +798,7 @@ select:focus {
   gap: 8px;
 }
 .incoming-call {
-  background: radial-gradient(circle at 50% 30%, #4338ca, #1e1b4b 55%, #0b0e1a);
+  background: radial-gradient(circle at 50% 30%, var(--stage-4), var(--stage-2) 55%, var(--stage));
 }
 .ic-avatar {
   border-radius: 50%;
@@ -872,17 +810,17 @@ select:focus {
     box-shadow: 0 0 0 0 rgb(165 180 252 / 0.6);
   }
   100% {
-    box-shadow: 0 0 0 36px rgb(165 180 252 / 0);
+    box-shadow: 0 0 0 36px transparent;
   }
 }
 .call-btn {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #fff;
+  color: var(--on-accent);
 }
 .call-view {
-  background: radial-gradient(circle at 50% 30%, #312e81, #0b0e1a 70%);
+  background: radial-gradient(circle at 50% 30%, var(--stage-3), var(--stage) 70%);
 }
 .call-controls .ctl {
   background: rgb(255 255 255 / 0.14);
@@ -891,11 +829,11 @@ select:focus {
   background: var(--grad);
 }
 .call-controls .ctl.off {
-  background: #fff;
-  color: #111;
+  background: var(--text-on-media);
+  color: var(--stage);
 }
 .call-controls .ctl.hangup {
-  background: linear-gradient(135deg, #e11d48, #f43f5e);
+  background: linear-gradient(135deg, var(--hangup), var(--hangup-2));
 }
 
 /* One-line previews (reply quotes, bars) keep text and emoji images on a single row. */
@@ -974,7 +912,7 @@ select:focus {
   border-radius: 50%;
   border: 0;
   background: rgb(255 255 255 / 0.15);
-  color: #fff;
+  color: var(--text-on-media);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -987,12 +925,12 @@ select:focus {
   max-width: 92vw;
   max-height: 88vh;
   border-radius: 8px;
-  box-shadow: 0 20px 60px rgb(0 0 0 / 0.6);
+  box-shadow: var(--shadow-lg);
 }
 .user-list .chips button.chip-btn.active,
 .user-list .chips button.chip-btn.active:hover {
   background: var(--grad);
-  color: #fff;
+  color: var(--on-accent);
 }
 @media (max-width: 767px) {
   /* Keep bottom-sheet buttons clear of the iPhone home indicator. */

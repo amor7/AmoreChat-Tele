@@ -1,6 +1,9 @@
-// Appearance: color theme, light/dark/auto, message text size and chat wallpaper.
-// Stored per device (prefs); applied as attributes on <html> that themes.css reads.
+// Appearance: color theme, light/dark/auto, lite mode, message text size and chat wallpaper.
+// Stored per device (prefs); applied as attributes on <html> that tokens.css / themes.css read.
 import { getPrefs } from './util';
+import { liteEnabled, validWallpaper, validTextSize, barColor } from './appearance-rules';
+
+export { LITE_MODES, TEXT_SIZES, WALLPAPERS, liteEnabled, validWallpaper, validTextSize } from './appearance-rules';
 
 export const THEMES = [
   { id: 'indigo', name: 'نیلی', colors: ['#6366f1', '#a855f7'] },
@@ -19,20 +22,6 @@ export const MODES = [
   ['light', 'روشن'],
   ['dark', 'تیره'],
 ];
-export const TEXT_SIZES = [
-  ['14', 'کوچک'],
-  ['15', 'معمولی'],
-  ['17', 'بزرگ'],
-  ['19', 'خیلی بزرگ'],
-];
-export const WALLPAPERS = [
-  ['plain', 'ساده'],
-  ['dots', 'نقطه‌ای'],
-  ['grid', 'شطرنجی'],
-  ['waves', 'موج'],
-  ['glow', 'درخشش'],
-];
-
 const media = typeof matchMedia !== 'undefined' ? matchMedia('(prefers-color-scheme: dark)') : null;
 
 export function applyAppearance(prefs = getPrefs()) {
@@ -42,11 +31,17 @@ export function applyAppearance(prefs = getPrefs()) {
   const dark = mode === 'dark' || (mode === 'auto' && !!media?.matches);
   root.dataset.mode = dark ? 'dark' : 'light';
   root.dataset.theme = theme.id;
-  root.dataset.wall = prefs.wallpaper || 'dots';
-  root.style.setProperty('--msg-size', `${prefs.textSize || 15}px`);
-  // Browser / phone bars follow the theme.
-  const bar = getComputedStyle(root).getPropertyValue('--panel').trim() || (dark ? '#121729' : '#ffffff');
-  document.querySelector('meta[name="theme-color"]')?.setAttribute('content', bar);
+  root.dataset.wall = validWallpaper(prefs.wallpaper);
+  if (liteEnabled(prefs.lite || 'auto', typeof navigator !== 'undefined' ? navigator : null)) root.dataset.lite = '';
+  else delete root.dataset.lite;
+  root.style.setProperty('--msg-size', `${validTextSize(prefs.textSize)}px`);
+  // Browser / phone bars follow the theme. index.html has a light and a dark (media) meta for
+  // the first paint; from here on both carry the chosen color, so drop the media condition.
+  const bar = barColor(getComputedStyle(root).getPropertyValue('--panel'), dark);
+  for (const meta of document.querySelectorAll('meta[name="theme-color"]')) {
+    meta.setAttribute('content', bar);
+    meta.removeAttribute('media');
+  }
   try {
     window.AmoreAndroid?.setBars?.(bar, dark);
   } catch {

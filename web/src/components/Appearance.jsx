@@ -1,7 +1,7 @@
 import { useStore } from '../store';
-import { THEMES, MODES, TEXT_SIZES, WALLPAPERS, applyAppearance } from '../appearance';
+import { THEMES, MODES, LITE_MODES, TEXT_SIZES, WALLPAPERS, applyAppearance, liteEnabled, validWallpaper, validTextSize } from '../appearance';
 
-// Profile section: theme, light/dark, message text size, chat wallpaper (saved on this device).
+// Profile section: theme, light/dark, lite mode, message text size, chat wallpaper (saved on this device).
 export default function Appearance() {
   const prefs = useStore((s) => s.prefs);
   const setPrefs = useStore((s) => s.setPrefs);
@@ -10,6 +10,7 @@ export default function Appearance() {
     applyAppearance({ ...prefs, ...patch });
   };
   const theme = THEMES.find((t) => t.id === prefs.theme) || THEMES[0];
+  const lite = prefs.lite || 'auto';
 
   return (
     <>
@@ -31,10 +32,22 @@ export default function Appearance() {
           ))}
         </div>
       )}
+      <h5>حالت سبک</h5>
+      <p className="hint">برای گوشی‌های ضعیف: تاری پس‌زمینه، سایه‌ها و حرکت‌ها خاموش می‌شوند تا برنامه روان‌تر شود.</p>
+      <div className="segmented">
+        {LITE_MODES.map(([k, label]) => (
+          <button key={k} className={lite === k ? 'active' : ''} onClick={() => change({ lite: k })}>
+            {label}
+          </button>
+        ))}
+      </div>
+      {lite === 'auto' && (
+        <p className="hint">خودکار: اگر گوشی ضعیف باشد یا صرفه‌جویی داده روشن باشد، روشن می‌شود {liteEnabled('auto', navigator) ? '(الان روشن است).' : '(الان خاموش است).'}</p>
+      )}
       <h5>اندازه متن پیام‌ها</h5>
       <div className="segmented">
         {TEXT_SIZES.map(([k, label]) => (
-          <button key={k} className={String(prefs.textSize || 15) === k ? 'active' : ''} onClick={() => change({ textSize: Number(k) })}>
+          <button key={k} className={String(validTextSize(prefs.textSize)) === k ? 'active' : ''} onClick={() => change({ textSize: Number(k) })}>
             {label}
           </button>
         ))}
@@ -43,7 +56,7 @@ export default function Appearance() {
       <h5>پس‌زمینه گفتگو</h5>
       <div className="wall-grid">
         {WALLPAPERS.map(([k, label]) => (
-          <button key={k} className={`wall-swatch ${k} ${(prefs.wallpaper || 'dots') === k ? 'active' : ''}`} onClick={() => change({ wallpaper: k })}>
+          <button key={k} className={`wall-swatch ${k} ${validWallpaper(prefs.wallpaper) === k ? 'active' : ''}`} onClick={() => change({ wallpaper: k })}>
             {label}
           </button>
         ))}
