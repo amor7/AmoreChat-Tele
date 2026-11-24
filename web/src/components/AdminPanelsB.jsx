@@ -5,7 +5,7 @@ import { formatDateTime, messagePreview } from '../util';
 import { EmojiImg } from './Emoji';
 import { RtcSettings } from './AdminRtc';
 import { useLoad } from './AdminPanelsA1';
-import { Skeleton, ErrorState } from './States';
+import { Skeleton, ErrorState, EmptyState } from './States';
 
 export function Settings() {
   const showToast = useStore((s) => s.showToast);
@@ -78,7 +78,7 @@ export function Settings() {
 export function Reports() {
   const showToast = useStore((s) => s.showToast);
   const [status, setStatus] = useState('open');
-  const [data, load] = useLoad(`/admin/reports?status=${status}`);
+  const [data, load, error] = useLoad(`/admin/reports?status=${status}`);
 
   const act = (id, action) =>
     api('POST', `/admin/reports/${id}`, { action })
@@ -98,11 +98,8 @@ export function Reports() {
           بسته‌شده
         </button>
       </div>
-      {data?.reports.length === 0 && (
-        <p className="muted pad with-icon">
-          گزارشی وجود ندارد <EmojiImg ch="🎉" size={22} />
-        </p>
-      )}
+      {!data && (error ? <ErrorState message={error} onRetry={load} /> : <Skeleton lines={4} />)}
+      {data?.reports.length === 0 && <EmptyState compact icon={<EmojiImg ch="🎉" size={32} />} title="گزارشی وجود ندارد" />}
       <ul className="audit">
         {data?.reports.map((r) => (
           <li key={r.id} className="report">
@@ -161,18 +158,25 @@ export const ACTION_LABELS = {
 };
 
 export function Audit() {
-  const [entries, setEntries] = useState([]);
+  const showToast = useStore((s) => s.showToast);
+  const [entries, setEntries] = useState(null);
   const [more, setMore] = useState(true);
+  const [error, setError] = useState('');
   const load = async (before) => {
     const r = await api('GET', `/admin/audit${before ? `?before=${before}` : ''}`);
-    setEntries((e) => (before ? [...e, ...r.entries] : r.entries));
+    setError('');
+    setEntries((e) => (before ? [...(e || []), ...r.entries] : r.entries));
     setMore(r.entries.length === 100);
   };
+  // The first page fails in place (with a retry); a failed «more» is only a toast.
+  const first = () => load().catch((e) => setError(e.message));
   useEffect(() => {
-    load().catch(() => {});
-  }, []);
+    first();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  if (!entries) return error ? <ErrorState message={error} onRetry={first} /> : <Skeleton lines={5} />;
   return (
     <>
+      {!entries.length && <EmptyState compact hint="هنوز کاری ثبت نشده" />}
       <ul className="audit">
         {entries.map((a) => (
           <li key={a.id}>
@@ -184,7 +188,7 @@ export function Audit() {
         ))}
       </ul>
       {more && entries.length > 0 && (
-        <button className="btn wide" onClick={() => load(entries[entries.length - 1].id)}>
+        <button className="btn wide" onClick={() => load(entries[entries.length - 1].id).catch((e) => showToast(e.message))}>
           موارد بیشتر
         </button>
       )}

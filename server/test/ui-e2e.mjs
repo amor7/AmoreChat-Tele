@@ -287,6 +287,31 @@ step('shared confirm dialog: its Cancel does nothing; Escape closes it and focus
   await waitFor(() => !document.querySelector('.modal'), null, 'profile closed');
 }
 
+step('admin panel deep link: #/admin/vpn opens the VPN page, is consumed, and works a second time');
+{
+  const vpnOpen = () => waitFor(() => !!document.querySelector('.modal [data-admin-item="vpn"][aria-current="page"]'), null, '#/admin/vpn: the VPN page is open');
+  await page.goto(`${BASE}/#/`, { waitUntil: 'networkidle2' });
+  await page.evaluate(() => (location.hash = '#/admin/vpn'));
+  await vpnOpen();
+  await expectModalStays('admin panel from a link');
+  assert.ok(!(await page.evaluate(() => location.hash)).includes('admin'), 'the link is consumed (no #/admin while open)');
+  await page.keyboard.press('Escape');
+  await waitFor(() => !document.querySelector('.modal'), null, 'admin panel closed');
+  await sleep(300);
+  assert.ok(!(await page.evaluate(() => location.hash)).includes('admin'), 'closing leaves no #/admin behind');
+  // Open on another page, then the same link again: it opens and jumps back to VPN.
+  await page.evaluate(() => (location.hash = '#/admin/vpn'));
+  await vpnOpen();
+  await page.$eval('.modal [data-admin-item="health"]', (b) => b.click());
+  await waitFor(() => !!document.querySelector('.modal [data-admin-item="health"][aria-current="page"]'), null, 'moved to health');
+  await page.evaluate(() => (location.hash = '#/admin/vpn'));
+  await vpnOpen();
+  await expectModalStays('admin panel after a second link');
+  // Back still closes it in one step (the link did not leave a stray history entry on top).
+  await backCloses('admin panel after a second link');
+  assert.ok(!(await page.evaluate(() => location.hash)).includes('admin'), 'still no #/admin after closing');
+}
+
 step('server unreachable (requests hang, like a domain that no longer resolves): opens offline, no endless "loading"');
 await page.goto(`${BASE}/#/`, { waitUntil: 'networkidle2' });
 await waitFor(() => document.querySelectorAll('.sidebar .chat-item').length >= 2, null, 'chats saved on the device');

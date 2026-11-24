@@ -7,7 +7,7 @@ import { LimitsEditor } from './AdminRtc';
 import { TriangleAlert, SlidersHorizontal } from 'lucide-react';
 import { ACTION_LABELS } from './AdminPanelsB';
 import { confirmDialog, copyDialog, isolate } from '../confirm';
-import { Skeleton, ErrorState } from './States';
+import { Skeleton, ErrorState, EmptyState } from './States';
 
 /**
  * GET `url` now and on load(). [data, load, error]: `error` is the message of the last failed
@@ -91,10 +91,10 @@ const RESTRICT_HOURS = [
 ];
 
 function UserOverview({ u, canRestrict, run, onStorage }) {
-  const [o, load] = useLoad(`/admin/users/${u.id}/overview`);
+  const [o, load, error] = useLoad(`/admin/users/${u.id}/overview`);
   const [hours, setHours] = useState(24);
   const [reason, setReason] = useState('');
-  if (!o) return <small className="muted">…</small>;
+  if (!o) return error ? <ErrorState message={error} onRetry={load} /> : <Skeleton lines={2} />;
   const bytes = o.files.reduce((n, c) => n + c.bytes, 0);
   const active = Object.keys(o.restrictions);
   const owned = o.rooms.filter((r) => r.role === 'owner').length;
@@ -189,7 +189,7 @@ export function Users({ onStorage }) {
   const showToast = useStore((s) => s.showToast);
   const [q, setQ] = useState('');
   const [query, setQuery] = useState('');
-  const [data, load] = useLoad(`/admin/users?q=${encodeURIComponent(query)}`);
+  const [data, load, error] = useLoad(`/admin/users?q=${encodeURIComponent(query)}`);
   const [open, setOpen] = useState(null);
 
   useEffect(() => {
@@ -235,6 +235,8 @@ export function Users({ onStorage }) {
           </li>
         ))}
       </ul>
+      {!data && (error ? <ErrorState message={error} onRetry={load} /> : <Skeleton lines={4} />)}
+      {data && !data.users.length && <EmptyState compact hint="کاربری پیدا نشد." />}
     </>
   );
 }

@@ -3023,3 +3023,171 @@ input.music-bar-seek:hover::-moz-range-thumb {
   margin-inline-start: auto;
   width: min(45%, 260px);
 }
+
+/* ---------- Admin panel navigation (Admin.jsx, admin-nav.js) ----------
+   Wide screens: every section in a side list, the page beside it, each scrolling on its own.
+   Phones: a row of sections, the current section's pages in a row under it, both sticky. */
+.modal.admin-modal {
+  /* A fixed height, so the panel does not jump in size from page to page. */
+  height: 90vh;
+  max-height: 760px;
+}
+.modal-body.admin-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  padding: 0;
+  overflow: hidden;
+}
+.admin-layout {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+.admin-nav {
+  flex: 0 0 200px;
+  overflow-y: auto;
+  padding: var(--space-1) var(--space-2) var(--space-4);
+  border-inline-end: 1px solid var(--border);
+  background: var(--panel-2);
+  /* More below: the last rows fade out. Without mask support they are simply not faded. */
+  -webkit-mask-image: linear-gradient(to bottom, black calc(100% - var(--space-4)), transparent);
+  mask-image: linear-gradient(to bottom, black calc(100% - var(--space-4)), transparent);
+}
+.admin-sections {
+  display: none;
+}
+.admin-nav .admin-nav-title {
+  margin: var(--space-2) var(--space-2) 2px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+.admin-nav ul {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.admin-nav ul button {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: 5px var(--space-3);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 14px;
+  text-align: start;
+  cursor: pointer;
+  transition: background var(--dur-fast);
+}
+.admin-nav ul button:hover {
+  background: var(--hover);
+}
+.admin-nav ul button[aria-current='page'] {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+.admin-content {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding: var(--space-4);
+}
+/* Short number boxes (priority, minutes, caps) in the Telegram / VPN pages: .inline-form makes
+   its inputs grow, which these should not. */
+.inline-form input.num-input {
+  flex: 0 0 auto;
+  width: 88px;
+  min-width: 0;
+}
+.inline-form input.num-input.wide {
+  width: 104px;
+}
+@media (max-width: 767px) {
+  .modal.admin-modal {
+    height: 92vh;
+    max-height: 92vh;
+  }
+  .modal-body.admin-body {
+    display: block;
+    overflow-y: auto;
+  }
+  .admin-layout {
+    display: block;
+  }
+  .admin-nav {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    padding: var(--space-2) 0;
+    border-inline-end: 0;
+    border-bottom: 1px solid var(--border);
+    background: var(--panel);
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+  .admin-sections,
+  .admin-nav ul {
+    display: flex;
+    flex-direction: row;
+    gap: var(--space-2);
+    overflow-x: auto;
+    padding-inline-start: var(--space-3);
+    padding-inline-end: var(--space-6);
+    /* The rows scroll sideways: the far (left, in RTL) edge fades so a cut-off chip reads as
+       "more this way". The end padding lets the last chip scroll clear of the fade. Without
+       mask support the rows just are not faded. */
+    -webkit-mask-image: linear-gradient(to right, transparent, black var(--space-6));
+    mask-image: linear-gradient(to right, transparent, black var(--space-6));
+  }
+  .admin-sections {
+    padding-bottom: var(--space-2);
+  }
+  .admin-sections button {
+    flex: 0 0 auto;
+    min-height: var(--tap);
+    padding: 6px 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-pill);
+    background: none;
+    color: inherit;
+    font: inherit;
+    font-size: 14px;
+    white-space: nowrap;
+    cursor: pointer;
+  }
+  .admin-sections button[aria-current='true'] {
+    border-color: var(--accent);
+    background: var(--accent);
+    color: var(--on-accent);
+    font-weight: 600;
+  }
+  .admin-nav .admin-nav-title,
+  .admin-group {
+    display: none;
+  }
+  .admin-group.current {
+    display: block;
+  }
+  .admin-nav ul button {
+    width: auto;
+    min-height: var(--tap);
+    white-space: nowrap;
+  }
+  .admin-nav ul li {
+    flex: 0 0 auto;
+  }
+  .admin-content {
+    overflow: visible;
+    padding: var(--space-3);
+  }
+}

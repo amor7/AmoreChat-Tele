@@ -4,13 +4,14 @@ import { api } from '../api';
 import { toFa } from '../util';
 import { useLoad } from './AdminPanelsA1';
 import { confirmDialog, promptDialog, isolate } from '../confirm';
+import { Skeleton, ErrorState, EmptyState } from './States';
 
 // The names kept from everyone: release one, give it to a user, or add more.
 export default function AdminHandles() {
   const showToast = useStore((s) => s.showToast);
   const [q, setQ] = useState('');
   const [name, setName] = useState('');
-  const [data, load] = useLoad(`/admin/handles?q=${encodeURIComponent(q)}`);
+  const [data, load, error] = useLoad(`/admin/handles?q=${encodeURIComponent(q)}`);
 
   const run = async (fn, ok) => {
     try {
@@ -66,6 +67,8 @@ export default function AdminHandles() {
           </li>
         ))}
       </ul>
+      {!data && (error ? <ErrorState message={error} onRetry={load} /> : <Skeleton lines={4} />)}
+      {data && !data.names.length && <EmptyState compact hint={q ? 'شناسه‌ای پیدا نشد' : 'هنوز شناسه‌ای رزرو نشده'} />}
       {data?.kept.length > 0 && (
         <>
           <h4>شناسه‌های اصلی کانال‌های تلگرام</h4>

@@ -404,10 +404,11 @@ const admin = {
     await sleep(500);
     await p.evaluate(() => document.querySelector('.menu-btn')?.click());
     await click(p, '.sidebar .menu > button', 'پنل مدیریت');
-    await wait(p, () => document.querySelector('.modal .tabs button'), null, 'admin panel');
-    const n = await p.$$eval('.modal .tabs button', (b) => b.length);
+    // Every page of the panel, by its stable id (data-admin-item).
+    await wait(p, () => document.querySelector('.modal [data-admin-item]'), null, 'admin panel');
+    const n = await p.$$eval('.modal [data-admin-item]', (b) => b.length);
     for (let i = 0; i < n; i++) {
-      await p.$$eval('.modal .tabs button', (b, x) => b[x].click(), i);
+      await p.$$eval('.modal [data-admin-item]', (b, x) => b[x].click(), i);
       await sleep(900);
     }
     await p.evaluate(() => document.querySelector('.modal [aria-label="بستن"], .modal .close')?.click());

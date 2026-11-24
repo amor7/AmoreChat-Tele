@@ -59,7 +59,7 @@ function PendingPhoto({ m }) {
   return (
     <button className="pending-photo" style={{ aspectRatio: `1 / ${ratio}` }} onClick={load} disabled={busy} aria-label="نمایش عکس">
       <ImageDown size={28} />
-      <span>{busy ? 'در حال دریافت از تلگرام…' : `نمایش عکس${p.size ? ` (${toFa(Math.max(1, Math.round(p.size / 1024)))} KB)` : ''}`}</span>
+      <span>{busy ? 'در حال دریافت از تلگرام…' : `نمایش عکس${p.size ? ` (${formatSize(p.size)})` : ''}`}</span>
     </button>
   );
 }

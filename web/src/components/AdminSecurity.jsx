@@ -3,7 +3,7 @@ import { api } from '../api';
 import { useStore } from '../store';
 import { toFa, formatDateTime } from '../util';
 import { ShieldAlert, Ban, BellRing } from 'lucide-react';
-import { Skeleton, ErrorState } from './States';
+import { Skeleton, ErrorState, EmptyState } from './States';
 
 // Failed logins per IP, banned IPs (ban / unban), and the owner's security alerts.
 export default function AdminSecurity() {
@@ -86,8 +86,8 @@ export default function AdminSecurity() {
               )}
             </li>
           ))}
-          {!data.failures.length && <li className="muted">تلاش ناموفقی ثبت نشده است.</li>}
         </ul>
+        {!data.failures.length && <EmptyState compact hint="تلاش ناموفقی ثبت نشده است." />}
       </div>
 
       <div className="boxed" style={{ marginTop: 16 }}>
@@ -127,8 +127,8 @@ export default function AdminSecurity() {
               </button>
             </li>
           ))}
-          {!data.bans.length && <li className="muted">آی‌پی بن‌شده‌ای نیست.</li>}
         </ul>
+        {!data.bans.length && <EmptyState compact hint="آی‌پی بن‌شده‌ای نیست." />}
       </div>
 
       {owner && (

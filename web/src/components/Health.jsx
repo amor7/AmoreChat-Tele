@@ -1,10 +1,11 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Cpu, MemoryStick, HardDrive, ArrowDownUp, Users, Phone, AudioLines, TriangleAlert, CircleCheck, Info } from 'lucide-react';
 import { api } from '../api';
 import { useStore } from '../store';
 import { formatSize, formatDateTime, toFa } from '../util';
 import { plainHttpUrl } from '../transfer';
 import QrCode from './QrCode';
+import { Skeleton, ErrorState, EmptyState } from './States';
 
 const RANGES = [
   ['1h', '۱ ساعت'],
@@ -75,22 +76,31 @@ export default function Health() {
   const showToast = useStore((s) => s.showToast);
   const [range, setRange] = useState('24h');
   const [data, setData] = useState(null);
+  const [error, setError] = useState('');
+  const [retry, setRetry] = useState(0);
+  const hasData = useRef(false);
+  hasData.current = !!data;
 
   useEffect(() => {
     let alive = true;
     const load = () =>
       api('GET', `/admin/health?range=${range}`)
-        .then((d) => alive && setData(d))
-        .catch((e) => showToast(e.message));
+        .then((d) => {
+          if (!alive) return;
+          setError('');
+          setData(d);
+        })
+        // Nothing shown yet: say so in place (with a retry); later failures are only a toast.
+        .catch((e) => alive && (hasData.current ? showToast(e.message) : setError(e.message)));
     load();
     const t = setInterval(load, 30000);
     return () => {
       alive = false;
       clearInterval(t);
     };
-  }, [range]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [range, retry]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (!data) return <p className="muted">…</p>;
+  if (!data) return error ? <ErrorState message={error} onRetry={() => setRetry((n) => n + 1)} /> : <Skeleton lines={5} />;
   const n = data.now;
   const memP = pct(n.memUsed, n.memTotal);
   const diskP = pct(n.diskUsed, n.diskTotal);
@@ -236,8 +246,8 @@ export default function Health() {
             </small>
           </li>
         ))}
-        {!data.alerts.length && <li className="muted">هشداری ثبت نشده</li>}
       </ul>
+      {!data.alerts.length && <EmptyState compact hint="هشداری ثبت نشده" />}
     </div>
   );
 }

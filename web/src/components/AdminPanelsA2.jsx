@@ -6,7 +6,7 @@ import { DatabaseBackup, Download, Megaphone, Volume2, Users as UsersIcon } from
 import { useLoad } from './AdminPanelsA1';
 import { QrButton } from './QrCode';
 import { confirmDialog, promptDialog, isolate } from '../confirm';
-import { Skeleton, ErrorState } from './States';
+import { Skeleton, ErrorState, EmptyState } from './States';
 
 export function Backups() {
   const showToast = useStore((s) => s.showToast);
@@ -102,8 +102,8 @@ export function Backups() {
             </a>
           </li>
         ))}
-        {!data.files.length && <li className="muted">هنوز نسخه‌ای ساخته نشده</li>}
       </ul>
+      {!data.files.length && <EmptyState compact hint="هنوز نسخه‌ای ساخته نشده" />}
       <details className="hint">
         <summary>بازگردانی پشتیبان روی سرور</summary>
         <p>روی سرور: برنامه را متوقف کنید، فایل را جای data/amorechat.db بگذارید (و برای پشتیبان کامل پوشهٔ uploads را هم از tar باز کنید) و دوباره اجرا کنید. جزئیات در README.</p>
@@ -114,7 +114,7 @@ export function Backups() {
 
 export function Invites() {
   const showToast = useStore((s) => s.showToast);
-  const [data, load] = useLoad('/admin/invites');
+  const [data, load, error] = useLoad('/admin/invites');
   const [f, setF] = useState({ maxUses: '1', expiresInHours: '72', note: '' });
   const link = (code) => `${location.origin}/#/invite/${code}`;
 
@@ -164,6 +164,8 @@ export function Invites() {
           );
         })}
       </ul>
+      {!data && (error ? <ErrorState message={error} onRetry={load} /> : <Skeleton lines={3} />)}
+      {data && !data.invites.length && <EmptyState compact hint="هنوز کد دعوتی ساخته نشده" />}
     </>
   );
 }
@@ -177,7 +179,7 @@ const CHAT_KINDS = [
 
 export function Chats({ onClose }) {
   const showToast = useStore((s) => s.showToast);
-  const [data, load] = useLoad('/admin/chats');
+  const [data, load, error] = useLoad('/admin/chats');
   const [kind, setKind] = useState('all');
   const [q, setQ] = useState('');
   const list = (data?.chats || []).filter((c) => (kind === 'all' || c.type === kind) && (!q || `${c.title} ${c.handle} ${c.ownerName} ${c.ownerUsername}`.toLowerCase().includes(q.toLowerCase().replace(/^@/, ''))));
@@ -233,8 +235,9 @@ export function Chats({ onClose }) {
             )}
           </li>
         ))}
-        {data && !list.length && <li className="muted center">موردی نیست</li>}
       </ul>
+      {!data && (error ? <ErrorState message={error} onRetry={load} /> : <Skeleton lines={4} />)}
+      {data && !list.length && <EmptyState compact hint={data.chats.length ? 'گفتگویی پیدا نشد' : 'هنوز گروه یا کانالی ساخته نشده'} />}
     </>
   );
 }

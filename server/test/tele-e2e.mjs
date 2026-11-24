@@ -1010,6 +1010,13 @@ async function uiChecks({ owner, alice, bob, pd, gd, meta, photoMsg, voiceMsg, s
       await waitText(sel, text);
       await page.evaluate((sel, text) => [...document.querySelectorAll(sel)].find((e) => e.textContent.includes(text)).click(), sel, text);
     };
+    // Admin panel pages by their stable id (data-admin-item), not by label or layout.
+    const adminItem = async (id) => {
+      const sel = `.modal [data-admin-item="${id}"]`;
+      await page.waitForSelector(sel);
+      await page.$eval(sel, (b) => b.click());
+      await page.waitForSelector(`${sel}[aria-current="page"]`);
+    };
 
     log('UI: forward a Telegram message into the app');
     const savedCount = async () => ok(await alice.call('GET', `/api/chats/${savedChat.id}/messages?limit=100`), 'saved').messages.filter((m) => m.text === helloText).length;
@@ -1077,14 +1084,14 @@ async function uiChecks({ owner, alice, bob, pd, gd, meta, photoMsg, voiceMsg, s
     await open(owner, '#/', { width: 1280, height: 900 });
     await page.click('.menu-btn');
     await clickText('.sidebar .menu > button', 'پنل مدیریت');
-    await clickText('.modal .tabs button', 'VPN');
+    await adminItem('vpn');
     await clickText('.modal .tele-seg button', 'هشدارها');
     await waitText('.modal h4', 'هشدارها');
     await noBrokenText('admin panel, VPN');
     await shot('admin');
     await page.evaluate(() => document.querySelector('.modal .tele-alerts').scrollIntoView());
     await shot('admin-alerts');
-    await clickText('.modal .tabs button', 'تلگرام');
+    await adminItem('tele');
     await clickText('.modal .tele-seg button', 'کاربران');
     await waitText('.modal .tele-users', 'Alice');
     await noBrokenText('admin panel, Telegram');
@@ -1130,7 +1137,7 @@ async function uiChecks({ owner, alice, bob, pd, gd, meta, photoMsg, voiceMsg, s
     await open(owner, '#/', { width: 1280, height: 900 });
     await page.click('.menu-btn');
     await clickText('.sidebar .menu > button', 'پنل مدیریت');
-    await clickText('.modal .tabs button', 'امنیت');
+    await adminItem('security');
     await waitText('.modal h4', 'تلاش‌های ناموفق ورود');
     await waitText('.modal h4', 'آی‌پی‌های بن‌شده');
     await noBrokenText('admin panel, Security');
