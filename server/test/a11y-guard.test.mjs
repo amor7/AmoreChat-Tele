@@ -69,6 +69,9 @@ const CLICK_ALLOWED = {
   'components/Music.jsx music-sheet-back': 'backdrop of the music sheet',
   // Tap anywhere on the call shows the auto-hidden controls; keyboard focus does the same (onFocus).
   'components/CallView.jsx call-view': 'shows the call controls',
+  // A Telegram message bubble: a screen reader's activation (a click with detail 0, not after a
+  // touch) opens the message menu; keyboard users have the «کارهای پیام» button inside it.
+  'components/TeleMessage.jsx bubble': 'screen-reader activation opens the Telegram message menu',
 };
 
 test('clickable div/span/li have a role (or are an explained backdrop)', () => {

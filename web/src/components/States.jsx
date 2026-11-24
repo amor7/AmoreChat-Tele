@@ -88,3 +88,20 @@ export function BusyState({ text, compact = false }) {
     </div>
   );
 }
+
+/** Placeholder message bubbles while a chat's history loads for the first time. */
+export function SkeletonMessages({ rows = 6, announce = true }) {
+  return (
+    <div className="skeleton skeleton-messages">
+      {announce && <Loading />}
+      <div aria-hidden="true">
+        {Array.from({ length: rows }, (_, i) => (
+          <div key={i} className={`skeleton-bubble ${i % 3 === 1 ? 'mine' : ''}`}>
+            <span className="skeleton-line" style={{ width: `${WIDTHS[i % WIDTHS.length]}%` }} />
+            {i % 2 === 0 && <span className="skeleton-line" style={{ width: `${WIDTHS[(i + 3) % WIDTHS.length] - 25}%` }} />}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}

@@ -1,4 +1,5 @@
-import { useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { MoreVertical } from 'lucide-react';
 import { useMenu } from '../a11y';
 import { useAnchoredPosition } from '../anchor';
 
@@ -46,5 +47,37 @@ export function MenuItem({ icon, onClick, danger = false, disabled = false, clas
       {icon && children ? ' ' : null}
       {children}
     </button>
+  );
+}
+
+/**
+ * A header button with a drop-down menu under it (the Telegram list and chat headers): «بیشتر»
+ * by default, or another `label` / `icon` (the «افزودن گفتگو» menu). Items are <MenuItem>s.
+ * Class names (.tele-more, .tele-more-menu) are kept from the Telegram page that introduced it.
+ */
+export function HeaderMenu({ label = 'بیشتر', icon = <MoreVertical size={20} />, children }) {
+  const [open, setOpen] = useState(false);
+  // A tap anywhere closes it, the menu's own buttons included.
+  useEffect(() => {
+    if (!open) return;
+    const close = () => setOpen(false);
+    const t = setTimeout(() => document.addEventListener('click', close));
+    return () => {
+      clearTimeout(t);
+      document.removeEventListener('click', close);
+    };
+  }, [open]);
+  return (
+    <span className="tele-more">
+      <button className="icon-btn" aria-label={label} aria-haspopup="menu" aria-expanded={open} title={label} onClick={() => setOpen(!open)}>
+        {icon}
+      </button>
+      {/* No backdrop: the document listener above closes it on any tap and lets the tap through. */}
+      {open && (
+        <Menu label={label} className="tele-more-menu" backdrop={false} onClose={() => setOpen(false)}>
+          {children}
+        </Menu>
+      )}
+    </span>
   );
 }

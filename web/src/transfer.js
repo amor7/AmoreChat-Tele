@@ -73,8 +73,10 @@ export function watchedUpload(xhr, body, { onProgress, signal, stallMs = 45000, 
  * Resolves { status, ok, blob } for success and { status, ok, text } for an error answer;
  * rejects with an Error whose `kind` is 'cancel', 'connect' (no answer at all), 'late',
  * 'stall' or 'broken' (the link broke mid-body).
+ * `onProgress(received, total)` follows the body as it arrives (total 0 when the server sent no
+ * length); it only watches the bytes, the request itself is the same with or without it.
  */
-export async function watchedDownload(fetchFn, url, init, { signal, stallMs = 45000, responseMs = 5 * 60 * 1000 } = {}) {
+export async function watchedDownload(fetchFn, url, init, { signal, stallMs = 45000, responseMs = 5 * 60 * 1000, onProgress } = {}) {
   const ctl = new AbortController();
   let why = null;
   let timer = null;
@@ -107,6 +109,8 @@ export async function watchedDownload(fetchFn, url, init, { signal, stallMs = 45
       return { status: res.status, ok: false, text };
     }
     const parts = [];
+    const total = Number(res.headers?.get?.('content-length')) || 0;
+    let received = 0;
     try {
       if (res.body?.getReader) {
         const reader = res.body.getReader();
@@ -115,9 +119,14 @@ export async function watchedDownload(fetchFn, url, init, { signal, stallMs = 45
           if (done) break;
           parts.push(value);
           arm(stallMs, 'stall');
+          received += value?.length || 0;
+          onProgress?.(received, total);
         }
       } else {
-        parts.push(await res.blob());
+        // Old WebViews without streams: one step, at the end.
+        const blob = await res.blob();
+        parts.push(blob);
+        onProgress?.(blob.size, total || blob.size);
       }
     } catch {
       throw error('broken');

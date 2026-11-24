@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
-import { api, TELE_LOCKED } from '../api';
+import { TELE_LOCKED } from '../api';
+import { teleStatus, forwardToChats, forwardToTele, teleSessions, endTeleSession, endOtherTeleSessions } from '../teleApi';
+import { avatarNum as num } from '../tele-rules';
 import { useStore } from '../store';
 import { toFa, postBlockReason } from '../util';
 import { Modal } from './Modals';
@@ -10,7 +12,6 @@ import { confirmDialog } from '../confirm';
 // Forwarding between Telegram and the app's own chats (both ways). Photos and voice go along only
 // for users an admin allowed them; otherwise the text (and the file's name) is sent.
 
-const num = (id) => Math.abs(Number(String(id || '').replace(/^[uc]/, '')) || 0);
 // TELE_LOCKED (423): the user's Telegram passcode lock is on (see TelePasscode.jsx).
 const isLocked = (e) => e?.status === TELE_LOCKED;
 
@@ -32,7 +33,7 @@ export function TeleToChat({ message, onClose }) {
   async function send() {
     setBusy(true);
     try {
-      const { sent } = await api('POST', `/tele/messages/${message.id}/forward`, { chatIds: picked }, { timeout: 120000 });
+      const { sent } = await forwardToChats(message.id, picked);
       showToast(`به ${toFa(sent.length)} گفتگو فرستاده شد`);
       onClose();
     } catch (e) {
@@ -89,7 +90,7 @@ export function ChatToTele({ message, onClose }) {
   const [picked, setPicked] = useState([]);
   const [busy, setBusy] = useState(false);
   const load = () =>
-    api('GET', '/tele/status')
+    teleStatus()
       .then(setStatus)
       .catch((e) => (isLocked(e) ? setStatus({ access: true, locked: true }) : showToast(e.message)));
   useEffect(() => {
@@ -102,7 +103,7 @@ export function ChatToTele({ message, onClose }) {
   async function send() {
     setBusy(true);
     try {
-      const { sent } = await api('POST', '/tele/forward', { messageId: message.id, dialogIds: picked }, { timeout: 120000 });
+      const { sent } = await forwardToTele(message.id, picked);
       showToast(`به ${toFa(sent.length)} گفتگوی تلگرام فرستاده شد`);
       onClose();
     } catch (e) {
@@ -181,7 +182,7 @@ export function TeleSessions({ onClose }) {
     }
     setBusy(false);
   };
-  const loadSessions = () => run(() => api('GET', '/tele/sessions'));
+  const loadSessions = () => run(teleSessions);
   useEffect(() => {
     loadSessions();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -205,16 +206,16 @@ export function TeleSessions({ onClose }) {
               {!s.official && !s.current && <span className="tag danger">برنامه غیررسمی</span>}
               <br />
               <small className="muted">
-                {s.device || '—'} · <span dir="ltr">{s.ip || '—'}</span>
-                {s.location ? ` · ${s.location}` : ''}
+                {s.device || '—'}، <bdi dir="ltr">{s.ip || '—'}</bdi>
+                {s.location ? `، ${s.location}` : ''}
               </small>
               <br />
               <small className="muted">
-                ورود: {when(s.loggedInAt)} · آخرین فعالیت: {when(s.lastActiveAt)}
+                ورود: {when(s.loggedInAt)}؛ آخرین فعالیت: {when(s.lastActiveAt)}
               </small>
             </span>
             {!s.current && (
-              <button className="btn sm danger" disabled={busy} onClick={async () => (await confirmDialog({ title: 'این نشست پایان یابد؟', message: 'آن دستگاه از حساب تلگرام شما خارج می‌شود.', confirmLabel: 'پایان نشست', danger: true })) && run(() => api('DELETE', `/tele/sessions/${s.id}`))}>
+              <button className="btn sm danger" disabled={busy} onClick={async () => (await confirmDialog({ title: 'این نشست پایان یابد؟', message: 'آن دستگاه از حساب تلگرام شما خارج می‌شود.', confirmLabel: 'پایان نشست', danger: true })) && run(() => endTeleSession(s.id))}>
                 بستن
               </button>
             )}
@@ -226,7 +227,7 @@ export function TeleSessions({ onClose }) {
           بستن پنجره
         </button>
         {others.length > 0 && (
-          <button className="btn danger" disabled={busy} onClick={async () => (await confirmDialog({ title: `همه‌ی ${toFa(others.length)} نشست دیگر پایان یابند؟`, message: 'آن دستگاه‌ها از حساب تلگرام شما خارج می‌شوند.', confirmLabel: 'پایان همه', danger: true })) && run(() => api('POST', '/tele/sessions/end-others', {}))}>
+          <button className="btn danger" disabled={busy} onClick={async () => (await confirmDialog({ title: `همه‌ی ${toFa(others.length)} نشست دیگر پایان یابند؟`, message: 'آن دستگاه‌ها از حساب تلگرام شما خارج می‌شوند.', confirmLabel: 'پایان همه', danger: true })) && run(endOtherTeleSessions)}>
             بستن همه نشست‌های دیگر
           </button>
         )}

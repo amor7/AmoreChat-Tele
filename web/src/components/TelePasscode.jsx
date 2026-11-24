@@ -4,6 +4,7 @@ import { api, TELE_LOCK_EVENT } from '../api';
 import { useStore } from '../store';
 import { toFa, faDigits } from '../util';
 import { clearDrafts } from '../drafts';
+import { announceUnlock } from '../teleLockEvents';
 import { IDLE_CHOICES, PASSCODE_MIN, PASSCODE_MAX, passcodeProblem, isNumericPasscode, secondsLeft, clockText, lockedUntilFrom } from '../tele-lock-rules';
 import { Modal } from './Modals';
 
@@ -34,32 +35,8 @@ const rememberPad = (numeric) => {
   }
 };
 
-// Fired when any lock screen opens the lock, so the others on the page (the Telegram page behind
-// a forward dialog) follow without a second passcode.
-const UNLOCK_EVENT = 'amore-tele-unlocked';
-const announceUnlock = () => {
-  try {
-    window.dispatchEvent(new CustomEvent(UNLOCK_EVENT));
-  } catch {
-    /* no window */
-  }
-};
-
-/** Listens for any 423 heard by api.js (onLocked) and for an unlock done elsewhere (onUnlocked). */
-export function useTeleLockEvent(onLocked, onUnlocked) {
-  const ref = useRef({ onLocked, onUnlocked });
-  ref.current = { onLocked, onUnlocked };
-  useEffect(() => {
-    const lock = () => ref.current.onLocked?.();
-    const unlock = () => ref.current.onUnlocked?.();
-    window.addEventListener(TELE_LOCK_EVENT, lock);
-    window.addEventListener(UNLOCK_EVENT, unlock);
-    return () => {
-      window.removeEventListener(TELE_LOCK_EVENT, lock);
-      window.removeEventListener(UNLOCK_EVENT, unlock);
-    };
-  }, []);
-}
+// Lock / unlock events live in teleLockEvents.js; re-exported here for older imports.
+export { useTeleLockEvent } from '../teleLockEvents';
 
 function IdleSelect({ value, onChange }) {
   return (

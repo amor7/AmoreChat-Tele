@@ -148,6 +148,34 @@ test('download: the body comes back as a Blob with its type', async () => {
   assert.ok(init.signal instanceof AbortSignal);
 });
 
+test('download: progress follows the body, with the length the server sent (0 when none)', async () => {
+  const withLength = (chunks, length) => {
+    const res = streamed(chunks);
+    res.headers = { get: (h) => (h === 'content-length' ? length : h === 'content-type' ? 'image/jpeg' : null) };
+    return res;
+  };
+  const seen = [];
+  await watchedDownload(async () => withLength([new Uint8Array([1, 2]), new Uint8Array([3])], '3'), '/x', {}, { onProgress: (r, t) => seen.push([r, t]) });
+  assert.deepEqual(seen, [
+    [2, 3],
+    [3, 3],
+  ]);
+  const unknown = [];
+  await watchedDownload(async () => streamed([new Uint8Array([1])]), '/x', {}, { onProgress: (r, t) => unknown.push([r, t]) });
+  assert.deepEqual(unknown, [[1, 0]]);
+  // No progress callback: the same download, nothing else asked for.
+  const r = await watchedDownload(async () => streamed([new Uint8Array([7])]), '/x', {}, {});
+  assert.deepEqual([...new Uint8Array(await r.blob.arrayBuffer())], [7]);
+});
+
+test('download: without streams (old WebViews) progress comes once, at the end', async () => {
+  const seen = [];
+  const res = { ok: true, status: 200, headers: { get: () => null }, blob: async () => new Blob([new Uint8Array([1, 2, 3, 4])]) };
+  const r = await watchedDownload(async () => res, '/x', {}, { onProgress: (a, b) => seen.push([a, b]) });
+  assert.equal(r.blob.size, 4);
+  assert.deepEqual(seen, [[4, 4]]);
+});
+
 test('download: an error answer is returned as text', async () => {
   const r = await watchedDownload(async () => streamed(['{"error":"no"}'], { status: 403 }), '/x', {}, {});
   assert.deepEqual(r, { status: 403, ok: false, text: '{"error":"no"}' });

@@ -51,7 +51,6 @@ input.music-seek:focus-visible {
   }
   .menu button,
   .tele-more-menu button,
-  .tele-msg-menu button,
   .tile-menu button {
     min-height: var(--tap);
   }
