@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { api } from '../api';
+import { addProxy } from '../teleApi';
 import { useStore } from '../store';
 import { toFa } from '../util';
 import { Plus, ClipboardPaste, SlidersHorizontal, FileKey } from 'lucide-react';
@@ -153,7 +153,7 @@ export default function TeleAddProxy({ onAdded }) {
             : { name: name || undefined, links };
       if (mode === 'paste' && !links.trim()) return;
       if (mode === 'openvpn' && !ovpn.ovpn.trim()) return showToast('فایل .ovpn را انتخاب کنید');
-      const r = await api('POST', '/admin/tele/proxies', body);
+      const r = await addProxy(body);
       const n = r.proxies?.length || 0;
       showToast(r.errors?.length ? `${toFa(n)} پروکسی اضافه شد؛ ${toFa(r.errors.length)} مورد خطا داشت: ${r.errors.join(' · ')}` : `${toFa(n)} پروکسی اضافه شد؛ حالا تستش کنید`);
       setLinks('');

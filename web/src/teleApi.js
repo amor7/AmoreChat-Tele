@@ -1,6 +1,7 @@
 // Every request of the Telegram screens in one place (TeleView, TeleChat, TeleMessage, TeleLogin,
 // TeleForward, the sidebar entry): the paths, timeouts and poll marks live here, the screens only
 // say what they want. Same requests as before this file existed; nothing here changes traffic.
+// The admin panel's Telegram and VPN pages have their own section at the end.
 import { api, teleUpload, teleDownload } from './api';
 
 // Marks the automatic checks: they must not keep the Telegram passcode lock from timing out
@@ -61,3 +62,47 @@ export const forwardToTele = (messageId, dialogIds) => api('POST', '/tele/forwar
 export const teleSessions = () => api('GET', '/tele/sessions');
 export const endTeleSession = (id) => api('DELETE', `/tele/sessions/${id}`);
 export const endOtherTeleSessions = () => api('POST', '/tele/sessions/end-others', {});
+
+// ---------- Admin panel: the Telegram and VPN pages (TeleAdmin*.jsx) ----------
+// Same paths, bodies and timeouts the panel used inline before.
+
+// Tunnel and proxies
+export const adminProxies = () => api('GET', '/admin/tele/proxies');
+export const addProxy = (body) => api('POST', '/admin/tele/proxies', body);
+export const saveTelePolicy = (patch) => api('PATCH', '/admin/tele/policy', patch);
+/** One proxy (`id`) or every proxy (`'all'`), tested all the way to Telegram. */
+export const probeProxy = (id) => api('POST', id === 'all' ? '/admin/tele/proxies/probe-all' : `/admin/tele/proxies/${id}/probe`, {}, { timeout: 180000 });
+export const deleteProxy = (id) => api('DELETE', `/admin/tele/proxies/${id}`);
+export const patchProxy = (id, patch) => api('PATCH', `/admin/tele/proxies/${id}`, patch);
+export const restartEgress = () => api('POST', '/admin/tele/egress/restart');
+
+// Alerts in the admins' Saved Messages
+export const teleAlerts = () => api('GET', '/admin/tele/alerts');
+export const saveTeleAlerts = (patch) => api('PATCH', '/admin/tele/alerts', patch);
+export const testTeleAlert = () => api('POST', '/admin/tele/alerts/test', {});
+
+// Users: traffic, caps, what each may fetch
+export const adminTeleAccounts = () => api('GET', '/admin/tele/accounts');
+export const patchTeleAccount = (id, body) => api('PATCH', `/admin/tele/accounts/${id}`, body);
+export const teleAccountUsage = (id) => api('GET', `/admin/tele/accounts/${id}/usage`);
+export const saveTeleMediaLimits = (maxMb, fileMaxMb) => api('PATCH', '/admin/tele/media', { maxMb, fileMaxMb });
+export const saveTeleQuota = (defaultMb) => api('PATCH', '/admin/tele/quota', { defaultMb });
+/** Who may use a feature: 'tele' (Telegram itself) or 'mirror-files' (channel videos and files). */
+const ACCESS_FEATURES = new Set(['tele', 'mirror-files']);
+const accessPath = (feature) => {
+  if (!ACCESS_FEATURES.has(feature)) throw new Error(`unknown access feature: ${feature}`);
+  return `/admin/access/${feature}`;
+};
+export const adminAccess = (feature) => api('GET', accessPath(feature));
+export const saveAdminAccess = (feature, body) => api('PATCH', accessPath(feature), body);
+
+// Owner: Telegram channels published in the app
+export const teleMirrors = () => api('GET', '/admin/tele/mirrors');
+/** Channels the owner's account follows (or a public one by @name), live from Telegram. */
+export const mirrorChannels = (term) => api('GET', `/admin/tele/mirrors/channels${term ? `?q=${q(term)}` : ''}`, undefined, { timeout: 90000 });
+export const addMirror = (body) => api('POST', '/admin/tele/mirrors', body, { timeout: 120000 });
+export const runMirrors = () => api('POST', '/admin/tele/mirrors/run', {}, { timeout: 180000 });
+export const patchMirror = (id, patch) => api('PATCH', `/admin/tele/mirrors/${id}`, patch);
+export const newMirrorInvite = (id) => api('POST', `/admin/tele/mirrors/${id}/invite`);
+export const deleteMirror = (id) => api('DELETE', `/admin/tele/mirrors/${id}`);
+export const saveMirrorSettings = (minutes) => api('PATCH', '/admin/tele/mirrors-settings', { minutes });

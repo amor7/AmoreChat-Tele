@@ -423,7 +423,7 @@ function storeDialog(modal, close) {
     case 'chatInfo':
       return <ChatInfo chatId={modal.chatId} onClose={close} />;
     case 'admin':
-      return <Admin onClose={close} />;
+      return <Admin item={modal.item} nonce={modal.nonce} onClose={close} />;
     case 'image':
       return <ImageViewer fileId={modal.fileId} name={modal.name} onClose={close} />;
     case 'forward':

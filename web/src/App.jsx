@@ -12,11 +12,15 @@ import TeleView from './components/TeleView';
 import Modals from './components/Modals';
 import ConfirmHost from './components/ConfirmDialog';
 import { EmptyState } from './components/States';
+import { parseAdminLink } from './admin-nav';
 import { VoiceBar, RoomView, IncomingCall, useAutoExpandCalls } from './components/Voice';
 import { MusicBar } from './components/Music';
 import { initNative } from './native';
 import { saveBoot, loadBoot, startOutbox, flushOutbox } from './offline';
 import { useAppUpdateCheck } from './components/AndroidApp';
+
+// Each admin link opening gets a new number, so the same link jumps again inside an open panel.
+let adminLinks = 0;
 
 function parseHash() {
   // A shared link: /@name, or #/@name from inside the app.
@@ -123,6 +127,14 @@ function Main() {
         useStore.setState({ activeChatId: null });
         if (kind === 'join') st.openModal('join', { code: value });
         if (kind === 'handle') st.openModal('handle', { name: value });
+        // #/admin or #/admin/<page>: the panel itself shows only what this user may see. The link
+        // is consumed first (like join links), before the panel's Back entry is pushed: closing
+        // leaves no #/admin behind, a reload does not reopen it, and the same link works again.
+        const admin = parseAdminLink(location.hash);
+        if (admin) {
+          history.replaceState(null, '', '/');
+          st.openModal('admin', { item: admin.item, nonce: ++adminLinks });
+        }
       }
     };
     onHash();

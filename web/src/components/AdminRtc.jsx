@@ -4,7 +4,7 @@ import { useStore } from '../store';
 import Avatar from './Avatar';
 import { Mic, MicOff, Video, VideoOff, LogOut, Phone } from 'lucide-react';
 import { confirmDialog } from '../confirm';
-import { Skeleton, ErrorState } from './States';
+import { Skeleton, ErrorState, EmptyState } from './States';
 
 const formatMb = (mb) => (mb >= 1024 ? `${+(mb / 1024).toFixed(1)} گیگابایت` : `${mb} مگابایت`);
 
@@ -180,7 +180,7 @@ export function Live() {
       <h4 className="with-icon">
         <Mic size={18} /> ویس‌چت‌های فعال
       </h4>
-      {!data.rooms.length && <p className="muted">هیچ ویس‌چتی فعال نیست.</p>}
+      {!data.rooms.length && <EmptyState compact hint="هیچ ویس‌چتی فعال نیست." />}
       {data.rooms.map((r) => (
         <div key={r.chatId} className="boxed">
           <div className="row-item">
@@ -214,7 +214,7 @@ export function Live() {
       <h4 className="with-icon">
         <Phone size={18} /> تماس‌های در جریان
       </h4>
-      {!data.calls.length && <p className="muted">تماسی در جریان نیست.</p>}
+      {!data.calls.length && <EmptyState compact hint="تماسی در جریان نیست." />}
       {data.calls.map((c) => (
         <div key={c.id} className="row-item boxed">
           <span className="grow">

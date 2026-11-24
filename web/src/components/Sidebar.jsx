@@ -3,6 +3,7 @@ import { FolderTabs, ChatMenu, inFolder, sortChats } from './Folders';
 import { Menu as PopMenu, MenuItem } from './Menu';
 import { EmptyState } from './States';
 import { cancelAllDialogs } from '../confirm';
+import { hasAdminPanel } from '../admin-nav';
 import { MessageResults, openMessage } from './Modals';
 import { VoiceChannels } from './Voice';
 import { RichText } from './Emoji';
@@ -118,6 +119,8 @@ export default function Sidebar() {
 
   async function logout() {
     cancelAllDialogs();
+    // The next account on this device starts the admin panel on its own first page.
+    useStore.getState().setPrefs({ adminItem: undefined });
     await api('POST', '/auth/logout').catch(() => {});
     await wipeLocal();
     disconnectSocket();
@@ -162,7 +165,7 @@ export default function Sidebar() {
             {item(<SquarePen size={18} />, 'گفتگوی جدید', () => openModal('newChat'))}
             {item(<Compass size={18} />, 'کاوش گروه‌ها و کانال‌ها', () => openModal('discover'))}
             {item(<FolderPlus size={18} />, 'پوشه‌های گفتگو', () => openModal('folders'))}
-            {isAdmin && hasAnyAdminPerm(me) && item(<Shield size={18} />, 'پنل مدیریت', () => openModal('admin'))}
+            {isAdmin && hasAdminPanel(me, hasSitePerm) && item(<Shield size={18} />, 'پنل مدیریت', () => openModal('admin'))}
             {item(<LogOut size={18} />, 'خروج', logout)}
           </PopMenu>
         )}
@@ -312,6 +315,3 @@ export function useOtherServersUnread() {
   useStore((s) => s.nativeTick);
   return multiServer ? appServers().some((s) => !s.current && s.unread > 0) : false;
 }
-
-const hasAnyAdminPerm = (me) =>
-  ['manage_users', 'manage_invites', 'manage_settings', 'manage_chats', 'view_audit', 'handle_reports'].some((p) => hasSitePerm(me, p));
