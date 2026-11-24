@@ -1,14 +1,17 @@
 import { useEffect, useState } from 'react';
-import { api } from '../api';
+import { api, TELE_LOCKED } from '../api';
 import { useStore } from '../store';
 import { toFa, postBlockReason } from '../util';
 import { Modal } from './Modals';
 import Avatar from './Avatar';
+import { TeleLockScreen } from './TelePasscode';
 
 // Forwarding between Telegram and the app's own chats (both ways). Photos and voice go along only
 // for users an admin allowed them; otherwise the text (and the file's name) is sent.
 
 const num = (id) => Math.abs(Number(String(id || '').replace(/^[uc]/, '')) || 0);
+// TELE_LOCKED (423): the user's Telegram passcode lock is on (see TelePasscode.jsx).
+const isLocked = (e) => e?.status === TELE_LOCKED;
 
 /** A Telegram message → chats of this app. */
 export function TeleToChat({ message, onClose }) {
@@ -18,6 +21,7 @@ export function TeleToChat({ message, onClose }) {
   const [q, setQ] = useState('');
   const [picked, setPicked] = useState([]);
   const [busy, setBusy] = useState(false);
+  const [locked, setLocked] = useState(false);
 
   const list = Object.values(chats)
     .filter((c) => !postBlockReason(me, c))
@@ -31,10 +35,19 @@ export function TeleToChat({ message, onClose }) {
       showToast(`به ${toFa(sent.length)} گفتگو فرستاده شد`);
       onClose();
     } catch (e) {
-      showToast(e.message);
+      if (isLocked(e)) setLocked(true);
+      else showToast(e.message);
     }
     setBusy(false);
   }
+
+  // Locked while the dialog was open: the message text must not stay on screen either.
+  if (locked)
+    return (
+      <Modal title="ارسال پیام تلگرام به…" onClose={onClose}>
+        <TeleLockScreen compact onUnlocked={() => setLocked(false)} />
+      </Modal>
+    );
 
   return (
     <Modal title="ارسال پیام تلگرام به…" onClose={onClose}>
@@ -74,10 +87,12 @@ export function ChatToTele({ message, onClose }) {
   const [status, setStatus] = useState(null);
   const [picked, setPicked] = useState([]);
   const [busy, setBusy] = useState(false);
-  useEffect(() => {
+  const load = () =>
     api('GET', '/tele/status')
       .then(setStatus)
-      .catch((e) => showToast(e.message));
+      .catch((e) => (isLocked(e) ? setStatus({ access: true, locked: true }) : showToast(e.message)));
+  useEffect(() => {
+    load();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const connected = status?.account?.status === 'connected';
@@ -90,10 +105,18 @@ export function ChatToTele({ message, onClose }) {
       showToast(`به ${toFa(sent.length)} گفتگوی تلگرام فرستاده شد`);
       onClose();
     } catch (e) {
-      showToast(e.message);
+      if (isLocked(e)) setStatus({ access: true, locked: true });
+      else showToast(e.message);
     }
     setBusy(false);
   }
+
+  if (status?.locked)
+    return (
+      <Modal title="ارسال به تلگرام" onClose={onClose}>
+        <TeleLockScreen compact onUnlocked={() => (setStatus(null), setPicked([]), load())} />
+      </Modal>
+    );
 
   return (
     <Modal title="ارسال به تلگرام" onClose={onClose}>
@@ -141,21 +164,34 @@ export function TeleSessions({ onClose }) {
   const showToast = useStore((s) => s.showToast);
   const [list, setList] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [locked, setLocked] = useState(false);
   const run = async (fn) => {
     setBusy(true);
     try {
       setList((await fn()).sessions);
     } catch (e) {
-      showToast(e.message);
-      if (!list) setList([]);
+      if (isLocked(e)) {
+        setLocked(true);
+        setList(null);
+      } else {
+        showToast(e.message);
+        if (!list) setList([]);
+      }
     }
     setBusy(false);
   };
+  const loadSessions = () => run(() => api('GET', '/tele/sessions'));
   useEffect(() => {
-    run(() => api('GET', '/tele/sessions'));
+    loadSessions();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
   const when = (t) => (t ? new Date(t).toLocaleString('fa-IR', { dateStyle: 'medium', timeStyle: 'short' }) : '—');
   const others = (list || []).filter((s) => !s.current);
+  if (locked)
+    return (
+      <Modal title="نشست‌های فعال تلگرام" onClose={onClose}>
+        <TeleLockScreen compact onUnlocked={() => (setLocked(false), loadSessions())} />
+      </Modal>
+    );
   return (
     <Modal title="نشست‌های فعال تلگرام" onClose={onClose}>
       <p className="hint">همه جاهایی که حساب تلگرام شما باز است. اگر دستگاهی را نمی‌شناسید، ببندیدش و رمز دومرحله‌ای تلگرام را فعال کنید.</p>

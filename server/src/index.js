@@ -5,7 +5,9 @@ import cookie from '@fastify/cookie';
 import multipart from '@fastify/multipart';
 import fastifyStatic from '@fastify/static';
 import rateLimit from '@fastify/rate-limit';
-import { db, get, all, run, now, DATA_DIR, UPLOAD_DIR } from './db.js';
+import { db, get, all, run, now, DATA_DIR, UPLOAD_DIR, PASSCODE_CARRY, PASSCODE_CARRY_CORRUPT } from './db.js';
+import { applyCarry, writeCarry } from './passcode-carry.js';
+import { pruneOrphanSessions, sessionsRoot } from './tele/session-dirs.js';
 import { startSweeper } from './sweeper.js';
 import { mediaReady, onMediaUpdate, resumePendingMedia, killAllFfmpeg } from './media.js';
 import { setTimerLogger } from './timers.js';
@@ -15,7 +17,8 @@ import { hasAnyUser } from './settings.js';
 import { userFromToken, SESSION_COOKIE, randomCode } from './auth.js';
 import { ensureEmergencyChannel } from './chats.js';
 import { setupSocket } from './socket.js';
-import { scheduleBackups } from './backup.js';
+import { scheduleBackups, cleanBackupsAtStart, redactBackupsAtStart } from './backup.js';
+import { setTeleQuarantine, QUARANTINE_TEXT } from './tele/passcode.js';
 import authRoutes from './routes/auth.js';
 import chatRoutes from './routes/chats.js';
 import messageRoutes from './routes/messages.js';
@@ -30,6 +33,7 @@ import backupRoutes from './routes/backup.js';
 import appRoutes from './routes/app.js';
 import folderRoutes from './routes/folders.js';
 import teleRoutes from './routes/tele.js';
+import telePasscodeRoutes from './routes/tele-passcode.js';
 import securityRoutes from './routes/security.js';
 import updateRoutes from './routes/update.js';
 import { refreshEgress, startHealthLoop, stopEgress } from './tele/egress.js';
@@ -45,6 +49,23 @@ import { setupRtcProxy } from './rtc-proxy.js';
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || '0.0.0.0';
 const WEB_DIR = path.resolve(process.env.WEB_DIR || path.join(import.meta.dirname, '../../web/dist'));
+
+// A restore from the panel just put an older database in place: the Telegram passcodes of before
+// go back in before anything is served. If they can't be read, the app still starts but Telegram
+// stays closed for everyone (423) for as long as data/tele-passcodes.carry.corrupt exists:
+// fail-closed for Telegram only. Deleting that file (shell) lifts it at the next start.
+const carried = applyCarry(db, PASSCODE_CARRY, PASSCODE_CARRY_CORRUPT);
+if (carried?.corrupt) console.error(`[restore] Telegram passcodes kept from before a restore could not be read (${carried.error}); set aside as ${PASSCODE_CARRY_CORRUPT}`);
+else if (carried) console.log(`[restore] Telegram passcodes kept: ${carried.applied} (skipped, user not in this database: ${carried.skipped}; newer row in this database kept: ${carried.newer})`);
+setTeleQuarantine(!!carried?.corrupt || fs.existsSync(PASSCODE_CARRY_CORRUPT));
+// TDLib session folders whose account row is gone (an older backup restored, a user deleted): the
+// next account given that id must not open someone else's logged-in session. The .key stays.
+try {
+  const orphans = pruneOrphanSessions(db, sessionsRoot(DATA_DIR));
+  if (orphans.length) console.log(`[tele] removed ${orphans.length} session folder(s) with no account: ${orphans.join(', ')}`);
+} catch (e) {
+  console.error('[tele] could not clean session folders with no account:', e?.message || e);
+}
 
 const app = Fastify({
   logger: { level: process.env.LOG_LEVEL || 'info' },
@@ -65,6 +86,13 @@ function shutdown(code) {
     killAllFfmpeg();
     await stopEgress().catch(() => {});
     await app.close().catch(() => {});
+    // A restore is waiting (the panel asked, deploy/panel-update.sh stops us to swap the database):
+    // the passcodes as they are now, in case one changed since it was asked for.
+    try {
+      if (fs.existsSync(PASSCODE_CARRY)) writeCarry(db, PASSCODE_CARRY);
+    } catch (e) {
+      logError('could not refresh the kept Telegram passcodes', e);
+    }
     try {
       db.close();
     } catch {}
@@ -165,7 +193,9 @@ app.setErrorHandler((err, req, reply) => {
   const code = err.statusCode || 500;
   if (code >= 500) req.log.error(err);
   // `expose`: a 5xx whose message is meant for the user (e.g. Telegram/TDLib refused the login).
-  reply.code(code).send({ error: code >= 500 && !err.expose ? 'خطای داخلی سرور' : err.message });
+  // `details`: extra fields a client needs to act on a 4xx (e.g. lockedUntil on a 429), set by the route.
+  const details = code < 500 && err.details && typeof err.details === 'object' ? err.details : {};
+  reply.code(code).send({ ...details, error: code >= 500 && !err.expose ? 'خطای داخلی سرور' : err.message });
 });
 
 await app.register(authRoutes);
@@ -177,6 +207,7 @@ await app.register(adminRoutes);
 await app.register(storageRoutes);
 await app.register(handleRoutes);
 await app.register(teleRoutes);
+await app.register(telePasscodeRoutes);
 await app.register(securityRoutes);
 await app.register(updateRoutes);
 // Bring the Telegram tunnel back after a restart or update (not only on the next login).
@@ -236,8 +267,16 @@ if (!hasAnyUser()) {
 }
 
 setupSocket(app);
+cleanBackupsAtStart(app.log);
 await app.listen({ port: PORT, host: HOST });
 scheduleBackups(app.log);
+redactBackupsAtStart(app.log);
+if (fs.existsSync(PASSCODE_CARRY_CORRUPT) || carried?.corrupt) {
+  app.log.error(`Telegram closed for everyone: ${PASSCODE_CARRY_CORRUPT} (passcodes kept from before a restore) could not be read`);
+  (await import('./health.js'))
+    .raiseAlert('tele-quarantine', `${QUARANTINE_TEXT}: رمزهای تلگرامِ نگه‌داشته‌شده هنگام بازگردانی بکاپ خوانده نشد (data/tele-passcodes.carry.corrupt)`)
+    .catch(() => {});
+}
 // A note from the watchdog (deploy/watchdog.sh), which restarted the app or gave up.
 try {
   const note = path.join(DATA_DIR, 'watchdog', 'note');

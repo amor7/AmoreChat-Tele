@@ -1,7 +1,7 @@
 // Chat drafts kept on the device (web/src/drafts.js). Usage: node --test server/test/drafts.test.mjs
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { draftKey, loadDraft, saveDraft, clearDraft, listDrafts, clearAllDrafts, draftSaver, DRAFT_MAX } from '../../web/src/drafts.js';
+import { draftKey, loadDraft, saveDraft, clearDraft, listDrafts, clearAllDrafts, clearDrafts, draftSaver, DRAFT_MAX } from '../../web/src/drafts.js';
 
 // The parts of localStorage the module uses.
 function fakeStorage(init = {}) {
@@ -104,4 +104,18 @@ test('saver writes after the pause, flush writes at once, cancel drops', async (
   t.mock.timers.tick(1000);
   saver.flush();
   assert.equal(loadDraft(1, 'chat', 5, s), 'abc', 'a cancelled save never happens');
+});
+
+test('clearDrafts removes only one user and one kind of drafts', () => {
+  const s = fakeStorage({ other: 'keep' });
+  saveDraft(1, 'tele', 5, 'secret', s);
+  saveDraft(1, 'tele', 6, 'secret 2', s);
+  saveDraft(1, 'chat', 5, 'mine', s);
+  saveDraft(2, 'tele', 5, 'someone else', s);
+  clearDrafts(1, 'tele', s);
+  assert.deepEqual(listDrafts(1, 'tele', s), {});
+  assert.deepEqual(listDrafts(1, 'chat', s), { 5: 'mine' });
+  assert.deepEqual(listDrafts(2, 'tele', s), { 5: 'someone else' });
+  assert.equal(s.getItem('other'), 'keep');
+  assert.doesNotThrow(() => clearDrafts(1, 'tele', brokenStorage));
 });

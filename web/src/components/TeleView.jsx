@@ -1,10 +1,11 @@
 import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { api, teleUpload, teleDownload } from '../api';
+import { api, teleUpload, teleDownload, TELE_LOCKED } from '../api';
 import { useStore, useDataSaver, dataSaverNow } from '../store';
 import { colorFor, formatDay, formatListTime, formatTime, sameDay, toFa, faDigits, compressImage, formatSize } from '../util';
 import Avatar from './Avatar';
 import { loadDraft } from '../drafts';
 import { useDrafts, useDraftSaver, draftPreview } from '../useDrafts';
+import { TeleLockScreen, useTeleLockEvent } from './TelePasscode';
 import { ArrowRight, Check, LogOut, Megaphone, Plus, RefreshCw, Search, SendHorizontal, Users, X, CircleMinus, Reply, ImagePlus, Mic, Play, Forward, Trash2, ShieldCheck, Paperclip, FileText, Film, Download, UserPlus, Lock, MessageSquare, DoorOpen, MoreVertical, Send, TriangleAlert } from 'lucide-react';
 
 // Telegram, in the same look as the app's own chats: chat list on the side, the open chat beside it.
@@ -24,6 +25,8 @@ const num = (id) => Math.abs(Number(String(id || '').replace(/^[uc]/, '')) || 0)
 const mb = (n) => `${toFa((n / 1048576).toFixed(n < 10485760 ? 1 : 0))} MB`;
 // Periodic checks pause while the tab is in the background (no traffic, and the idle timer runs).
 const visible = () => document.visibilityState !== 'hidden';
+// Marks the automatic checks: they must not keep the Telegram passcode lock from timing out.
+const POLL = { headers: { 'x-amore-poll': '1' } };
 
 export default function TeleView({ dialogId }) {
   const [status, setStatus] = useState(null);
@@ -36,18 +39,29 @@ export default function TeleView({ dialogId }) {
   const showToast = useStore((s) => s.showToast);
   const drafts = useDrafts(useStore((s) => s.me?.id || 0), 'tele');
 
-  const load = () => api('GET', '/tele/status').then(setStatus).catch((e) => showToast(e.message));
+  // poll: an automatic check (see POLL). A TELE_LOCKED (423) is no error to show: the lock screen takes over.
+  const load = (poll = false) =>
+    api('GET', '/tele/status', undefined, poll ? POLL : undefined)
+      .then(setStatus)
+      .catch((e) => e.status !== TELE_LOCKED && showToast(e.message));
+  // Passcode lock: whatever request heard it, drop everything shown (dialogs here; the open chat's
+  // messages and its polls go with TeleChat, which is no longer rendered).
+  useTeleLockEvent(
+    () => setStatus((s) => ({ access: true, locked: true, passcode: s?.passcode })),
+    () => status?.locked && load(),
+  );
+  const locked = !!status?.locked;
   const account = status?.account;
   const connected = account?.status === 'connected';
 
-  const syncList = async (all = false) => {
+  const syncList = async (all = false, poll = false) => {
     setSyncing(true);
     try {
-      const r = await api('POST', '/tele/dialogs/refresh', { all });
+      const r = await api('POST', '/tele/dialogs/refresh', { all }, poll ? POLL : undefined);
       if (r?.notice) showToast(r.notice);
-      await load();
+      await load(poll);
     } catch (e) {
-      showToast(e.message);
+      if (e.status !== TELE_LOCKED) showToast(e.message);
     } finally {
       setSyncing(false);
     }
@@ -59,8 +73,8 @@ export default function TeleView({ dialogId }) {
   // Connected: the user's own chats from Telegram every minute, the stored list more often.
   useEffect(() => {
     if (!connected) return;
-    const fromTelegram = setInterval(() => visible() && syncList(), 60000);
-    const stored = setInterval(() => visible() && load(), 10000);
+    const fromTelegram = setInterval(() => visible() && syncList(false, true), 60000);
+    const stored = setInterval(() => visible() && load(true), 10000);
     return () => {
       clearInterval(fromTelegram);
       clearInterval(stored);
@@ -77,6 +91,35 @@ export default function TeleView({ dialogId }) {
   }, [dialogs, mine, picking, query, tab]);
   const unreadOf = (kind) => mine.filter((d) => (kind === 'all' || d.kind === kind) && d.unread > 0).length;
   const active = dialogs.find((d) => d.id === dialogId);
+
+  if (locked) {
+    // On a phone with no chat open only the side column shows; elsewhere the main pane does.
+    const inSide = phone && !dialogId;
+    // Unlocking (here or in a dialog) reloads through the unlock event above.
+    // Quarantine (unreadable passcode carry file after a restore): no passcode can open it, so
+    // show the server's message instead of a field that can only fail.
+    const lockScreen = status?.quarantined ? (
+      <div className="tele-lock" role="status">
+        <p className="error">{status.message || 'بخش تلگرام موقتاً قفل است؛ با مدیر سرور تماس بگیرید'}</p>
+      </div>
+    ) : (
+      <TeleLockScreen />
+    );
+    return (
+      <>
+        <aside className="sidebar tele-side">
+          <header className="sidebar-head">
+            <a className="icon-btn" href="#/" aria-label="بازگشت به پیام‌رسان" title="بازگشت به پیام‌رسان">
+              <ArrowRight size={22} />
+            </a>
+            <b className="grow">تلگرام</b>
+          </header>
+          {inSide && lockScreen}
+        </aside>
+        <main className="chat-pane">{!inSide && lockScreen}</main>
+      </>
+    );
+  }
 
   const startPicking = () => {
     setPicking(true);
@@ -619,7 +662,7 @@ function TeleChat({ dialog, onChanged, onRemove, allowMedia, allowVoice, allowFi
   const fetchLatest = async (first) => {
     try {
       // Later checks ask TDLib for what it already received (local=1): no network traffic.
-      const r = await api('GET', `/tele/dialogs/${dialog.id}/messages${first ? '' : '?local=1'}`);
+      const r = await api('GET', `/tele/dialogs/${dialog.id}/messages${first ? '' : '?local=1'}`, undefined, first ? undefined : POLL);
       setMessages((cur) => withLatest(first ? [] : cur, r.messages || []));
       setNotice(r.notice || '');
       if (first) {

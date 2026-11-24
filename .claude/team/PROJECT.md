@@ -1,6 +1,6 @@
 # AmoreChat-Tele — حافظه‌ی تیم
 
-> ساخته‌شده با /onboard در 2026-11-23 (نسخه‌ی 1.0.39؛ به‌روزشده برای 1.0.40). بخش‌هایی که با (حدس) علامت خورده‌اند تأیید نشده‌اند.
+> ساخته‌شده با /onboard در 2026-11-23 (نسخه‌ی 1.0.39؛ به‌روزشده برای 1.0.41). بخش‌هایی که با (حدس) علامت خورده‌اند تأیید نشده‌اند.
 
 ## خلاصه
 پیام‌رسان فارسی self-hosted (چت، گروه، کانال، تماس، ویس‌چت، استریم، موزیک؛ وب PWA + اپ اندروید) با «پل تلگرام» (Tele):
@@ -36,12 +36,13 @@
 | `server/src/routes/*.js` | هر فایل یک پلاگین Fastify (default export) |
 | `server/src/db.js` | SQLite، cache prepared statement، **migrationها (آرایه، فقط append)** |
 | `server/src/tele/` | پل تلگرام: `accounts.js` (نشست/TDLib)، `messages.js`، `egress.js`/`proxies.js`/`uri.js`/`ovpn.js` (خروجی)، `mirror.js` (کپی کانال)، `explore.js`، `alerts.js`، `access.js` |
-| `server/src/routes/tele.js` | API تلگرام |
+| `server/src/routes/tele.js` | API تلگرام (hook قفل رمز روی همه‌ی `/api/tele/*`) |
+| `server/src/tele/passcode*.js`، `routes/tele-passcode.js`، `backup-redact.js` | رمز تلگرام: منطق/قواعد، routeها، حذف داده‌ی تلگرام از بکاپ (پروسه‌ی جدا) |
 | `server/src/{timers,media-guard}.js` | `timers.js`: حلقه‌های پس‌زمینه‌ی امن (خطا حلقه را نمی‌کشد)؛ `media-guard.js`: محافظ ffmpeg (فقط فایل محلی و فرمت مجاز، سقف زمانی) |
 | `server/*-cli.js` | backup، reset-password، unban |
 | `server/ovpn/*.sh` | سرویس OpenVPN مخصوص Tele |
 | `server/test/` | unit (`*.test.mjs`) و اسکریپت‌های e2e |
-| `web/src/` | `main.jsx`→`App.jsx`، `store.js` (zustand)، `api.js`، `socket.js`، `rtc.js`؛ کامپوننت‌ها در `components/` (Tele: `TeleView`، `TeleAdmin`، `TeleProxyForm`، `TeleForward`) |
+| `web/src/` | `main.jsx`→`App.jsx`، `store.js` (zustand)، `api.js`، `socket.js`، `rtc.js`؛ کامپوننت‌ها در `components/` (Tele: `TeleView`، `TeleAdmin`، `TeleProxyForm`، `TeleForward`، `TelePasscode`) |
 | `web/src/{drafts,outbox-rules,transfer}.js`، `components/QrCode.jsx` | پیش‌نویس ماندگار، قواعد صف آفلاین (متن/ویس)، منطق انتقال/آپلود؛ QR لینک‌ها |
 | `android/` | اپ Java: `MainActivity`، `CallService`، `MusicService`، `NotifyService`، `Updater`، assets `setup.html`/`offline.html` |
 | `tools/` | پکیج Node جدا برای eslint و اجرای unit test (عمداً جدا تا runtime id عوض نشود) |
@@ -76,7 +77,8 @@ docker compose -f docker-compose.isolated.yml ...   # تست بدون اینتر
 
 ## نقاط حساس
 - **کلید نشست تلگرام** (`server/src/tele/accounts.js:192-218`): از `TELE_SESSION_KEY` در `.env`؛ اگر نباشد کلید در `DATA_DIR/tele-sessions/.key` کنار نشست‌ها ساخته می‌شود. عوض یا گم شدن کلید = از کار افتادن بی‌صدای همه‌ی نشست‌ها. هر تغییر در deploy/backup/restore باید حفظش کند.
-- **migrationها** در `db.js` (الان v25).
+- **migrationها** در `db.js` (الان v26).
+- **رمز تلگرام**: هر route یا رویداد socket جدیدی که داده‌ی تلگرام کاربر را خارج از `/api/tele/` برمی‌گرداند باید `assertTeleUnlocked` بگیرد؛ hook در `routes/tele.js` آن را پوشش نمی‌دهد. بکاپ‌های جدید هم باید از `redactTeleLocked` رد شوند.
 - **ماژول‌های بزرگ و درهم Tele**: `TeleView.jsx` (~1258 خط)، `TeleAdmin.jsx` (~1043)، `accounts.js`، `messages.js`، `routes/tele.js` (~569، import از ~15 ماژول)؛ unit test ندارند → تغییر در Tele شعاع اثر بزرگ دارد.
 - **سرویس `ovpn`** در compose با `user: root` و `NET_ADMIN` و دسترسی به `./data`.
 - **زنجیره‌ی release**: امضا با `deploy/release-signing.pub` و `verify-release.sh`؛ نصب یک‌خطی `curl | sudo bash` از `deploy/get.sh`.

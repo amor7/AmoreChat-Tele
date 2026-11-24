@@ -1,4 +1,5 @@
 import { RESERVED_NAMES } from './reserved-names.js';
+import { CARRY_NAME, CORRUPT_NAME } from './passcode-carry.js';
 import { DatabaseSync } from 'node:sqlite';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -533,6 +534,18 @@ const migrations = [
   `
   CREATE TABLE stage_bans (room TEXT NOT NULL, user_id INTEGER NOT NULL, PRIMARY KEY (room, user_id));
   `,
+  // v26: a user's own passcode for the Telegram part (no row = none). Its own table so the hash
+  // never comes along with a SELECT * FROM users.
+  `
+  CREATE TABLE tele_passcodes (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    hash TEXT NOT NULL,
+    idle_min INTEGER NOT NULL DEFAULT 15,
+    fails INTEGER NOT NULL DEFAULT 0,
+    locked_until INTEGER,
+    updated_at INTEGER NOT NULL
+  );
+  `,
 ];
 
 const current = db.prepare('PRAGMA user_version').get().user_version;
@@ -542,6 +555,13 @@ for (let v = current; v < migrations.length; v++) {
     db.exec(`PRAGMA user_version = ${v + 1}`);
   });
 }
+
+// Telegram passcodes kept from before a restore from the panel (see passcode-carry.js). Put back
+// by the server's start (index.js), after the migrations above; never by the CLIs that also load
+// this file while the app runs (backup-cli.js), which would use the file up before the restore.
+export const PASSCODE_CARRY = path.join(DATA_DIR, CARRY_NAME);
+// Set aside when that file couldn't be read: while it exists, Telegram is closed for everyone.
+export const PASSCODE_CARRY_CORRUPT = path.join(DATA_DIR, CORRUPT_NAME);
 
 export const parseJSON = (s, fallback) => {
   try {

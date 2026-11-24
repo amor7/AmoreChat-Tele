@@ -85,3 +85,12 @@ export function safeInterval(name, ms, fn, { log } = {}) {
   timer.unref();
   return timer;
 }
+
+/** `p`, or a rejection after `ms` if it hasn't settled by then (`p` itself is not cancelled). */
+export function withTimeout(p, ms, message = 'timed out') {
+  let timer;
+  const cap = new Promise((_, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), ms);
+  });
+  return Promise.race([p, cap]).finally(() => clearTimeout(timer));
+}

@@ -1,11 +1,25 @@
 // Background loops survive their own errors. Usage: node --test server/test/timers.test.mjs
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { safeInterval, setTimerLogger } from '../src/timers.js';
+import { safeInterval, setTimerLogger, withTimeout } from '../src/timers.js';
 
+// Mocked clocks throughout: real 5 ms intervals were flaky on Windows and on a busy CI runner.
+// setImmediate stays real, so `step` can let promise callbacks (catch/finally) run between ticks.
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const flush = () => new Promise((r) => setImmediate(r));
+function clock(ctx) {
+  ctx.mock.timers.enable({ apis: ['setInterval', 'setTimeout', 'Date'] });
+  // One interval at a time: a single big tick moves Date to the end before the callbacks run.
+  return async (ms, each = 5) => {
+    for (let i = 0; i < ms / each; i++) {
+      ctx.mock.timers.tick(each);
+      await flush();
+    }
+  };
+}
 
-test('sync throws and rejections are caught and the loop keeps going', async () => {
+test('sync throws and rejections are caught and the loop keeps going', async (ctx) => {
+  const step = clock(ctx);
   const logs = [];
   const log = (...a) => logs.push(a);
   let n = 0;
@@ -18,7 +32,7 @@ test('sync throws and rejections are caught and the loop keeps going', async () 
     m++;
     throw new Error('later');
   }, { log });
-  await sleep(80);
+  await step(80);
   clearInterval(t);
   clearInterval(t2);
   assert.ok(n >= 3 && m >= 3, `ran ${n} and ${m} times`);
@@ -30,7 +44,8 @@ test('sync throws and rejections are caught and the loop keeps going', async () 
   }
 });
 
-test('a non-promise return value and a throwing logger are harmless', async () => {
+test('a non-promise return value and a throwing logger are harmless', async (ctx) => {
+  const step = clock(ctx);
   let n = 0;
   const t = safeInterval('odd', 5, () => {
     n++;
@@ -46,7 +61,7 @@ test('a non-promise return value and a throwing logger are harmless', async () =
       throw new Error('logger broke');
     },
   });
-  await sleep(40);
+  await step(40);
   clearInterval(t);
   clearInterval(t2);
   assert.ok(n >= 3);
@@ -75,7 +90,8 @@ test('logging is throttled to one line per 5 minutes with a count', (ctx) => {
   clearInterval(t);
 });
 
-test('a slow async run is not overlapped by the next tick', async () => {
+test('a slow async run is not overlapped by the next tick', async (ctx) => {
+  const step = clock(ctx);
   let active = 0;
   let maxActive = 0;
   let starts = 0;
@@ -86,7 +102,7 @@ test('a slow async run is not overlapped by the next tick', async () => {
     await sleep(40);
     active--;
   });
-  await sleep(150);
+  await step(150);
   clearInterval(t);
   assert.equal(maxActive, 1);
   assert.ok(starts >= 2 && starts <= 5, `started ${starts} times`);
@@ -98,27 +114,42 @@ test('the timer is unref()ed and returned for clearInterval', () => {
   clearInterval(t);
 });
 
-test('setTimerLogger replaces the default logger', async () => {
+test('setTimerLogger replaces the default logger', async (ctx) => {
+  const step = clock(ctx);
   const logs = [];
   setTimerLogger((...a) => logs.push(a));
   setTimerLogger('not a function'); // ignored
   const t = safeInterval('default', 5, () => {
     throw new Error('to default');
   });
-  await sleep(30);
+  await step(30);
   clearInterval(t);
   assert.equal(logs.length, 1);
   assert.equal(logs[0][0], '[default] failed');
 });
 
-test('a run still going after 10 intervals is reported once', async () => {
+test('a run still going after 10 intervals is reported once', async (ctx) => {
+  const step = clock(ctx);
   const logs = [];
   let release;
   const hung = new Promise((r) => (release = r));
   const t = safeInterval('hung', 5, () => hung, { log: (...a) => logs.push(a) });
-  await sleep(150);
+  await step(150);
   assert.equal(logs.length, 1, 'one report for the whole run');
   assert.match(logs[0][0], /^\[hung\] still running since \d{4}-\d\d-\d\dT/);
   release();
   clearInterval(t);
+});
+
+test('withTimeout: the value when in time, a rejection when not', async (ctx) => {
+  const step = clock(ctx);
+  assert.equal(await withTimeout(Promise.resolve(7), 1000), 7);
+  let err = null;
+  const slow = withTimeout(new Promise(() => {}), 15_000, 'logOut timed out').catch((e) => (err = e));
+  await step(14_000, 1000);
+  assert.equal(err, null);
+  await step(1000, 1000);
+  await slow;
+  assert.match(err.message, /logOut timed out/);
+  await assert.rejects(withTimeout(Promise.reject(new Error('own')), 1000), /own/);
 });

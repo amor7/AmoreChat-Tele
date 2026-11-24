@@ -6,7 +6,10 @@
 #   apply    installs the files uploaded to data/update/incoming with deploy/update.sh: the same
 #            checks as by hand, the signature against the key of the version installed now
 #   restore  puts a backup (data/update/restore-name) in place of the database; the database of
-#            now is kept in data/backups/before-restore-*, and comes back if the app won't start
+#            now is kept in data/backups/before-restore-*, and comes back if the app won't start.
+#            Telegram passcodes of now are not lost with it: the app wrote them to
+#            data/tele-passcodes.carry.json when the restore was asked for (and again as it stops),
+#            and puts them back into the restored database when it starts (server/src/passcode-carry.js)
 # Everything runs inside main(): update.sh replaces this file while it runs.
 main() {
 set -uo pipefail

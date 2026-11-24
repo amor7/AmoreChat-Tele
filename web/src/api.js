@@ -8,16 +8,31 @@ export class ApiError extends Error {
   }
 }
 
+// The Telegram section answers 423 while its passcode lock is on. Any request that hears it
+// (a poll, an upload, a forward) tells the screens at once, so they can hide what they show.
+export const TELE_LOCK_EVENT = 'amore-tele-locked';
+export const TELE_LOCKED = 423;
+function heardLock(status) {
+  if (status !== TELE_LOCKED) return;
+  try {
+    window.dispatchEvent(new CustomEvent(TELE_LOCK_EVENT));
+  } catch {
+    /* no window */
+  }
+}
+
 // Every request gives up after a while: with the server unreachable (e.g. its domain can't be
 // resolved during an internet shutdown) the app must fall back to offline mode, not wait forever.
-export async function api(method, url, body, { timeout = 20000 } = {}) {
+// `headers` adds request headers (e.g. x-amore-poll: 1 marks an automatic check, which must not
+// count as the user being active for the Telegram auto-lock).
+export async function api(method, url, body, { timeout = 20000, headers } = {}) {
   let res;
   try {
     res = await fetch('/api' + url, {
       method,
       signal: AbortSignal.timeout(timeout),
       credentials: 'same-origin',
-      headers: { 'x-requested-with': 'amorechat', ...(body ? { 'content-type': 'application/json' } : {}) },
+      headers: { ...headers, 'x-requested-with': 'amorechat', ...(body ? { 'content-type': 'application/json' } : {}) },
       body: body ? JSON.stringify(body) : undefined,
     });
   } catch {
@@ -32,7 +47,11 @@ export async function api(method, url, body, { timeout = 20000 } = {}) {
   } catch {
     if (res.ok) throw new ApiError('پاسخ سرور ناقص رسید', 0);
   }
-  if (!res.ok) throw new ApiError(data.error || 'خطا در ارتباط با سرور', res.status);
+  if (!res.ok) {
+    heardLock(res.status);
+    // data goes along: some refusals say more than the message (e.g. how long a lock lasts).
+    throw new ApiError(data.error || 'خطا در ارتباط با سرور', res.status, data);
+  }
   return data;
 }
 
@@ -46,7 +65,10 @@ function parseAnswer(status, text, fallback) {
   } catch {
     if (status >= 200 && status < 300) throw new ApiError('پاسخ سرور ناقص رسید', 0);
   }
-  if (status < 200 || status >= 300) throw new ApiError(data.error || fallback, status, data);
+  if (status < 200 || status >= 300) {
+    heardLock(status);
+    throw new ApiError(data.error || fallback, status, data);
+  }
   return data;
 }
 

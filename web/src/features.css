@@ -2417,3 +2417,124 @@ input.music-bar-seek:hover::-moz-range-thumb {
 .composer-bar.voice-retry .bar-body {
   border-inline-start-color: var(--danger);
 }
+
+/* ---------- Telegram passcode (TelePasscode.jsx) ---------- */
+.twofa-status > .tele-pass-actions {
+  flex: 0 0 auto;
+}
+.tele-pass-note {
+  margin: 8px 2px 0;
+  padding-inline-start: 18px;
+  line-height: 1.8;
+}
+/* "If you forget it…": seen while turning the passcode on or changing it. */
+.tele-pass-risk {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  margin: 0;
+  color: var(--danger);
+  line-height: 1.8;
+}
+.tele-pass-risk > svg {
+  flex-shrink: 0;
+  margin-top: 4px;
+}
+/* Read by screen readers only (e.g. a fixed sentence instead of a ticking clock). */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+.tele-pass-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 14px;
+}
+.tele-pass-input {
+  text-align: center;
+  letter-spacing: 2px;
+}
+/* The lock screen: calm, centered, nothing of Telegram behind it. */
+.tele-lock {
+  gap: 10px;
+}
+.tele-lock h2 {
+  margin: 4px 0 0;
+  font-size: 20px;
+}
+.tele-lock > p {
+  margin: 0;
+}
+.tele-lock.compact {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 0;
+  text-align: center;
+  color: var(--muted);
+}
+.tele-lock.compact h2 {
+  color: var(--text);
+  font-size: 17px;
+}
+.tele-lock-icon {
+  display: grid;
+  place-items: center;
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--accent);
+}
+.tele-lock.compact .tele-lock-icon {
+  width: 56px;
+  height: 56px;
+}
+.tele-lock-form {
+  width: min(320px, 100%);
+  margin-top: 6px;
+}
+.tele-lock-form .tele-block,
+.tele-lock-form .error {
+  width: 100%;
+  box-sizing: border-box;
+}
+.tele-lock-form .link-btn {
+  align-self: center;
+  color: var(--muted);
+}
+.tele-forgot {
+  margin-top: 6px;
+  color: var(--accent);
+  font-size: 13px;
+}
+/* Keypad switch and "forgot": a finger-sized target on touch screens. */
+@media (pointer: coarse) {
+  .tele-lock .link-btn {
+    min-height: 44px;
+  }
+}
+.tele-forgot-warn {
+  width: auto;
+  align-items: flex-start;
+  line-height: 1.8;
+}
+.tele-forgot-warn > svg {
+  flex-shrink: 0;
+  margin-top: 4px;
+}
+/* On a phone the lock sits in the side column, under its header. */
+.tele-side .tele-lock {
+  height: auto;
+  flex: 1;
+}
