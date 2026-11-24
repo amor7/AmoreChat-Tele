@@ -1099,12 +1099,27 @@ body:has(.room-view, .call-view) .toast {
 .tele-photo-cta {
   position: absolute;
   inset: auto 8px 8px;
-  padding: 4px 10px;
-  border-radius: 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px 4px 4px;
+  border-radius: 20px;
   background: rgb(0 0 0 / 0.55);
   color: var(--text-on-media);
   font-size: 13px;
-  text-align: center;
+  text-align: start;
+}
+.tele-photo-cta .media-card-icon {
+  width: 32px;
+  height: 32px;
+  background: rgb(255 255 255 / 0.2);
+}
+.tele-photo-cta > span:last-child {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.tele-photo.is-error .tele-photo-cta {
+  background: rgb(0 0 0 / 0.7);
 }
 .tele-chat .msg-row.flash .bubble {
   outline: 2px solid var(--accent);
@@ -1184,63 +1199,131 @@ body:has(.room-view, .call-view) .toast {
   padding: 24px 12px 32px;
 }
 
-/* Telegram: forward button under the reply button (hover), long-press menu on phones. */
+/* Telegram: hover buttons beside the bubble (desktop): reply, forward, then the menu button.
+   On phones they are hidden (styles.css): a tap or long-press on the bubble opens the menu. */
 .msg-more.msg-fwd {
   top: 30px;
 }
-.tele-msg-menu {
-  position: absolute;
-  z-index: 5;
-  top: 100%;
-  inset-inline-start: 0;
-  display: flex;
-  flex-direction: column;
-  min-width: 190px;
-  padding: 4px;
-  border-radius: 12px;
-  background: var(--panel);
-  box-shadow: var(--shadow-menu);
+.msg-more.msg-menu-btn {
+  top: 58px;
 }
-.tele-msg-menu button {
+.msg-more.msg-menu-btn.alone {
+  top: 2px;
+}
+.msg-more:focus-visible {
+  opacity: 1;
+}
+/* Touch screens hide the hover buttons (styles.css); the menu button stays in the page for
+   TalkBack and a keyboard, out of sight until it has keyboard focus. */
+@media (pointer: coarse) {
+  .msg-more.msg-menu-btn {
+    display: block;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
+  .msg-more.msg-menu-btn:focus-visible {
+    width: var(--tap);
+    height: var(--tap);
+    clip: auto;
+    opacity: 1;
+  }
+}
+/* Telegram text can always be selected with a mouse. On touch screens bubbles are not
+   selectable (the long-press is the menu, see .bubble above) until «انتخاب متن» is chosen. */
+.tele-chat .bubble .text {
+  -webkit-user-select: text;
+  user-select: text;
+}
+@media (pointer: coarse) {
+  .tele-chat .bubble .text {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  .tele-chat .bubble.selecting,
+  .tele-chat .bubble.selecting .text {
+    -webkit-touch-callout: default;
+    -webkit-user-select: text;
+    user-select: text;
+  }
+}
+/* Once, on touch screens: how to reach a message's actions. */
+.tele-hint {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 9px 10px;
-  border: 0;
-  border-radius: 8px;
-  background: none;
+  padding: 8px 12px;
+  background: var(--accent-soft);
   color: var(--text);
-  font: inherit;
-  text-align: start;
-  cursor: pointer;
-}
-.tele-msg-menu button:hover {
-  background: var(--hover);
+  font-size: 14px;
 }
 
-/* Telegram voice message: fetched when tapped. */
-.tele-voice {
+/* Telegram photo / voice / file before it is opened (MediaCard.jsx): the whole card is the
+   button; its round icon shows the download (ring), a failure (!) or the end (✓). */
+.media-card {
   display: flex;
   align-items: center;
   gap: 10px;
-  width: min(260px, 66vw);
+  width: min(280px, 70vw);
   padding: 6px 4px;
-  border: 0;
-  background: none;
   color: inherit;
-  font: inherit;
   text-align: start;
   cursor: pointer;
+  border-radius: 10px;
 }
-.tele-voice-play {
+.media-card-icon {
+  position: relative;
   display: grid;
   place-items: center;
-  width: 38px;
-  height: 38px;
+  width: 40px;
+  height: 40px;
   flex: none;
   border-radius: 50%;
   background: var(--accent);
   color: var(--on-accent);
+}
+.media-card-icon .dl-icon {
+  display: flex;
+}
+.media-card-icon.failed {
+  background: var(--danger);
+}
+.msg-row.mine .media-card-icon {
+  background: rgb(255 255 255 / 0.22);
+}
+.media-card-body {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  text-align: start;
+}
+.media-card-title {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.media-card-sub {
+  color: var(--muted);
+  overflow-wrap: anywhere;
+}
+.msg-row.mine .media-card-sub {
+  color: rgb(255 255 255 / 0.82);
+}
+.media-card-error {
+  color: var(--danger);
+}
+.msg-row.mine .media-card-error {
+  color: var(--danger-on-dark);
+}
+.media-card-retry {
+  font-weight: 600;
+  text-decoration: underline;
+}
+.media-card-hint {
+  white-space: nowrap;
 }
 .tele-voice-audio {
   display: block;
@@ -1304,53 +1387,50 @@ body:has(.room-view, .call-view) .toast {
 }
 
 /* Telegram: a message waiting for the tunnel; files and videos (fetched when tapped). */
-.tele-queued {
-  display: inline-flex;
-  gap: 6px;
+/* A message not in Telegram yet (queued) or that never got there (failed): what, why, and what
+   to do, in words (no emoji, not only a tooltip). */
+.tele-msg-state {
+  display: flex;
+  flex-wrap: wrap;
   align-items: center;
+  gap: 2px 8px;
+  margin-top: 4px;
+  font-size: 13px;
+}
+.tele-msg-state span {
+  flex-basis: 100%;
+  color: var(--muted);
+}
+.tele-msg-state.queued b {
   color: var(--warn-text);
 }
-.tele-queued .link-btn {
+.tele-msg-state.failed b {
+  color: var(--danger);
+}
+.msg-row.mine .tele-msg-state span {
+  color: rgb(255 255 255 / 0.82);
+}
+.msg-row.mine .tele-msg-state.queued b {
+  color: var(--bubble-out-text);
+}
+.msg-row.mine .tele-msg-state.failed b {
+  color: var(--danger-on-dark);
+}
+.tele-msg-state .link-btn {
   border: 0;
   background: none;
   color: inherit;
   text-decoration: underline;
   cursor: pointer;
   font: inherit;
+  font-weight: 600;
   padding: 0;
 }
-.tele-file {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  width: min(280px, 70vw);
-  padding: 6px 4px;
-  border: 0;
-  background: none;
-  color: inherit;
-  font: inherit;
-  text-align: start;
-  cursor: pointer;
-}
-.tele-file .grow {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-.tele-file-name {
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-}
-.tele-file-icon {
-  display: grid;
-  place-items: center;
-  width: 38px;
-  height: 38px;
-  flex: none;
-  border-radius: 10px;
-  background: var(--accent);
-  color: var(--on-accent);
+@media (pointer: coarse) {
+  .tele-msg-state .link-btn {
+    min-height: var(--tap);
+    padding: 0 8px;
+  }
 }
 .tele-video {
   display: block;
@@ -2913,4 +2993,33 @@ input.music-bar-seek:hover::-moz-range-thumb {
 .confirm-input input {
   flex: 1;
   min-width: 0;
+}
+
+/* ---------- Telegram: sidebar entry and history placeholder ---------- */
+/* The Telegram button next to the chat search, with the unread count of the added chats. */
+.tele-entry {
+  position: relative;
+  flex: none;
+}
+.tele-entry .badge {
+  position: absolute;
+  top: 0;
+  inset-inline-end: -2px;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 4px;
+  font-size: 11px;
+  box-shadow: 0 0 0 2px var(--panel);
+}
+/* Grey bubbles while a chat's history loads the first time (States.jsx SkeletonMessages). */
+.skeleton-bubble {
+  width: min(60%, 320px);
+  margin: var(--space-2) 0;
+  padding: var(--space-1) var(--space-3);
+  border-radius: 14px;
+  background: var(--panel-2);
+}
+.skeleton-bubble.mine {
+  margin-inline-start: auto;
+  width: min(45%, 260px);
 }

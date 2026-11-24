@@ -34,6 +34,7 @@ export const useStore = create((set, get) => ({
   rtc: null, // active voice room / call connection (see rtc.js)
   call: null, // 1:1 call being rung / in progress
   folders: [], // the user's chat folders
+  teleEntry: null, // { show, unread, stopped } for the sidebar's Telegram button (useTeleEntry.js publishTeleStatus)
   async loadFolders() {
     const { folders } = await api('GET', '/folders');
     set({ folders });

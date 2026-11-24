@@ -121,10 +121,11 @@ const DOWNLOAD_ERRORS = {
 
 // A media download from the Telegram bridge as a Blob. Same headers and errors as api(); gives
 // up only when the server is silent too long or the data stops arriving, never mid-progress.
-export async function teleDownload(url, { signal, stallMs = 45000, responseMs = 5 * 60 * 1000, errorText = 'دانلود ناموفق بود' } = {}) {
+// `onProgress(received, total)` reports the bytes as they arrive (total 0 when unknown).
+export async function teleDownload(url, { signal, stallMs = 45000, responseMs = 5 * 60 * 1000, errorText = 'دانلود ناموفق بود', onProgress } = {}) {
   let r;
   try {
-    r = await watchedDownload(fetch, '/api' + url, { credentials: 'same-origin', headers: { 'x-requested-with': 'amorechat' } }, { signal, stallMs, responseMs });
+    r = await watchedDownload(fetch, '/api' + url, { credentials: 'same-origin', headers: { 'x-requested-with': 'amorechat' } }, { signal, stallMs, responseMs, onProgress });
   } catch (e) {
     const [msg, status] = DOWNLOAD_ERRORS[e.kind] || DOWNLOAD_ERRORS.broken;
     throw new ApiError(msg, status);

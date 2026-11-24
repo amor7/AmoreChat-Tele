@@ -7,6 +7,7 @@ import { getAccountForUser, liveClient, listDialogs, upsertDialog, onTeleUpdate,
 import { ensureEgress } from './egress.js';
 import { ffmpeg, mediaReady } from '../media.js';
 import { safeInterval } from '../timers.js';
+import { pickPhotoSize } from './photo-size.js';
 
 const UPLOADS = path.join(DATA_DIR, 'tele-uploads');
 export const mediaMaxBytes = () => (settingNumber('tele_media_max_mb') || 5) * 1048576;
@@ -87,7 +88,8 @@ export function publicMessage(row, quoted = null) {
   return {
     id: row.id, dialogId: row.dialog_id, tgMsgId: row.tg_msg_id, direction: row.direction, kind: row.kind, text: row.text,
     createdAt: row.created_at, senderId: row.sender_id || '', senderName: row.sender_name || '', replyTo,
-    photo: media?.type === 'photo' ? { w: media.w, h: media.h, mini: media.mini } : null,
+    // size: of the photo a tap downloads (0 when Telegram did not say), shown before the tap.
+    photo: media?.type === 'photo' ? { w: media.w, h: media.h, mini: media.mini, size: pickPhotoSize(media.sizes, mediaMaxBytes())?.size || 0 } : null,
     voice: media?.type === 'voice' ? { duration: media.duration, wave: media.wave, size: media.size } : null,
     file: media?.type === 'file' ? { name: media.name, size: media.size, mime: media.mime, video: media.video, gif: media.gif, duration: media.duration, w: media.w, h: media.h, mini: media.mini } : null,
   };
@@ -452,7 +454,7 @@ export async function telePhotoFile(userId, messageId) {
   if (media?.type !== 'photo') throw Object.assign(new Error('عکس پیدا نشد'), { statusCode: 404 });
   // The biggest size that fits the limit (Telegram keeps several sizes of every photo).
   const max = mediaMaxBytes();
-  const size = [...media.sizes].sort((a, b) => b.size - a.size).find((s) => !s.size || s.size <= max);
+  const size = pickPhotoSize(media.sizes, max);
   if (!size) throw Object.assign(new Error(`حجم این عکس بیشتر از سقف مجاز (${settingNumber('tele_media_max_mb') || 5} مگابایت) است`), { statusCode: 413 });
   const client = await liveClient(account);
   if (!client) throw Object.assign(new Error('اتصال به تلگرام برقرار نیست'), { statusCode: 503, expose: true });

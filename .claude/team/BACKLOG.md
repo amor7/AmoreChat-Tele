@@ -54,6 +54,11 @@
 - [جزئی · v1.0.44] e2e برای «تأیید و بلافاصله navigate» (`whenHistorySettled` در `confirm.js` به ترتیب flush افکت‌های React تکیه دارد)؛ اسکلتون با `background-position` روی WebView ضعیف repaint می‌کند (در حالت سبک خاموش).
 - [جزئی · v1.0.44] Modal دیگر prop تازه نگیرد؛ Lightbox/sheet مرحله‌ی ۴ مستقیم روی `useDialog`/`useLayer` (architect).
 
+- [جزئی · v1.0.45] پیام تلگرامِ «ارسال نشد» API ارسال دوباره/حذف ندارد (`DELETE /api/tele/messages/:id` فقط queued)؛ فعلاً فقط توضیح دارد.
+- [جزئی · v1.0.45] لغو دانلود در کلاینت احتمالاً `downloadFile` تلگرام را در سرور متوقف نمی‌کند (ترافیک VPN) — بررسی شود. blob عکس/ویدیوهای دانلودشده تا بستن چت در حافظه می‌ماند (بدون سقف).
+- [جزئی · v1.0.45] `/api/tele/status` برای badge سایدبار کل dialogs را برمی‌گرداند؛ پاسخ سبک `?brief=1` (perf). `sameMessage` در `tele-rules.js` باید با فیلدهای `publicMessage` سرور هم‌گام بماند.
+- [جزئی · v1.0.45] TalkBack واقعی (click با `detail===0`) روی دستگاه تست نشده؛ long-press و `useBackdropGuard` در Message/TeleMessage/ChatView/Folders تکراری‌اند (architect).
+
 ## ایده‌ها
 - [کم] UI تلگرام با polling کار می‌کند (هر 5/10/60 ثانیه) در حالی که Socket.IO هست؛ در مقیاس <۵۰ کاربر اولویت پایین، ولی روی نت کند push مصرف داده را کم می‌کند.
   - همراهش: اعلان پیام تلگرام برای چت‌های «مهم» (الان در `server/src/tele/` هیچ notify/push نیست). با `TELE_IDLE_MINUTES` و `assertQuota` در تنش است؛ اول طراحی و تصمیم درباره‌ی بودجه‌ی ترافیک VPN.

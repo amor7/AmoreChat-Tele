@@ -222,7 +222,7 @@ function dlName(name, variant) {
   return (name || 'video').replace(/\.\w+$/, '') + `-${variant}p.mp4`;
 }
 
-function Ring({ progress }) {
+export function Ring({ progress }) {
   const r = 16;
   const c = 2 * Math.PI * r;
   return (

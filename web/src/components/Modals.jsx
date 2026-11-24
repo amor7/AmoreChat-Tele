@@ -18,6 +18,7 @@ import { FoldersModal, FolderEditor } from './Folders';
 import { useBackClose } from '../backnav';
 import { useDialog } from '../a11y';
 import { TeleToChat, ChatToTele, TeleSessions } from './TeleForward';
+import Lightbox from './Lightbox';
 
 /**
  * The app's dialog frame: backdrop, panel, title bar with a close button, focus handling.
@@ -395,17 +396,9 @@ function Search({ chatId, onClose }) {
   );
 }
 
+// Back: registered by Modals() below, so the lightbox leaves it out.
 function ImageViewer({ fileId, name, onClose }) {
-  const dialog = useDialog({ onClose, back: false }); // Back: Modals() below
-  return (
-    <div className="lightbox" onClick={onClose} role="dialog" aria-modal="true" aria-label="نمایش عکس" {...dialog}>
-      <button className="lightbox-close" onClick={onClose} aria-label="بستن">
-        <X size={24} />
-      </button>
-      <img src={fileUrl(fileId)} alt="" onClick={(e) => e.stopPropagation()} />
-      <DownloadButton fileId={fileId} name={name || 'image.jpg'} className="lightbox-dl" />
-    </div>
-  );
+  return <Lightbox src={fileUrl(fileId)} onClose={onClose} back={false} download={<DownloadButton fileId={fileId} name={name || 'image.jpg'} className="lightbox-dl" />} />;
 }
 
 export default function Modals() {

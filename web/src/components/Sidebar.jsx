@@ -7,7 +7,7 @@ import { MessageResults, openMessage } from './Modals';
 import { VoiceChannels } from './Voice';
 import { RichText } from './Emoji';
 import PreviewIcon from './PreviewIcon';
-import { Menu, SquarePen, UserRound, Compass, Shield, LogOut, Users, Megaphone, Volume2, BellOff, Pin, FolderPlus, Server, Plus, Cable } from 'lucide-react';
+import { Menu, SquarePen, UserRound, Compass, Shield, LogOut, Users, Megaphone, Volume2, BellOff, Pin, FolderPlus, Server, Plus, Cable, Send } from 'lucide-react';
 import { useStore } from '../store';
 import { api } from '../api';
 import { disconnectSocket, isChatMuted } from '../socket';
@@ -18,6 +18,8 @@ import Avatar from './Avatar';
 import Ping from './Ping';
 import { UpdateBar } from './AndroidApp';
 import { multiServer, appServers, switchServer, addServer } from '../native';
+import { useTeleEntry } from '../useTeleEntry';
+import { badgeText } from '../tele-rules';
 
 const TYPE_ICON = { group: Users, channel: Megaphone, voice: Volume2 };
 
@@ -144,6 +146,7 @@ export default function Sidebar() {
           {otherUnread && <i className="menu-dot" />}
         </button>
         <input className="search" placeholder="جستجو" value={query} onChange={(e) => setQuery(e.target.value)} />
+        <TeleEntry />
         {menu && (
           <PopMenu label="منو" onClose={closeMenu}>
             <div className="menu-user">
@@ -247,6 +250,24 @@ export default function Sidebar() {
         <SquarePen size={24} />
       </button>
     </aside>
+  );
+}
+
+// Telegram, one tap from the chat list (it is also in the main menu): only for users with a
+// connected account; the number is the unread messages of the Telegram chats they added.
+function TeleEntry() {
+  const { show, unread } = useTeleEntry();
+  if (!show) return null;
+  const label = unread > 0 ? `تلگرام، ${toFa(unread)} پیام خوانده‌نشده` : 'تلگرام';
+  return (
+    <a className="icon-btn tele-entry" href="#/tele" aria-label={label} title={label}>
+      <Send size={20} />
+      {unread > 0 && (
+        <span className="badge" aria-hidden="true">
+          {badgeText(unread)}
+        </span>
+      )}
+    </a>
   );
 }
 
