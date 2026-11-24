@@ -1018,7 +1018,10 @@ async function uiChecks({ owner, alice, bob, pd, gd, meta, photoMsg, voiceMsg, s
       const row = [...document.querySelectorAll('.tele-chat .msg-row')].find((r) => r.querySelector('.text')?.textContent.trim() === t);
       row.querySelector('.msg-fwd').click();
     }, helloText);
-    await page.waitForSelector('.modal[aria-label="ارسال پیام تلگرام به…"] .user-list input[type=checkbox]');
+    // The dialog is named by its heading (aria-labelledby), as a screen reader reads it.
+    await page.waitForFunction(() => [...document.querySelectorAll('.modal[role=dialog]')].some((m) =>
+      document.getElementById(m.getAttribute('aria-labelledby') || '')?.textContent.trim() === 'ارسال پیام تلگرام به…' &&
+      m.querySelector('.user-list input[type=checkbox]')));
     await page.click('.modal .user-list input[type=checkbox]');
     await clickText('.modal button.btn.primary', 'ارسال');
     await until('forwarded from the UI', async () => (await savedCount()) === before + 1, 20000);
