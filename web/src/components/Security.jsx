@@ -4,6 +4,7 @@ import { Smartphone, Monitor, LogOut, ShieldCheck, ShieldOff, Copy, KeyRound } f
 import { api } from '../api';
 import { useStore } from '../store';
 import { formatDay, formatTime, toFa, copyText } from '../util';
+import { TelePasscodeSettings } from './TelePasscode';
 
 const when = (t) => (Date.now() - t < 2 * 60 * 1000 ? 'همین حالا' : `${formatDay(t)} ${formatTime(t)}`);
 
@@ -220,6 +221,7 @@ export default function Security() {
     <>
       <h4>امنیت</h4>
       <TwoFactor />
+      <TelePasscodeSettings />
       <h5>دستگاه‌های وارد شده</h5>
       <Devices key={String(twoFactor)} />
     </>

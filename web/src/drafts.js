@@ -105,6 +105,22 @@ export function clearAllDrafts(storage) {
   if (all.length) changed();
 }
 
+/** One user's drafts of one kind (Telegram locked by its passcode: no text left on screen or disk). */
+export function clearDrafts(uid, kind, storage) {
+  const s = store(storage);
+  if (!s) return;
+  const prefix = `${DRAFT_PREFIX}u${uid}:${kind}:`;
+  const mine = keys(s).filter((k) => k.startsWith(prefix));
+  for (const k of mine) {
+    try {
+      s.removeItem(k);
+    } catch {
+      /* skip */
+    }
+  }
+  if (mine.length) changed();
+}
+
 /**
  * Writes the draft a moment after typing stops instead of on every key. flush() writes the
  * pending text now (page hidden or closed, chat switched); cancel() drops it.

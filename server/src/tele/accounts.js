@@ -6,9 +6,10 @@ import { settingNumber } from '../settings.js';
 import { ACCESS_MODES, accessMode, accessAllowed } from '../access.js';
 import { ensureEgress, egressStatus, onEgressChange, setMtprotoTester } from './egress.js';
 import { teleAlert } from './alerts.js';
-import { safeInterval } from '../timers.js';
+import { safeInterval, withTimeout } from '../timers.js';
+import { sessionsRoot, wipeSessionDir } from './session-dirs.js';
 
-const SESSIONS_ROOT = path.join(DATA_DIR, 'tele-sessions');
+const SESSIONS_ROOT = sessionsRoot(DATA_DIR);
 const live = new Map();
 // TDLib updates (e.g. a sent message got its final id) for code that keeps state per account.
 const updateHandlers = [];
@@ -292,6 +293,16 @@ export async function beginLogin(userId, phone) {
   if (!row) {
     const r = run(`INSERT INTO tele_accounts (user_id, phone, status, session_dir, created_at, updated_at) VALUES (?,?,?,?,?,?)`, userId, phoneClean, 'disconnected', '', t, t);
     row = get('SELECT * FROM tele_accounts WHERE id = ?', Number(r.lastInsertRowid));
+    // Ids can be given out again (an older backup restored, a user deleted): a client or a session
+    // folder left under this id belongs to someone else's login. Dropped before TDLib opens it.
+    // If that fails the row goes too, so a retry does it again instead of opening the old folder.
+    try {
+      await dropStale(row.id);
+      wipeSessionDir(SESSIONS_ROOT, row.id);
+    } catch (e) {
+      run('DELETE FROM tele_accounts WHERE id = ?', row.id);
+      throw e;
+    }
   } else {
     run(`UPDATE tele_accounts SET phone = ?, updated_at = ? WHERE id = ?`, phoneClean, t, row.id);
   }
@@ -331,6 +342,14 @@ export async function beginLogin(userId, phone) {
     }
     throw Object.assign(new Error('ورود به تلگرام ناموفق بود: ' + msg), { statusCode: 502, expose: true });
   }
+}
+// A client still kept under an id that was just given to a new account: closed without counting
+// its traffic (it was someone else's).
+async function dropStale(accountId) {
+  await opening.get(accountId)?.catch(() => null);
+  const handle = live.get(accountId);
+  live.delete(accountId);
+  if (handle?.client) await handle.client.close().catch(() => {});
 }
 async function closeLive(accountId) {
   await flushUsage(accountId).catch(() => null);
@@ -461,12 +480,16 @@ export function clearStaleLogin(row) {
   }
   return row;
 }
+const LOGOUT_TIMEOUT_MS = 15000;
 export async function disconnectAccount(userId) {
   const row = getAccountForUser(userId);
   if (!row) return { ok: true };
   // Closed for being idle: open it once more, so the session is also ended on Telegram's side.
   const client = live.get(row.id)?.client || (row.status === 'connected' ? await liveClient(row, { ignoreQuota: true, ignoreAccess: true }).catch(() => null) : null);
-  if (client) { try { await client.invoke({ _: 'logOut' }); } catch {} }
+  // Capped: with the tunnel down logOut never answers, and a user who forgot the passcode (or just
+  // wants out) must still be disconnected here. Then the session stays open on Telegram's side until
+  // the user ends it from another device (Settings > Devices); the local data goes either way.
+  if (client) { try { await withTimeout(client.invoke({ _: 'logOut' }), LOGOUT_TIMEOUT_MS, 'logOut timed out'); } catch {} }
   await closeLive(row.id);
   run(`UPDATE tele_accounts SET status = 'disconnected', session_dir = '', tg_user_id = NULL, display_name = '', username = '', db_encrypted = 0 WHERE id = ?`, row.id);
   run('DELETE FROM tele_dialogs WHERE account_id = ?', row.id);

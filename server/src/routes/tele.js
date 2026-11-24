@@ -20,6 +20,7 @@ import { requireChat } from './chats.js';
 import { assertCanPost } from './messages.js';
 import { registerFile, newRel } from './files.js';
 import { ownerAccount, listMirrors, createMirror, runMirrors, telegramChannels, setVisibility, renewInvite, loadMirrorMedia, VISIBILITY } from '../tele/mirror.js';
+import { assertTeleUnlocked, passcodeRow, isUnlocked, hasPasscode, passcodeUserIds, teleQuarantined, QUARANTINE_TEXT } from '../tele/passcode.js';
 
 const loginLimit = { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } };
 // Each of these costs the server's VPN traffic (and too many sends get a Telegram account limited).
@@ -31,9 +32,19 @@ const needTeleAdmin = (req) => {
 
 export default async function teleRoutes(app) {
   // Users the admin closed Telegram for: only the status (which says so) and logging out.
+  // A user's own Telegram passcode locks every /api/tele/ route but the status (which says it is
+  // locked, and nothing else), and the owner's mirror settings, which show their Telegram channels.
+  // Not /api/mirror-media: public channel posts any app member may load. The passcode's own routes
+  // live in routes/tele-passcode.js, outside this hook.
+  // Matched on the route's own path, not req.url: a percent-encoded or oddly written URL that the
+  // router still sends to one of these routes can't slip past the checks.
   app.addHook('preHandler', async (req) => {
-    if (!req.user || !req.url.startsWith('/api/tele/') || /^\/api\/tele\/(status|disconnect)(\?|$)/.test(req.url)) return;
-    assertTeleAllowed(req.user);
+    const route = req.routeOptions.url || '';
+    if (!req.user) return;
+    if (route.startsWith('/api/admin/tele/mirrors')) return assertTeleUnlocked(req);
+    if (!route.startsWith('/api/tele/') || route === '/api/tele/status') return;
+    if (route !== '/api/tele/disconnect') assertTeleAllowed(req.user);
+    assertTeleUnlocked(req);
   });
   app.get('/api/admin/tele/policy', async (req) => {
     needTeleAdmin(req);
@@ -125,6 +136,14 @@ export default async function teleRoutes(app) {
   });
   app.get('/api/tele/status', async (req) => {
     if (!teleAllowed(req.user)) return { access: false, account: null, dialogs: [], runtime: { apiConfigured: false, tdlAvailable: false, egress: { running: false } } };
+    const pc = passcodeRow(req.user.id);
+    // Closed for everyone after a restore whose kept passcodes could not be read (passcode-carry.js).
+    if (teleQuarantined()) return { access: true, locked: true, quarantined: true, message: QUARANTINE_TEXT, passcode: { idleMin: pc?.idle_min ?? 15 } };
+    if (pc) {
+      // Locked: only that it is, so the app can show the passcode screen. Nothing about the account.
+      if (!isUnlocked(req.user.session_id, req.user.id, pc)) return { access: true, locked: true, passcode: { idleMin: pc.idle_min } };
+      assertTeleUnlocked(req);
+    }
     const account = clearStaleLogin(getAccountForUser(req.user.id));
     // Users see whether the tunnel runs, not its proxy server or errors (those name the VPN server).
     const runtime = teleRuntimeInfo();
@@ -199,6 +218,10 @@ export default async function teleRoutes(app) {
     return file;
   }
 
+  // A passcode user's Telegram media stays out of the browser's cache: a locked app must not still
+  // show it from there.
+  const mediaCache = (req) => (hasPasscode(req.user.id) ? 'private, no-store' : 'private, max-age=86400');
+
   // ---------- Photos (only for accounts an admin allowed) ----------
   app.post('/api/tele/dialogs/:id/photo', limit(10), async (req, reply) => {
     const account = getAccountForUser(req.user.id);
@@ -209,7 +232,7 @@ export default async function teleRoutes(app) {
   });
   app.get('/api/tele/messages/:id/photo', limit(60), async (req, reply) => {
     const file = await telePhotoFile(req.user.id, req.params.id);
-    reply.header('cache-control', 'private, max-age=86400');
+    reply.header('cache-control', mediaCache(req));
     reply.type(/\.png$/i.test(file) ? 'image/png' : /\.webp$/i.test(file) ? 'image/webp' : 'image/jpeg');
     return reply.send(fs.createReadStream(file));
   });
@@ -217,7 +240,7 @@ export default async function teleRoutes(app) {
   // ---------- Voice messages (only for accounts an admin allowed) ----------
   app.get('/api/tele/messages/:id/voice', limit(60), async (req, reply) => {
     const { file, type } = await teleVoiceFile(req.user.id, req.params.id);
-    reply.header('cache-control', 'private, max-age=86400');
+    reply.header('cache-control', mediaCache(req));
     reply.type(type);
     return reply.send(fs.createReadStream(file));
   });
@@ -232,7 +255,7 @@ export default async function teleRoutes(app) {
   // ---------- Files and videos (only for accounts an admin allowed) ----------
   app.get('/api/tele/messages/:id/file', limit(30), async (req, reply) => {
     const f = await teleFileFile(req.user.id, req.params.id);
-    reply.header('cache-control', 'private, max-age=86400');
+    reply.header('cache-control', mediaCache(req));
     reply.header('x-content-type-options', 'nosniff');
     // Only a video is shown in the page (to play it); anything else is a download, never run here.
     if (req.query?.inline === '1' && f.video && /^video\/(mp4|webm)$/.test(f.mime)) {
@@ -364,6 +387,7 @@ export default async function teleRoutes(app) {
   app.get('/api/admin/tele/accounts', async (req) => {
     needTeleAdmin(req);
     const month = new Date().toISOString().slice(0, 7);
+    const locked = passcodeUserIds();
     // Highest traffic first: who uses the VPN the most this month.
     const accounts = all(
       `SELECT a.*, a.display_name AS tg_name, u.display_name AS name, u.username, u.role, IFNULL(t.sent, 0) + IFNULL(t.received, 0) AS used
@@ -371,7 +395,8 @@ export default async function teleRoutes(app) {
        ORDER BY used DESC, u.display_name`,
       month,
     ).map((a) => ({
-      id: a.id, userId: a.user_id, name: a.name, username: a.username, tgName: a.tg_name, status: a.status, live: isLive(a.id),
+      // The Telegram name of a passcode user is theirs to show, not the panel's.
+      id: a.id, userId: a.user_id, name: a.name, username: a.username, tgName: locked.has(a.user_id) ? '' : a.tg_name, status: a.status, live: isLive(a.id),
       allowMedia: !!a.allow_media, allowVoice: !!a.allow_voice, allowFiles: !!a.allow_files, allowExplore: exploreAllowed(a), owner: a.role === 'owner', used: a.used, quotaMb: a.quota_mb, effectiveQuotaMb: quotaOf(a),
     }));
     return { accounts, month, mediaMaxMb: settingNumber('tele_media_max_mb') || 5, fileMaxMb: settingNumber('tele_file_max_mb') || 20, defaultQuotaMb: settingNumber('tele_quota_mb') };

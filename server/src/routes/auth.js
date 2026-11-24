@@ -24,6 +24,7 @@ import { mediaReady } from '../media.js';
 import { spendLookup, isUserStaff, searchAcquaintances, knowsUser } from '../lookup.js';
 import { rtcEnabled } from '../livekit.js';
 import { handleTaken } from '../handles.js';
+import { lockSession } from '../tele/passcode.js';
 
 const VERSION = JSON.parse(readFileSync(new URL('../../../package.json', import.meta.url), 'utf8')).version;
 
@@ -222,6 +223,8 @@ export default async function authRoutes(app) {
     destroySession(req.cookies[SESSION_COOKIE]);
     // This device's open connections end too (otherwise they kept getting messages until a reconnect).
     if (req.user?.session_id) disconnectSessions([req.user.session_id]);
+    // The Telegram passcode is asked again on the next login, even on this same device.
+    if (req.user?.session_id) lockSession(req.user.session_id);
     reply.clearCookie(SESSION_COOKIE, { path: '/' });
     return { ok: true };
   });

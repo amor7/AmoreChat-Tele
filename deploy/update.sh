@@ -114,9 +114,10 @@ if [ -f deploy/disk-check.sh ]; then
   # is the room a build needs around it.
   DOCKER_NEED=$(( LOAD_MB * 3 ))
   [ "$DOCKER_NEED" -ge 300 ] || DOCKER_NEED=300
-  # Project folder: the database backup (as big as the database) + the new code and its rollback
-  # copy (that one is in the cache folder, usually on the same disk, where needs are added up).
-  PROJECT_NEED=$(( 150 + $(amore_size_mb data/amorechat.db) ))
+  # Project folder: the database backup (as big as the database), the same again while VACUUM
+  # rebuilds it without Telegram passcode users' history, + the new code and its rollback copy
+  # (that one is in the cache folder, usually on the same disk, where needs are added up).
+  PROJECT_NEED=$(( 150 + 2 * $(amore_size_mb data/amorechat.db) ))
   # Cache: downloads are kept there (resumable), plus 20 %; offline nothing is downloaded.
   CACHE_NEED=0
   [ -n "$LOCAL" ] || CACHE_NEED=$(( (DOWNLOAD_MB * 12 + 9) / 10 ))

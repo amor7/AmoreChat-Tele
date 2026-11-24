@@ -4,9 +4,10 @@ import path from 'node:path';
 import { Readable } from 'node:stream';
 import { backup } from 'node:sqlite';
 import { db, UPLOAD_DIR, DB_FILE } from '../db.js';
-import { BACKUP_DIR, backupNow, checkBackup, lastCheck } from '../backup.js';
+import { BACKUP_DIR, backupNow, checkBackup, lastCheck, redactOrDrop } from '../backup.js';
 import { verifyPassword } from '../auth.js';
-import { DATA_DIR } from '../db.js';
+import { DATA_DIR, PASSCODE_CARRY } from '../db.js';
+import { writeCarry } from '../passcode-carry.js';
 import { fail, audit } from '../chats.js';
 
 // Backups contain every message and password hash: owner only.
@@ -18,6 +19,7 @@ const stamp = () => new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
 async function snapshot() {
   const file = path.join(os.tmpdir(), `amorechat-${process.pid}-${Date.now()}.db`);
   await backup(db, file);
+  await redactOrDrop(file);
   return file;
 }
 
@@ -134,11 +136,24 @@ export default async function backupRoutes(app) {
     if (!/^amorechat-\d+\.db$/.test(name)) fail(400, 'نام نامعتبر');
     const abs = path.join(BACKUP_DIR, name);
     if (!fs.existsSync(abs)) fail(404, 'پیدا نشد');
+    // Redacted again on a copy before it leaves: a file from before someone turned on a Telegram
+    // passcode may still hold that history (if the pass at that moment failed or is still running).
+    // Fail-closed: if that doesn't work, nothing is sent.
+    const file = path.join(os.tmpdir(), `amorechat-${process.pid}-${Date.now()}-${name}`);
+    try {
+      await fs.promises.copyFile(abs, file);
+      await redactOrDrop(file);
+    } catch (e) {
+      fs.rmSync(file, { force: true });
+      throw Object.assign(new Error('آماده‌سازی بکاپ برای دانلود ناموفق بود؛ چیزی ارسال نشد'), { statusCode: 500, expose: true, cause: e });
+    }
     audit(req.user.id, 'backup.download', '', { kind: name, ip: req.ip });
+    const stream = fs.createReadStream(file);
+    stream.on('close', () => fs.rm(file, { force: true }, () => {}));
     reply.header('Content-Type', 'application/octet-stream');
-    reply.header('Content-Length', fs.statSync(abs).size);
+    reply.header('Content-Length', fs.statSync(file).size);
     reply.header('Content-Disposition', `attachment; filename="${name}"`);
-    return reply.send(fs.createReadStream(abs));
+    return reply.send(stream);
   });
 
   app.post('/api/admin/backups', async (req) => {
@@ -171,6 +186,13 @@ export default async function backupRoutes(app) {
     if (!fs.existsSync(path.join(U, 'host.json'))) fail(400, 'ابزار سرور نصب نیست؛ بازگردانی را روی سرور انجام دهید (راهنمای پایین صفحه)');
     const check = await checkBackup(abs);
     if (!check.ok) fail(400, `این نسخه سالم نیست و بازگردانده نمی‌شود: ${check.error}`);
+    // Telegram passcodes set after that backup must not go with it (the TDLib sessions stay): kept
+    // here and put back by the next start (passcode-carry.js). No restore if they can't be kept.
+    try {
+      writeCarry(db, PASSCODE_CARRY);
+    } catch (e) {
+      throw Object.assign(new Error('نگه‌داشتن رمزهای تلگرام ناموفق بود؛ بازگردانی انجام نشد'), { statusCode: 500, expose: true, cause: e });
+    }
     audit(req.user.id, 'backup.restore', '', { file: name });
     fs.writeFileSync(path.join(U, 'restore-name'), name);
     fs.writeFileSync(path.join(U, 'request'), 'restore\n');

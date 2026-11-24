@@ -46,6 +46,18 @@ Treat protocol support as adapter-specific and verify each implementation with i
 - Do not claim OpenVPN, WireGuard, or every V2Ray URI is supported until parsing, lifecycle, health checks, and no-direct-fallback behavior are tested for that adapter.
 - Keep endpoint secrets encrypted at rest and redact them from API responses and logs.
 
+## Telegram passcode
+
+Optional per-user passcode (migration v26, table `tele_passcodes`, scrypt hash via `auth.js`). Code: `tele/passcode.js`, `tele/passcode-rules.js`, `routes/tele-passcode.js`, `backup-redact.js`.
+
+- Threat model: panel admins and anyone who resets a user's password. Not root or shell on the server (they can read the data directly); the UI says so.
+- Guard: the hook in `routes/tele.js` calls `assertTeleUnlocked` for every `/api/tele/*` route and for `/api/admin/tele/mirrors*`, matching on `req.routeOptions.url` (the registered route, not the raw URL, so encoded paths like `/api/%74ele/...` cannot bypass it). `/api/tele/status` is exempt but returns only `{access, locked, passcode}` while locked. The passcode routes live in their own plugin so they work while locked.
+- State: unlocked sessions are kept in memory only (session id to user and last-use time). A restart locks everyone; logout, revoke and password reset make entries inert. Failed-attempt counters are in the database and survive restarts (5 wrong = 15 minutes).
+- Locked requests get HTTP 423. Background jobs (send queue, mirror, sync, alerts) keep running while locked.
+- Backups: `backup-redact.js` runs in a child process on the snapshot file (never the live DB) and removes Telegram messages and identifying fields of users with a passcode, then VACUUMs. It is applied to auto backups, panel downloads, and existing backups when a passcode is first enabled; a file that cannot be redacted is deleted.
+- Restore from the panel: the current passcode rows are written to `data/tele-passcodes.carry.json` (0600) when the restore is requested (refreshed when the app stops) and put back with INSERT OR REPLACE at the next start, after the migrations (`passcode-carry.js`, `index.js`); rows only in the restored database stay, users missing from it are skipped. If that file can't be read it is moved to `data/tele-passcodes.carry.corrupt` and Telegram is closed (423) for every user while that file exists; the rest of the app works. Deleting it (shell, outside the threat model) lifts this at the next restart.
+- Warning: any new route or socket event that returns a user's Telegram data outside `/api/tele/` must call `assertTeleUnlocked`. The hook does not cover it.
+
 ## Implementation milestones
 
 Status as checked against the code (the tests in item 6 are only partly there).
