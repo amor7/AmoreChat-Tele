@@ -3,6 +3,7 @@ import { useStore } from '../store';
 import { api } from '../api';
 import { toFa } from '../util';
 import { useLoad } from './AdminPanelsA1';
+import { confirmDialog, promptDialog, isolate } from '../confirm';
 
 // The names kept from everyone: release one, give it to a user, or add more.
 export default function AdminHandles() {
@@ -20,8 +21,14 @@ export default function AdminHandles() {
       showToast(e.message);
     }
   };
-  const gift = (handle) => {
-    const username = prompt(`نام کاربری فعلی کسی که @${handle} را می‌گیرد:\nاین شناسه جای نام کاربری فعلی‌اش می‌نشیند و از این پس با آن وارد می‌شود.`);
+  const gift = async (handle) => {
+    const username = await promptDialog({
+      title: `${isolate(`@${handle}`)} به چه کسی هدیه داده شود؟`,
+      message: 'این شناسه جای نام کاربری فعلی‌اش می‌نشیند و از این پس با آن وارد می‌شود.',
+      label: 'نام کاربری فعلی او',
+      confirmLabel: 'هدیه',
+      required: true,
+    });
     if (username) run(() => api('POST', `/admin/handles/${handle}/gift`, { username }), `@${handle} به او داده شد`);
   };
 
@@ -53,7 +60,7 @@ export default function AdminHandles() {
                 هدیه به کاربر
               </button>
             )}
-            <button className="btn sm" onClick={() => confirm(`@${n.handle} برای همه آزاد شود؟`) && run(() => api('DELETE', `/admin/handles/${n.handle}`), 'آزاد شد')}>
+            <button className="btn sm" onClick={async () => (await confirmDialog({ title: `${isolate(`@${n.handle}`)} برای همه آزاد شود؟`, confirmLabel: 'آزاد کردن' })) && run(() => api('DELETE', `/admin/handles/${n.handle}`), 'آزاد شد')}>
               آزاد کردن
             </button>
           </li>

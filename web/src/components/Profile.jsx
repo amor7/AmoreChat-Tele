@@ -145,7 +145,7 @@ export default function Profile({ onClose }) {
       <Security />
 
       <h5>تغییر رمز عبور</h5>
-      <p className="muted tiny">بعد از تغییر رمز، همهٔ دستگاه‌های دیگر خارج می‌شوند.</p>
+      <p className="muted tiny">بعد از تغییر رمز، همه‌ی دستگاه‌های دیگر خارج می‌شوند.</p>
       <form className="form" onSubmit={changePassword}>
         <input type="password" placeholder="رمز فعلی" value={pw.current} onChange={(e) => setPw({ ...pw, current: e.target.value })} required dir="ltr" autoComplete="current-password" />
         <input type="password" placeholder="رمز جدید (حداقل ۸ کاراکتر، ساده نباشد)" value={pw.next} onChange={(e) => setPw({ ...pw, next: e.target.value })} required minLength={8} dir="ltr" autoComplete="new-password" />

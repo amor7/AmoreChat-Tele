@@ -11,6 +11,7 @@ let seq = 0;
 let popping = 0;
 let queued = [];
 let popTimer;
+let waiters = []; // whenHistorySettled() callers
 // The app is about to load another page (another server, the add-server page): a late
 // history.back() from a menu closing would undo that navigation, so history is left alone.
 let leaving = false;
@@ -19,8 +20,15 @@ export function leavingPage() {
   popping = 0;
   queued = [];
   clearTimeout(popTimer);
+  wake();
   // Still here a while later (the other page never loaded): back to normal.
   setTimeout(() => (leaving = false), 4000);
+}
+
+function wake() {
+  const w = waiters;
+  waiters = [];
+  for (const fn of w) fn();
 }
 
 function flush() {
@@ -29,6 +37,16 @@ function flush() {
   const q = queued;
   queued = [];
   for (const entry of q) if (stack.includes(entry)) history.pushState({ layer: entry.id }, '');
+  wake();
+}
+
+/**
+ * Resolves once no history.back() of a closed layer is still on its way. Code that navigates
+ * right after a dialog closes (location.hash = ...) waits for this, or that late "back" would
+ * undo the navigation.
+ */
+export function whenHistorySettled() {
+  return popping ? new Promise((resolve) => waiters.push(resolve)) : Promise.resolve();
 }
 
 function push(entry) {

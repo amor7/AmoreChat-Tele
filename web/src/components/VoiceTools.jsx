@@ -5,6 +5,7 @@ import { useStore } from '../store';
 import { getVolume, setVolume } from '../rtc';
 import { hasSitePerm, toFa } from '../util';
 import Avatar from './Avatar';
+import { confirmDialog, isolate } from '../confirm';
 
 const run = (fn) =>
   Promise.resolve()
@@ -115,7 +116,7 @@ export function StagePanel({ chatId }) {
                       <button
                         className="icon-btn danger"
                         title="بیرون کردن و منع ورود به این ویس‌چت"
-                        onClick={() => confirm(`${p.name} بیرون شود و تا پایان این ویس‌چت نتواند برگردد؟`) && mod('kick', p.userId, { ban: true })}
+                        onClick={async () => (await confirmDialog({ title: `${isolate(p.name)} بیرون شود؟`, message: 'تا پایان این ویس‌چت نمی‌تواند برگردد.', confirmLabel: 'بیرون کردن', danger: true })) && mod('kick', p.userId, { ban: true })}
                       >
                         <Ban size={16} />
                       </button>
@@ -130,7 +131,7 @@ export function StagePanel({ chatId }) {
             <button className="btn sm" onClick={() => mod('mute_all')}>
               <MicOff size={14} /> بی‌صدا کردن همه
             </button>
-            <button className="btn sm danger" onClick={() => confirm('ویس‌چت برای همه تمام شود؟') && mod('end')}>
+            <button className="btn sm danger" onClick={async () => (await confirmDialog({ title: 'ویس‌چت برای همه تمام شود؟', confirmLabel: 'پایان برای همه', danger: true })) && mod('end')}>
               <PhoneOff size={14} /> پایان برای همه
             </button>
           </div>

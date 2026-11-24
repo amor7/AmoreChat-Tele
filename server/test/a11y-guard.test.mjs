@@ -61,15 +61,11 @@ test('every icon-only button (.icon-btn) has aria-label or title', () => {
 
 // Clickable non-buttons that are fine without a role, with the reason. Key: file + first class.
 const CLICK_ALLOWED = {
-  // Backdrops: a tap outside closes the layer. The dialog/menu itself (role="dialog", useDialog)
+  // Backdrops: a tap outside closes the layer. The dialog/menu itself (useDialog / useMenu)
   // closes on Escape for keyboard users; its panel stops the click from reaching the backdrop.
-  'components/Modals.jsx modal-backdrop': 'backdrop of Modal',
-  'components/QrCode.jsx modal-backdrop': 'backdrop of the QR overlay',
-  'components/Composer.jsx modal-backdrop': 'backdrop of the send-file dialog',
-  'components/Voice.jsx modal-backdrop': 'backdrop of the stream dialog',
-  'components/ChatView.jsx menu-backdrop': 'backdrop of the message menu',
-  'components/Folders.jsx menu-backdrop': 'backdrop of the chat menu',
-  'components/Sidebar.jsx menu-backdrop': 'backdrop of the main menu',
+  'components/Modals.jsx modal-backdrop': 'backdrop of Modal (every dialog, the shared confirm included)',
+  'components/Menu.jsx menu-backdrop': 'backdrop of Menu (message, chat list and main menus)',
+  'components/ChatView.jsx menu-backdrop': 'backdrop of the emoji picker that replaces the message menu',
   'components/Music.jsx music-sheet-back': 'backdrop of the music sheet',
   // Tap anywhere on the call shows the auto-hidden controls; keyboard focus does the same (onFocus).
   'components/CallView.jsx call-view': 'shows the call controls',
@@ -137,4 +133,48 @@ test('useDialog owns Back, or says back: false next to the useBackClose that doe
     });
   }
   assert.deepEqual(problems, []);
+});
+
+// Menus get their keyboard support (arrows, Escape, Tab leaves, Back) from useMenu; a hand-made
+// role="menu" would look like a menu to screen readers but not act like one.
+test('role="menu" / "menuitem" come from Menu.jsx (Menu uses useMenu)', () => {
+  const problems = [];
+  for (const f of jsxFiles) {
+    const src = fs.readFileSync(f, 'utf8');
+    const own = rel(f) === 'components/Menu.jsx';
+    for (const { tag, line } of openingTags(src, /<([\w.]+)\b/g)) {
+      if (!/\srole="menu(item)?"/.test(tag)) continue;
+      if (!own) problems.push(`${rel(f)}:${line} use <Menu> / <MenuItem> from components/Menu.jsx`);
+      else if (/\srole="menu"/.test(tag) && !/\{\.\.\.menu\}/.test(tag)) problems.push(`${rel(f)}:${line} role="menu" without {...menu} (useMenu)`);
+    }
+    if (own && !/\buseMenu\(/.test(src)) problems.push(`${rel(f)}: Menu must use useMenu`);
+  }
+  assert.deepEqual(problems, []);
+});
+
+// The browser's own boxes: unstyled, LTR in an RTL app, show a typed password in clear text and
+// may not appear at all in the Android WebView. Use confirmDialog / promptDialog / copyDialog
+// from web/src/confirm.js instead.
+const NATIVE_BOX = /(?:^|[^\w$.])(confirm|prompt|alert)\s*\(|\b(?:window|globalThis|self)\.(confirm|prompt|alert)\s*\(/;
+// Comments may mention them; strings with "//" in them only lose a tail, never add a match.
+const stripComments = (src) => src.replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:'"`])\/\/.*$/gm, '$1');
+
+test('the native-box rule catches calls and skips look-alikes', () => {
+  for (const s of ['confirm("x")', 'if (!confirm(a)) return;', 'x && prompt(y)', 'window.alert(1)', '(alert (2))', 'globalThis.confirm(1)', 'self.prompt(2)']) assert.match(s, NATIVE_BOX, s);
+  for (const s of ['confirmDialog({})', 'promptDialog()', 'x.confirm(1)', 'api.prompt(2)', 'reconfirm(3)', 'onConfirm(4)', '$confirm(5)', 'myself.confirm(6)']) assert.doesNotMatch(s, NATIVE_BOX, s);
+  assert.doesNotMatch(stripComments('a(); // opens confirm()\n/* prompt( */ b();'), NATIVE_BOX);
+});
+
+test('no window.confirm / prompt / alert in the web app', () => {
+  const problems = [];
+  const files = fs
+    .readdirSync(SRC, { recursive: true })
+    .filter((f) => /\.jsx?$/.test(f))
+    .map((f) => path.join(SRC, f));
+  for (const f of files) {
+    stripComments(fs.readFileSync(f, 'utf8'))
+      .split('\n')
+      .forEach((l, i) => NATIVE_BOX.test(l) && problems.push(`${rel(f)}:${i + 1} ${l.trim().slice(0, 100)}`));
+  }
+  assert.deepEqual(problems, [], 'use confirmDialog / promptDialog / copyDialog from web/src/confirm.js');
 });

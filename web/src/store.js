@@ -25,6 +25,7 @@ export const useStore = create((set, get) => ({
   typing: {}, // chatId -> { userId: { name, until } }
   online: {}, // userId -> bool
   modal: null, // { type, ...props }
+  confirmQueue: { current: null, waiting: [] }, // shared confirm / prompt dialogs (confirm.js)
   emergency: null,
   toast: null,
   connected: true,

@@ -1,5 +1,4 @@
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
 import {
   Mic,
   MicOff,
@@ -33,7 +32,9 @@ import Ping from './Ping';
 import CallView from './CallView';
 import { VolumeSlider, StagePanel } from './VoiceTools';
 import { useBackClose } from '../backnav';
-import { useDialog, asButton } from '../a11y';
+import { asButton } from '../a11y';
+import { Modal } from './Modals';
+import { confirmDialog, isolate } from '../confirm';
 import { useSmartFit } from '../smartFit';
 import {
   joinVoice,
@@ -262,56 +263,53 @@ export function ShareDialog({ onClose }) {
   const [fps, setFps] = useState(fpsOptions.includes(last.fps) ? last.fps : 30);
   const [audio, setAudio] = useState(last.audio !== false);
   const titleId = useId();
-  const dialog = useDialog({ onClose, labelledBy: titleId });
-  return createPortal(
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal small" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" {...dialog}>
-        <h3 className="with-icon" id={titleId}>
-          <MonitorPlay size={22} /> شروع استریم
-        </h3>
-        <p className="hint">بعد از «شروع»، مرورگر می‌پرسد چه چیزی نمایش داده شود: کل صفحه، یک پنجره یا یک تب.</p>
-        <label className="form-label">کیفیت {max < 1080 && <small className="muted">(حداکثر مجاز شما {max}p)</small>}</label>
-        <div className="segmented" role="group" aria-label="کیفیت">
-          {options.map((q) => (
-            <button key={q} className={quality === q ? 'active' : ''} aria-pressed={quality === q} onClick={() => setQuality(q)}>
-              {q}p
-            </button>
-          ))}
-        </div>
-        <label className="form-label">نرخ فریم</label>
-        <div className="segmented" role="group" aria-label="نرخ فریم">
-          {fpsOptions.map((f) => (
-            <button key={f} className={fps === f ? 'active' : ''} aria-pressed={fps === f} onClick={() => setFps(f)}>
-              {toFa(f)} فریم {f === 15 ? '(متن و اسلاید)' : f === 30 ? '(ویدیو)' : '(بازی، روان‌ترین)'}
-            </button>
-          ))}
-        </div>
-        <label className="check">
-          <input type="checkbox" checked={audio} onChange={(e) => setAudio(e.target.checked)} />
-          اشتراک صدای سیستم / تب
-        </label>
-        <div className="actions">
-          <button className="btn" onClick={onClose}>
-            انصراف
+  // Opens over the full-screen voice room / call, outside the store's Modals: its own Back.
+  return (
+    <Modal bare size="small" labelledBy={titleId} onClose={onClose} portal>
+      <h3 className="with-icon" id={titleId}>
+        <MonitorPlay size={22} /> شروع استریم
+      </h3>
+      <p className="hint">بعد از «شروع»، مرورگر می‌پرسد چه چیزی نمایش داده شود: کل صفحه، یک پنجره یا یک تب.</p>
+      <label className="form-label">کیفیت {max < 1080 && <small className="muted">(حداکثر مجاز شما {max}p)</small>}</label>
+      <div className="segmented" role="group" aria-label="کیفیت">
+        {options.map((q) => (
+          <button key={q} className={quality === q ? 'active' : ''} aria-pressed={quality === q} onClick={() => setQuality(q)}>
+            {q}p
           </button>
-          <button
-            className="btn primary"
-            onClick={() => {
-              try {
-                localStorage.setItem(SHARE_KEY, JSON.stringify({ quality, fps, audio }));
-              } catch {
-                /* not remembered */
-              }
-              onClose();
-              run(() => startScreenShare({ quality, fps, audio }));
-            }}
-          >
-            شروع
-          </button>
-        </div>
+        ))}
       </div>
-    </div>,
-    document.body,
+      <label className="form-label">نرخ فریم</label>
+      <div className="segmented" role="group" aria-label="نرخ فریم">
+        {fpsOptions.map((f) => (
+          <button key={f} className={fps === f ? 'active' : ''} aria-pressed={fps === f} onClick={() => setFps(f)}>
+            {toFa(f)} فریم {f === 15 ? '(متن و اسلاید)' : f === 30 ? '(ویدیو)' : '(بازی، روان‌ترین)'}
+          </button>
+        ))}
+      </div>
+      <label className="check">
+        <input type="checkbox" checked={audio} onChange={(e) => setAudio(e.target.checked)} />
+        اشتراک صدای سیستم / تب
+      </label>
+      <div className="actions">
+        <button className="btn" onClick={onClose}>
+          انصراف
+        </button>
+        <button
+          className="btn primary"
+          onClick={() => {
+            try {
+              localStorage.setItem(SHARE_KEY, JSON.stringify({ quality, fps, audio }));
+            } catch {
+              /* not remembered */
+            }
+            onClose();
+            run(() => startScreenShare({ quality, fps, audio }));
+          }}
+        >
+          شروع
+        </button>
+      </div>
+    </Modal>
   );
 }
 
@@ -599,7 +597,7 @@ function MeetTile({ t, mode, chatId, canMute, canKick, stageAdmin, onClick, onWa
             </button>
           )}
           {stageAdmin && (
-            <button className="danger" onClick={() => confirm(`${p.name} بیرون شود و تا پایان این ویس‌چت نتواند برگردد؟`) && mod('kick', { ban: true })}>
+            <button className="danger" onClick={async () => (await confirmDialog({ title: `${isolate(p.name)} بیرون شود؟`, message: 'تا پایان این ویس‌چت نمی‌تواند برگردد.', confirmLabel: 'بیرون کردن', danger: true })) && mod('kick', { ban: true })}>
               <Ban size={16} /> بیرون کردن و منع ورود
             </button>
           )}

@@ -74,8 +74,15 @@ async function openAs(client, label) {
 }
 const A = await openAs(owner, 'owner');
 const B = await openAs(bob, 'bob');
-A.on('dialog', (d) => d.accept());
-B.on('dialog', (d) => d.accept());
+// The app has its own confirm / prompt dialogs: a native one is a regression. Recorded and
+// failed at the end (dismissed so the run doesn't hang on it).
+const nativeDialogs = [];
+for (const [p, who] of [[A, 'owner'], [B, 'bob']]) {
+  p.on('dialog', (d) => {
+    nativeDialogs.push(`${who}: ${d.type()} "${d.message().slice(0, 80)}"`);
+    d.dismiss().catch(() => {});
+  });
+}
 
 const waitFor = (page, fn, arg, what, timeout = 20000) =>
   page.waitForFunction(fn, { timeout, polling: 250 }, arg).catch(async (e) => {
@@ -293,6 +300,8 @@ try {
   await waitFor(A, () => document.querySelectorAll('.mtile.person').length === 2, null, 'speaker visible to the admin');
   await A.screenshot({ path: 'shot-stage-admin.png' });
   await clickText(A, '.stage-panel .stage-actions button', 'پایان برای همه');
+  // Confirmed in the app's own dialog (not window.confirm).
+  await clickText(A, '.confirm-dialog .confirm-ok', 'پایان برای همه');
   await waitFor(B, () => !document.querySelector('.voice-bar') && !document.querySelector('.room-view'), null, 'voice chat ended for bob');
 
   step('a deleted message leaves no trace for members; a moderator can open what it said');
@@ -394,6 +403,7 @@ try {
   if (!(await B.$('.menu.floating .quick-reactions'))) throw new Error('message menu closed right after the long-press');
   await B.screenshot({ path: 'shot-longpress.png' });
 
+  assert.deepEqual(nativeDialogs, [], 'native confirm/prompt/alert (use confirmDialog / promptDialog)');
   console.log('\nRTC E2E TEST PASSED');
 } finally {
   await browser.close();

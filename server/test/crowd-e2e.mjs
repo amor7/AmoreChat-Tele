@@ -125,7 +125,12 @@ for (let i = 0; i < N; i++) {
     pageErrors.push(`${USERS[i]} console: ${t.slice(0, 200)}`);
   });
   p.on('response', (r) => r.status() >= 500 && serverErrors.push(`${USERS[i]}: ${r.status()} ${r.request().method()} ${new URL(r.url()).pathname}`));
-  p.on('dialog', (d) => d.accept());
+  // A native confirm/prompt is a regression (the app has its own dialogs): recorded as a page
+  // error, which fails the run; dismissed so the run doesn't hang on it.
+  p.on('dialog', (d) => {
+    pageErrors.push(`${USERS[i]}: native ${d.type()} "${d.message().slice(0, 80)}"`);
+    d.dismiss().catch(() => {});
+  });
   P.push(p);
 }
 const apis = [];
@@ -242,6 +247,8 @@ try {
     // delete (maryam's own message)
     const del = await P[3].$$eval('.msg-row[id]', (rows) => rows.filter((r) => r.innerText.includes('maryam-2')).map((r) => r.id).pop());
     await msgMenu(P[3], `#${del} .bubble`, 'حذف');
+    // The app's own confirm dialog (not window.confirm): press its destructive button.
+    await clickText(P[3], '.confirm-dialog .confirm-ok', 'حذف');
     await all((p) => waitFor(p, (id) => !document.getElementById(id)?.innerText.includes('maryam-2'), del, 'deleted for everyone'));
   });
 

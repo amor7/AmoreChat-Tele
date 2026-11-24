@@ -41,7 +41,13 @@ const browser = await puppeteer.launch({ args: ['--no-sandbox'] });
 const errors = [];
 const page = await browser.newPage();
 page.on('pageerror', (e) => errors.push(e.message));
-page.on('dialog', (d) => d.dismiss());
+// The app has its own confirm / prompt dialogs: a native one is a regression. Recorded and
+// failed at the end (dismissed so the run doesn't hang on it).
+const nativeDialogs = [];
+page.on('dialog', (d) => {
+  nativeDialogs.push(`${d.type()} "${d.message().slice(0, 80)}"`);
+  d.dismiss().catch(() => {});
+});
 await page.setCookie({ name: 'ac_session', value: owner.cookie(), url: BASE });
 
 const waitFor = (fn, arg, what, timeout = 10000) =>
@@ -250,6 +256,37 @@ if (process.env.APK_DIR) {
   await app.close();
 }
 
+step('shared confirm dialog: its Cancel does nothing; Escape closes it and focus returns to the button');
+{
+  // A second session, so Profile offers «خروج از همه‌ی دستگاه‌های دیگر»: harmless while cancelled.
+  const other = apiClient();
+  assert.equal((await other.call('POST', '/api/auth/login', { username: 'owner', password: 'Str0ng-Pass-77' })).status, 200);
+  const revoke = 'خروج از همه‌ی دستگاه‌های دیگر';
+  await page.goto(`${BASE}/#/`, { waitUntil: 'networkidle2' });
+  await page.click('.menu-btn');
+  await clickText('.sidebar .menu > button', 'پروفایل');
+  await waitFor(() => !!document.querySelector('.modal'), null, 'profile');
+  await clickText('.modal button', revoke);
+  await waitFor(() => !!document.querySelector('.confirm-dialog'), null, 'confirm opens');
+  await page.click('.confirm-dialog .confirm-cancel');
+  await waitFor(() => !document.querySelector('.confirm-dialog'), null, 'Cancel closes the confirm');
+  await sleep(500);
+  assert.equal((await other.call('GET', '/api/auth/me')).status, 200, 'Cancel: the other session is still signed in');
+  assert.ok(await page.evaluate(() => !!document.querySelector('.modal')), 'Cancel: the profile stays open');
+  // From the keyboard this time: Enter on the button, Escape in the dialog.
+  await page.evaluate((t) => [...document.querySelectorAll('.modal button')].find((b) => b.textContent.includes(t)).focus(), revoke);
+  await page.keyboard.press('Enter');
+  await waitFor(() => !!document.querySelector('.confirm-dialog'), null, 'confirm opens from the keyboard');
+  assert.ok(await page.evaluate(() => document.activeElement?.classList.contains('confirm-cancel')), 'keyboard: Cancel has focus, not the destructive button');
+  await page.keyboard.press('Escape');
+  await waitFor(() => !document.querySelector('.confirm-dialog'), null, 'Escape closes the confirm');
+  await waitFor((t) => document.activeElement?.textContent.includes(t), revoke, 'focus back on the button that opened it');
+  assert.ok(await page.evaluate(() => !!document.querySelector('.modal')), 'Escape closed only the confirm');
+  assert.equal((await other.call('GET', '/api/auth/me')).status, 200, 'Escape: the other session is still signed in');
+  await page.keyboard.press('Escape');
+  await waitFor(() => !document.querySelector('.modal'), null, 'profile closed');
+}
+
 step('server unreachable (requests hang, like a domain that no longer resolves): opens offline, no endless "loading"');
 await page.goto(`${BASE}/#/`, { waitUntil: 'networkidle2' });
 await waitFor(() => document.querySelectorAll('.sidebar .chat-item').length >= 2, null, 'chats saved on the device');
@@ -275,5 +312,6 @@ await page.setBypassServiceWorker(false);
 
 step('no JavaScript errors on the page');
 assert.deepEqual(errors, [], 'page errors');
+assert.deepEqual(nativeDialogs, [], 'native confirm/prompt/alert (use confirmDialog / promptDialog)');
 await browser.close();
 console.log('\nUI test passed');

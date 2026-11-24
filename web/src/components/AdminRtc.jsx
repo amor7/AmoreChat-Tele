@@ -3,6 +3,8 @@ import { api } from '../api';
 import { useStore } from '../store';
 import Avatar from './Avatar';
 import { Mic, MicOff, Video, VideoOff, LogOut, Phone } from 'lucide-react';
+import { confirmDialog } from '../confirm';
+import { Skeleton, ErrorState } from './States';
 
 const formatMb = (mb) => (mb >= 1024 ? `${+(mb / 1024).toFixed(1)} گیگابایت` : `${mb} مگابایت`);
 
@@ -138,11 +140,20 @@ export function LimitsEditor({ u, run }) {
 export function Live() {
   const showToast = useStore((s) => s.showToast);
   const [data, setData] = useState(null);
+  const [error, setError] = useState('');
   const alive = useRef(true);
+  const has = useRef(false);
+  // Polled every 5s: a failure before the first answer shows in the panel (with a retry), later
+  // ones are a toast.
   const load = () =>
     api('GET', '/admin/live')
-      .then((d) => alive.current && setData(d))
-      .catch((e) => showToast(e.message));
+      .then((d) => {
+        if (!alive.current) return;
+        has.current = true;
+        setError('');
+        setData(d);
+      })
+      .catch((e) => (has.current ? showToast(e.message) : alive.current && setError(e.message)));
 
   useEffect(() => {
     load();
@@ -162,7 +173,7 @@ export function Live() {
       .catch((e) => showToast(e.message));
   const moderate = (chatId, userId, action, ok) => act(() => api('POST', `/rtc/${chatId}/moderate`, { userId, action }), ok);
 
-  if (!data) return <p className="muted">…</p>;
+  if (!data) return error ? <ErrorState message={error} onRetry={load} /> : <Skeleton lines={4} />;
   if (!data.enabled) return <p className="muted pad">تماس و ویس‌چت روی این سرور فعال نیست (LiveKit تنظیم نشده).</p>;
   return (
     <>
@@ -176,7 +187,7 @@ export function Live() {
             <b className="grow">{r.title}</b>
             <button
               className="btn sm danger"
-              onClick={() => confirm('ویس‌چت برای همه بسته شود؟') && act(() => api('POST', '/admin/live/end', { chatId: r.chatId }), 'بسته شد')}
+              onClick={async () => (await confirmDialog({ title: 'ویس‌چت برای همه بسته شود؟', confirmLabel: 'پایان برای همه', danger: true })) && act(() => api('POST', '/admin/live/end', { chatId: r.chatId }), 'بسته شد')}
             >
               پایان برای همه
             </button>

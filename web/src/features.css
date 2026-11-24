@@ -2794,3 +2794,123 @@ input.music-bar-seek:hover::-moz-range-thumb {
   color: var(--danger);
   max-width: 45%;
 }
+
+/* ---------- Shared confirm / prompt / copy dialogs (ConfirmDialog.jsx) ---------- */
+/* Over every other dialog, the lightbox and the QR view (61); under an incoming call (65) and
+   the toasts (70), which must stay visible. */
+.confirm-backdrop {
+  z-index: 62;
+}
+.confirm-form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.confirm-form h3 {
+  margin: 0;
+  font-size: 17px;
+}
+/* Messages keep their line breaks (\n), like window.confirm did. */
+.confirm-message {
+  margin: 0;
+  white-space: pre-line;
+  line-height: 1.7;
+}
+.confirm-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  font-size: 14px;
+}
+.confirm-copy-value {
+  text-align: left;
+}
+/* The confirm button of a destructive action: solid red. A plain .btn.danger (red text) keeps
+   its look everywhere else. */
+.btn.primary.danger {
+  background: var(--danger-strong);
+  border-color: var(--danger-strong);
+  color: var(--on-accent);
+  box-shadow: none;
+}
+
+/* ---------- Empty / error / loading states (States.jsx) ---------- */
+.empty-state.compact {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-5) var(--space-4);
+  color: var(--muted);
+  text-align: center;
+}
+.empty-state.compact .empty-title {
+  color: var(--text);
+}
+.empty-state.compact p {
+  margin: 0;
+  font-size: 14px;
+}
+.error-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-4);
+  color: var(--danger);
+  text-align: center;
+}
+.error-state p {
+  margin: 0;
+}
+.skeleton {
+  padding: var(--space-3) var(--space-4);
+}
+/* Static grey blocks with a light sweep over them. motion.css stops the sweep in lite mode and
+   for reduced motion (it ends past the block, leaving the plain grey). */
+.skeleton-line {
+  display: block;
+  height: 12px;
+  margin: var(--space-2) 0;
+  border-radius: var(--radius-pill);
+  background-color: var(--border);
+  background-image: linear-gradient(90deg, transparent, var(--panel-2), transparent);
+  background-repeat: no-repeat;
+  background-size: 40% 100%;
+  animation: skeleton-sweep 1.6s ease-in-out infinite;
+}
+.skeleton-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-2) 0;
+}
+.skeleton-avatar {
+  flex: none;
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: var(--border);
+}
+.skeleton-text {
+  flex: 1;
+  min-width: 0;
+}
+@keyframes skeleton-sweep {
+  from {
+    background-position: -150% 0;
+  }
+  to {
+    background-position: 250% 0;
+  }
+}
+/* Prompt field with an optional show/hide button for passwords. */
+.confirm-input {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+.confirm-input input {
+  flex: 1;
+  min-width: 0;
+}

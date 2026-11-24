@@ -12,6 +12,16 @@ export class ApiError extends Error {
 // (a poll, an upload, a forward) tells the screens at once, so they can hide what they show.
 export const TELE_LOCK_EVENT = 'amore-tele-locked';
 export const TELE_LOCKED = 423;
+// The session is gone (401 outside the sign-in requests): open confirm dialogs are dropped.
+export const SIGNED_OUT_EVENT = 'amore-signed-out';
+function heardSignedOut(status, url) {
+  if (status !== 401 || url.startsWith('/auth/')) return;
+  try {
+    window.dispatchEvent(new CustomEvent(SIGNED_OUT_EVENT));
+  } catch {
+    /* no window */
+  }
+}
 function heardLock(status) {
   if (status !== TELE_LOCKED) return;
   try {
@@ -49,6 +59,7 @@ export async function api(method, url, body, { timeout = 20000, headers } = {}) 
   }
   if (!res.ok) {
     heardLock(res.status);
+    heardSignedOut(res.status, url);
     // data goes along: some refusals say more than the message (e.g. how long a lock lasts).
     throw new ApiError(data.error || 'خطا در ارتباط با سرور', res.status, data);
   }

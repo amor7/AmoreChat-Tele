@@ -3,6 +3,7 @@ import { api } from '../api';
 import { useStore } from '../store';
 import { Server, Plus, Trash2 } from 'lucide-react';
 import { multiServer, appServers, switchServer, addServer, removeServer } from '../native';
+import { confirmDialog, isolate } from '../confirm';
 
 export default function Auth({ invite: initialInvite }) {
   const config = useStore((s) => s.config);
@@ -180,7 +181,7 @@ function AppServers() {
         <button
           type="button"
           className="btn wide danger-text"
-          onClick={() => confirm(`«${cur.name}» از اپ حذف شود؟`) && removeServer(cur.url)}
+          onClick={async () => (await confirmDialog({ title: `«${isolate(cur.name)}» از اپ حذف شود؟`, confirmLabel: 'حذف', danger: true })) && removeServer(cur.url)}
         >
           <Trash2 size={16} /> حذف این سرور از اپ
         </button>

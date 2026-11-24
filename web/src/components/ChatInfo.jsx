@@ -16,6 +16,7 @@ import {
 import { Modal, UserSearch } from './Modals';
 import Avatar from './Avatar';
 import { QrButton } from './QrCode';
+import { confirmDialog, isolate } from '../confirm';
 import { NotifyMute, MediaGallery } from './ChatExtras';
 import { Camera, Settings, Link, UserPlus, VolumeX, MessageCircle, Timer } from 'lucide-react';
 
@@ -99,8 +100,8 @@ export default function ChatInfo({ chatId, onClose }) {
         {chat.myRole !== 'owner' && !chat.isEmergency && (
           <button
             className="btn danger"
-            onClick={() =>
-              confirm('از این گفتگو خارج می‌شوید؟') &&
+            onClick={async () =>
+              (await confirmDialog({ title: 'از این گفتگو خارج شوید؟', confirmLabel: 'خروج', danger: true })) &&
               run(async () => {
                 await api('POST', `/chats/${chat.id}/leave`);
                 useStore.getState().removeChat(chat.id);
@@ -114,8 +115,8 @@ export default function ChatInfo({ chatId, onClose }) {
         {isOwner && !chat.isEmergency && (
           <button
             className="btn danger"
-            onClick={() =>
-              confirm('این گفتگو برای همه حذف می‌شود. مطمئن هستید؟') &&
+            onClick={async () =>
+              (await confirmDialog({ title: `این ${chat.type === 'channel' ? 'کانال' : 'گروه'} برای همه حذف شود؟`, message: 'برای همه‌ی اعضا پاک می‌شود.', confirmLabel: 'حذف', danger: true })) &&
               run(async () => {
                 await api('DELETE', `/chats/${chat.id}`);
                 onClose();
@@ -307,7 +308,7 @@ function InviteLinks({ chatId, isPublic }) {
   }
 
   async function reset() {
-    if (!confirm('همه لینک‌های فعلی از کار می‌افتند و یک لینک جدید ساخته می‌شود. ادامه می‌دهید؟')) return;
+    if (!(await confirmDialog({ title: 'لینک دعوت جدید ساخته شود؟', message: 'همه‌ی لینک‌های فعلی از کار می‌افتند.', confirmLabel: 'ساخت لینک جدید' }))) return;
     try {
       const { invite } = await api('POST', `/chats/${chatId}/invites/reset`, {});
       (await copyText(link(invite.code))) && showToast('لینک جدید ساخته و کپی شد');
@@ -477,12 +478,12 @@ function MemberRow({ m, chat, me, isOwner, run }) {
           )}
           {hasActions && outranks && can('ban_members') && !chat.isEmergency && (
             <div className="inline-form">
-              <button className="btn sm danger" onClick={() => confirm(`${m.displayName} حذف شود؟`) && run(() => api('DELETE', path), 'حذف شد')}>
+              <button className="btn sm danger" onClick={async () => (await confirmDialog({ title: `${isolate(m.displayName)} از ${chat.type === 'channel' ? 'کانال' : 'گروه'} حذف شود؟`, confirmLabel: 'حذف', danger: true })) && run(() => api('DELETE', path), 'حذف شد')}>
                 حذف از {chat.type === 'channel' ? 'کانال' : 'گروه'}
               </button>
               <button
                 className="btn sm danger"
-                onClick={() => confirm(`${m.displayName} مسدود شود؟ دیگر نمی‌تواند برگردد.`) && run(() => api('DELETE', `${path}?ban=1`), 'مسدود شد')}
+                onClick={async () => (await confirmDialog({ title: `${isolate(m.displayName)} مسدود شود؟`, message: 'دیگر نمی‌تواند برگردد.', confirmLabel: 'مسدود کردن', danger: true })) && run(() => api('DELETE', `${path}?ban=1`), 'مسدود شد')}
               >
                 مسدود کردن
               </button>

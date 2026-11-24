@@ -3,6 +3,8 @@ import { api } from '../api';
 import { useStore } from '../store';
 import { formatSize, faDigits } from '../util';
 import { Upload, CheckCircle2, XCircle, RefreshCw, Trash2, Rocket } from 'lucide-react';
+import { confirmDialog } from '../confirm';
+import { Skeleton, ErrorState } from './States';
 
 // Owner: update the server from the release files (no terminal, no GitHub). The server says which
 // files it still needs; only those of the chosen ones are sent; the signature is checked first.
@@ -30,6 +32,7 @@ async function sendFile(file, from, onProgress) {
 export default function AdminUpdate() {
   const showToast = useStore((s) => s.showToast);
   const [s, setS] = useState(null);
+  const [error, setError] = useState('');
   const [chosen, setChosen] = useState([]);
   const [progress, setProgress] = useState({});
   const [busy, setBusy] = useState(false);
@@ -40,11 +43,14 @@ export default function AdminUpdate() {
     try {
       const r = await api('GET', '/admin/update', undefined, { timeout: 120000 });
       setS(r);
+      setError('');
       setLost(false);
       return r;
     } catch (e) {
       // While it installs, the app restarts: it is back in a minute.
       if (s?.result?.state === 'running' || s?.result?.state === 'queued') setLost(true);
+      // Nothing shown yet: the panel says so, with a retry, instead of loading forever.
+      else if (!s) setError(e.message);
       else showToast(e.message);
       return null;
     }
@@ -58,7 +64,7 @@ export default function AdminUpdate() {
     const t = setInterval(load, 3000);
     return () => clearInterval(t);
   }, [running]); // eslint-disable-line react-hooks/exhaustive-deps
-  if (!s) return <p className="muted">…</p>;
+  if (!s) return error ? <ErrorState message={error} onRetry={load} /> : <Skeleton lines={4} />;
 
   // The small files first (they say what else is needed), then only the needed ones.
   const upload = async (files) => {
@@ -85,7 +91,7 @@ export default function AdminUpdate() {
     setBusy(false);
   };
   const apply = async () => {
-    if (!confirm(`نسخه ${faDigits(s.target)} نصب شود؟ اول از داده‌ها پشتیبان گرفته می‌شود؛ برنامه حدود یک دقیقه در دسترس نیست.`)) return;
+    if (!(await confirmDialog({ title: `نسخه ${faDigits(s.target)} نصب شود؟`, message: 'اول از داده‌ها پشتیبان گرفته می‌شود؛ برنامه حدود یک دقیقه در دسترس نیست.', confirmLabel: 'نصب' }))) return;
     try {
       setS(await api('POST', '/admin/update/apply', {}, { timeout: 120000 }));
     } catch (e) {
@@ -93,7 +99,7 @@ export default function AdminUpdate() {
     }
   };
   const clear = async () => {
-    if (!confirm('فایل‌های فرستاده‌شده پاک شوند؟')) return;
+    if (!(await confirmDialog({ title: 'فایل‌های فرستاده‌شده پاک شوند؟', confirmLabel: 'پاک کردن', danger: true }))) return;
     try {
       setS(await api('DELETE', '/admin/update/files'));
       setProgress({});

@@ -1,8 +1,6 @@
-import { useId, useMemo, useState } from 'react';
-import { createPortal } from 'react-dom';
+import { useMemo, useState } from 'react';
 import qrcode from 'qrcode-generator';
-import { X } from 'lucide-react';
-import { useDialog } from '../a11y';
+import { Modal } from './Modals';
 
 // A link as a QR code, so another phone can open it with its camera (no copy/paste, no chat app
 // needed to pass the link along). Drawn locally; nothing is fetched.
@@ -21,32 +19,18 @@ function qrDataUrl(value) {
   }
 }
 
-// Large view over everything. Its own layer (not Modal) because it often opens from inside
-// another dialog: Escape and Back must close only this one.
+// Large view over everything. It often opens from inside another dialog, so it registers its
+// own Back (back) and sits above the other dialogs and the lightbox (qr-backdrop): Escape and
+// Back close only this one, thanks to the shared layer stacks.
 function QrOverlay({ src, value, title, onClose }) {
-  // useDialog's layer stacks (its own and backnav's) make Escape and Back close only this one
-  // when it sits over another dialog.
-  const titleId = useId();
-  const dialog = useDialog({ onClose, labelledBy: titleId });
-  return createPortal(
-    <div className="modal-backdrop qr-backdrop" onClick={onClose}>
-      <div className="modal qr-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" {...dialog}>
-        <header className="modal-head">
-          <h3 id={titleId}>{title}</h3>
-          <button className="icon-btn" aria-label="بستن" onClick={onClose}>
-            <X size={20} />
-          </button>
-        </header>
-        <div className="modal-body qr-modal-body">
-          <img className="qr-code qr-big" src={src} alt={`کد QR: ${value}`} />
-          <code dir="ltr" className="qr-value">
-            {value}
-          </code>
-          <p className="muted">با دوربین گوشی اسکن کنید.</p>
-        </div>
-      </div>
-    </div>,
-    document.body,
+  return (
+    <Modal title={title} onClose={onClose} size="qr-modal" bodyClassName="qr-modal-body" backdropClassName="qr-backdrop" portal>
+      <img className="qr-code qr-big" src={src} alt={`کد QR: ${value}`} />
+      <code dir="ltr" className="qr-value">
+        {value}
+      </code>
+      <p className="muted">با دوربین گوشی اسکن کنید.</p>
+    </Modal>
   );
 }
 
