@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { FolderTabs, ChatMenu, inFolder, sortChats } from './Folders';
-import { useBackClose } from '../backnav';
+import { useDialog } from '../a11y';
 import { MessageResults, openMessage } from './Modals';
 import { VoiceChannels } from './Voice';
 import { RichText } from './Emoji';
@@ -120,7 +120,7 @@ export default function Sidebar() {
     location.reload();
   }
 
-  useBackClose(menu, () => setMenu(false));
+  const menuDialog = useDialog({ onClose: () => setMenu(false), open: menu });
 
   const item = (label, action) => (
     <button
@@ -136,7 +136,7 @@ export default function Sidebar() {
   return (
     <aside className="sidebar">
       <header className="sidebar-head">
-        <button className="icon-btn menu-btn" aria-label="منو" onClick={() => setMenu(!menu)}>
+        <button className="icon-btn menu-btn" aria-label="منو" aria-expanded={menu} onClick={() => setMenu(!menu)}>
           <Menu size={22} />
           {otherUnread && <i className="menu-dot" />}
         </button>
@@ -144,7 +144,7 @@ export default function Sidebar() {
         {menu && (
           <>
             <div className="menu-backdrop" onClick={() => setMenu(false)} />
-            <div className="menu">
+            <div className="menu" role="dialog" aria-modal="true" aria-label="منو" {...menuDialog}>
               <div className="menu-user">
                 <Avatar id={me.id} name={me.displayName} file={me.avatar} size={40} />
                 <div>

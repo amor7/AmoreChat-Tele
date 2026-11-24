@@ -159,7 +159,9 @@ export function EmojiPicker({ onPick, onClose }) {
   const tabs = Object.keys(GROUP_META).filter((g) => g !== 'recent' || recent.length);
 
   return (
-    <div className="emoji-picker" ref={ref} role="dialog" aria-label="انتخاب ایموجی">
+    // Non-modal on purpose: a popover beside the composer that closes on any outside tap, and
+    // the text field must stay usable while it is open (no focus trap, no focus move).
+    <div className="emoji-picker" ref={ref} role="dialog" aria-modal="false" aria-label="انتخاب ایموجی">
       <div className="ep-grid">
         {!ready && tab !== 'recent' && <p className="ep-loading muted">در حال بارگذاری ایموجی‌ها…</p>}
         {items.map((ch) => (

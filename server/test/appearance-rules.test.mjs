@@ -2,7 +2,7 @@
 // Usage: node --test server/test/appearance-rules.test.mjs
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { LITE_MODES, WALLPAPERS, TEXT_SIZES, liteEnabled, validWallpaper, validTextSize, barColor } from '../../web/src/appearance-rules.js';
+import { LITE_MODES, MOTION_MODES, WALLPAPERS, TEXT_SIZES, liteEnabled, validWallpaper, validTextSize, barColor, motionReduced } from '../../web/src/appearance-rules.js';
 
 const strong = { deviceMemory: 8, hardwareConcurrency: 8, connection: { saveData: false } };
 
@@ -69,4 +69,16 @@ test('system bar color is always #RRGGBB (Android Color.parseColor)', () => {
   assert.equal(barColor('rgb(0 0 0)', false), '#ffffff');
   assert.equal(barColor('', true), '#121729');
   assert.equal(barColor(undefined, false), '#ffffff');
+});
+
+test('motion choices: follow the phone, or less', () => {
+  assert.deepEqual(MOTION_MODES, [
+    ['auto', 'مثل تنظیمات گوشی'],
+    ['reduce', 'کاهش حرکت'],
+  ]);
+});
+
+test('only an explicit "reduce" turns motion down', () => {
+  assert.equal(motionReduced('reduce'), true);
+  for (const v of ['auto', undefined, null, '', 'REDUCE', 'on', 1]) assert.equal(motionReduced(v), false, String(v));
 });

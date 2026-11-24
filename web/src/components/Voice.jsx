@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   Mic,
@@ -33,6 +33,7 @@ import Ping from './Ping';
 import CallView from './CallView';
 import { VolumeSlider, StagePanel } from './VoiceTools';
 import { useBackClose } from '../backnav';
+import { useDialog, asButton } from '../a11y';
 import { useSmartFit } from '../smartFit';
 import {
   joinVoice,
@@ -260,25 +261,27 @@ export function ShareDialog({ onClose }) {
   const fpsOptions = [15, 30, 60].filter((f) => f <= maxFps);
   const [fps, setFps] = useState(fpsOptions.includes(last.fps) ? last.fps : 30);
   const [audio, setAudio] = useState(last.audio !== false);
+  const titleId = useId();
+  const dialog = useDialog({ onClose, labelledBy: titleId });
   return createPortal(
     <div className="modal-backdrop" onClick={onClose}>
-      <div className="modal small" onClick={(e) => e.stopPropagation()}>
-        <h3 className="with-icon">
+      <div className="modal small" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" {...dialog}>
+        <h3 className="with-icon" id={titleId}>
           <MonitorPlay size={22} /> شروع استریم
         </h3>
         <p className="hint">بعد از «شروع»، مرورگر می‌پرسد چه چیزی نمایش داده شود: کل صفحه، یک پنجره یا یک تب.</p>
         <label className="form-label">کیفیت {max < 1080 && <small className="muted">(حداکثر مجاز شما {max}p)</small>}</label>
-        <div className="segmented">
+        <div className="segmented" role="group" aria-label="کیفیت">
           {options.map((q) => (
-            <button key={q} className={quality === q ? 'active' : ''} onClick={() => setQuality(q)}>
+            <button key={q} className={quality === q ? 'active' : ''} aria-pressed={quality === q} onClick={() => setQuality(q)}>
               {q}p
             </button>
           ))}
         </div>
         <label className="form-label">نرخ فریم</label>
-        <div className="segmented">
+        <div className="segmented" role="group" aria-label="نرخ فریم">
           {fpsOptions.map((f) => (
-            <button key={f} className={fps === f ? 'active' : ''} onClick={() => setFps(f)}>
+            <button key={f} className={fps === f ? 'active' : ''} aria-pressed={fps === f} onClick={() => setFps(f)}>
               {toFa(f)} فریم {f === 15 ? '(متن و اسلاید)' : f === 30 ? '(ویدیو)' : '(بازی، روان‌ترین)'}
             </button>
           ))}
@@ -492,7 +495,11 @@ function MeetTile({ t, mode, chatId, canMute, canKick, stageAdmin, onClick, onWa
     });
 
   return (
-    <div className={`mtile ${mode} ${type} ${type === 'person' && p.speaking ? 'speaking' : ''} ${hasVideo ? 'has-video' : ''}`} onClick={onClick}>
+    <div
+      className={`mtile ${mode} ${type} ${type === 'person' && p.speaking ? 'speaking' : ''} ${hasVideo ? 'has-video' : ''}`}
+      {...asButton(onClick)}
+      aria-label={mode === 'main' ? 'برگشت به نمای همه' : `بزرگ کردن ${type === 'screen' ? `صفحه ${p.name}` : p.name}`}
+    >
       {needsWatch ? (
         <button
           className="watch-btn"
@@ -607,7 +614,9 @@ export function IncomingCall() {
   const call = useStore((s) => s.call);
   if (!call || call.role !== 'callee' || call.state !== 'ringing') return null;
   return (
-    <div className="incoming-call" role="alertdialog" aria-label="تماس ورودی">
+    // Not modal on purpose: no focus trap and no Escape/Back close. Answering or declining a
+    // call must be an explicit tap, and the rest of the app stays usable while it rings.
+    <div className="incoming-call" role="alertdialog" aria-modal="false" aria-label="تماس ورودی">
       <div className="ic-avatar">
         <Avatar id={call.peer.id} name={call.peer.displayName} file={call.peer.avatar} size={112} />
       </div>

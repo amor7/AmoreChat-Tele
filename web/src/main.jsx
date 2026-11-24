@@ -6,6 +6,7 @@ import './voice.css';
 import './theme.css';
 import './features.css';
 import './themes.css';
+import './a11y.css';
 import './motion.css';
 import { initAppearance } from './appearance';
 import App from './App';

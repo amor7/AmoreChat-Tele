@@ -46,20 +46,22 @@ export default function NewChat({ onClose }) {
 
   return (
     <Modal title="گفتگوی جدید" onClose={onClose}>
-      <div className="tabs">
-        <button className={tab === 'dm' ? 'active' : ''} onClick={() => setTab('dm')}>
+      <div className="tabs" role="tablist">
+        <button role="tab" aria-selected={tab === 'dm'} className={tab === 'dm' ? 'active' : ''} onClick={() => setTab('dm')}>
           پیام خصوصی
         </button>
         {canCreate && (
           <>
-            <button className={tab === 'group' ? 'active' : ''} onClick={() => setTab('group')}>
+            <button role="tab" aria-selected={tab === 'group'} className={tab === 'group' ? 'active' : ''} onClick={() => setTab('group')}>
               گروه
             </button>
-            <button className={tab === 'channel' ? 'active' : ''} onClick={() => setTab('channel')}>
+            <button role="tab" aria-selected={tab === 'channel'} className={tab === 'channel' ? 'active' : ''} onClick={() => setTab('channel')}>
               کانال
             </button>
             {config.rtc && (
               <button
+                role="tab"
+                aria-selected={tab === 'voice'}
                 className={tab === 'voice' ? 'active' : ''}
                 onClick={() => {
                   setTab('voice');

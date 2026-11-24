@@ -4,6 +4,7 @@ import { useStore } from '../store';
 import { formatClock, formatSize, toFa, faDigits } from '../util';
 import { playMessage, toggle, next, prev, seek, seekBy, toggleShuffle, cycleRepeat, cycleSpeed, setVolume, closeMusic, playIndex, restoreMusic, trackInfo } from '../music';
 import { DownloadButton } from './Media';
+import { useDialog } from '../a11y';
 import { Play, Pause, SkipBack, SkipForward, Shuffle, Repeat, Repeat1, Music as MusicIcon, X, ChevronDown, ListMusic, Volume2, VolumeX } from 'lucide-react';
 
 function Cover({ fileId, thumb, className = '' }) {
@@ -112,10 +113,11 @@ export function MusicBar() {
   }, [meId]);
   const active = !!s;
   const sheet = !!s?.sheet;
+  // Escape (top layer only), focus and Tab for the sheet.
+  const dialog = useDialog({ onClose: () => open(false), open: sheet });
   useEffect(() => {
     if (!active) return;
     const keys = (e) => {
-      if (e.key === 'Escape' && sheet) return open(false);
       if (typing(e.target) || e.ctrlKey || e.metaKey || e.altKey || document.querySelector('.modal')) return;
       if (e.key === ' ') toggle();
       else if (e.key === 'ArrowRight') seekBy(5);
@@ -125,7 +127,7 @@ export function MusicBar() {
     };
     window.addEventListener('keydown', keys);
     return () => window.removeEventListener('keydown', keys);
-  }, [active, sheet]);
+  }, [active]);
   if (!s) return null;
   const t = s.queue[s.order[s.at]];
   if (!t) return null;
@@ -165,7 +167,7 @@ export function MusicBar() {
       </div>
       {s.sheet && (
         <div className="music-sheet-back" style={{ '--bar-bottom': `${bar.current?.getBoundingClientRect().bottom || 0}px` }} onClick={() => open(false)}>
-          <div className="music-sheet" role="dialog" aria-label="پلیر موزیک" onClick={(e) => e.stopPropagation()}>
+          <div className="music-sheet" role="dialog" aria-modal="true" aria-label="پلیر موزیک" onClick={(e) => e.stopPropagation()} {...dialog}>
             <button className="icon-btn music-sheet-close" aria-label="بستن" onClick={() => open(false)}>
               <ChevronDown size={24} />
             </button>

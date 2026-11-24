@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useId, useMemo, useState } from 'react';
 import { createPortal } from 'react-dom';
 import qrcode from 'qrcode-generator';
 import { X } from 'lucide-react';
-import { useBackClose } from '../backnav';
+import { useDialog } from '../a11y';
 
 // A link as a QR code, so another phone can open it with its camera (no copy/paste, no chat app
 // needed to pass the link along). Drawn locally; nothing is fetched.
@@ -24,21 +24,15 @@ function qrDataUrl(value) {
 // Large view over everything. Its own layer (not Modal) because it often opens from inside
 // another dialog: Escape and Back must close only this one.
 function QrOverlay({ src, value, title, onClose }) {
-  useBackClose(true, onClose);
-  useEffect(() => {
-    const onKey = (e) => {
-      if (e.key !== 'Escape') return;
-      e.stopImmediatePropagation();
-      onClose();
-    };
-    window.addEventListener('keydown', onKey, true);
-    return () => window.removeEventListener('keydown', onKey, true);
-  }, [onClose]);
+  // useDialog's layer stacks (its own and backnav's) make Escape and Back close only this one
+  // when it sits over another dialog.
+  const titleId = useId();
+  const dialog = useDialog({ onClose, labelledBy: titleId });
   return createPortal(
     <div className="modal-backdrop qr-backdrop" onClick={onClose}>
-      <div className="modal qr-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-label={title}>
+      <div className="modal qr-modal" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" {...dialog}>
         <header className="modal-head">
-          <h3>{title}</h3>
+          <h3 id={titleId}>{title}</h3>
           <button className="icon-btn" aria-label="بستن" onClick={onClose}>
             <X size={20} />
           </button>

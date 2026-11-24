@@ -126,9 +126,9 @@ export default function Health() {
         />
       </div>
 
-      <div className="segmented">
+      <div className="segmented" role="group" aria-label="بازه زمانی">
         {RANGES.map(([k, label]) => (
-          <button key={k} className={range === k ? 'active' : ''} onClick={() => setRange(k)}>
+          <button key={k} className={range === k ? 'active' : ''} aria-pressed={range === k} onClick={() => setRange(k)}>
             {label}
           </button>
         ))}

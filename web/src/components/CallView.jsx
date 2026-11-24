@@ -146,7 +146,7 @@ export default function CallView() {
   const minimize = () => useStore.setState((s) => ({ rtc: { ...s.rtc, expanded: false } }));
 
   return (
-    <div className={`call-view ${controls ? '' : 'hide-controls'} ${swapped ? 'swapped' : ''}`} data-remote={remote ? '1' : '0'} onClick={poke}>
+    <div className={`call-view ${controls ? '' : 'hide-controls'} ${swapped ? 'swapped' : ''}`} data-remote={remote ? '1' : '0'} onClick={poke} onFocus={poke}>
       {!hasBig && (
         <div className={`call-avatar ${remote?.speaking ? 'speaking' : ''}`}>
           <Avatar id={peer.id} name={peer.displayName} file={peer.avatar} size={132} />

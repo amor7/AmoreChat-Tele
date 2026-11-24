@@ -45,6 +45,11 @@
 - [جزئی · v1.0.42] دکمه‌های `.segmented` `aria-pressed` ندارند؛ نقطه‌های «در حال اتصال»/ضبط در حالت کاهش حرکت فقط رنگ‌اند (مرحله‌ی ۲ a11y).
 - [جزئی · v1.0.42] `theme.css` (صفحه‌های تماس) و `themes.css` نام‌های گیج‌کننده دارند → هنگام دست زدن به صفحه‌ی تماس، `theme.css` به `calls.css`.
 
+- [مهم · v1.0.43، پیش از مرحله‌ی ۳] منوها (منوی پیام، چت، سایدبار) فعلاً `role=dialog` و Tab-trap دارند؛ برای Menu مرحله‌ی ۳: هسته‌ی `useLayer` (stack + Escape + Back + بازگرداندن focus) و `useMenu` با فلش‌ها و `role=menu`، Tab منو را ببندد. `Modal` یک حالت بی‌سر (`bare`) بگیرد تا Composer/QR/ShareDialog هم از آن استفاده کنند. (architect)
+- [جزئی · v1.0.43] Back مرورگر (نه اپ اندروید) وسط آپلود Composer ورودی history را مصرف می‌کند و Back بعدی از چت خارج می‌شود (`backnav.js`).
+- [جزئی · v1.0.43] `TeleForgot` در `TelePasscode.jsx` با Back بسته نمی‌شود؛ منوهای `.tele-more-menu`/`.tele-msg-menu` Escape ندارند؛ `pipProps` در CallView کیبورد ندارد.
+- [جزئی · v1.0.43] تست DOM برای `useDialog` (Escape دولایه، wrap Tab، بازگرداندن focus) نیست؛ پیشنهاد: گام کوچک در `ui-e2e.mjs`.
+
 ## ایده‌ها
 - [کم] UI تلگرام با polling کار می‌کند (هر 5/10/60 ثانیه) در حالی که Socket.IO هست؛ در مقیاس <۵۰ کاربر اولویت پایین، ولی روی نت کند push مصرف داده را کم می‌کند.
   - همراهش: اعلان پیام تلگرام برای چت‌های «مهم» (الان در `server/src/tele/` هیچ notify/push نیست). با `TELE_IDLE_MINUTES` و `assertQuota` در تنش است؛ اول طراحی و تصمیم درباره‌ی بودجه‌ی ترافیک VPN.

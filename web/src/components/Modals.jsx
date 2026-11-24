@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import { useStore } from '../store';
 import { api, fileUrl } from '../api';
 import { toFa, postBlockReason, messagePreview, formatListTime } from '../util';
@@ -15,19 +15,18 @@ import { Readers } from './ChatExtras';
 import { ShareTarget, AppUpdateNotes } from './AndroidApp';
 import { FoldersModal, FolderEditor } from './Folders';
 import { useBackClose } from '../backnav';
+import { useDialog } from '../a11y';
 import { TeleToChat, ChatToTele, TeleSessions } from './TeleForward';
 
 export function Modal({ title, onClose, children, size = '' }) {
-  useEffect(() => {
-    const onKey = (e) => e.key === 'Escape' && onClose();
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  const titleId = useId();
+  // Back is registered once for whichever modal is open, by Modals() below.
+  const dialog = useDialog({ onClose, labelledBy: titleId, back: false });
   return (
     <div className="modal-backdrop" onClick={onClose}>
-      <div className={`modal ${size}`} onClick={(e) => e.stopPropagation()} role="dialog" aria-label={title}>
+      <div className={`modal ${size}`} onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" {...dialog}>
         <header className="modal-head">
-          <h3>{title}</h3>
+          <h3 id={titleId}>{title}</h3>
           <button className="icon-btn" aria-label="بستن" onClick={onClose}>
             <X size={20} />
           </button>
@@ -369,13 +368,9 @@ function Search({ chatId, onClose }) {
 }
 
 function ImageViewer({ fileId, name, onClose }) {
-  useEffect(() => {
-    const onKey = (e) => e.key === 'Escape' && onClose();
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onClose]);
+  const dialog = useDialog({ onClose, back: false }); // Back: Modals() below
   return (
-    <div className="lightbox" onClick={onClose} role="dialog" aria-label="نمایش عکس">
+    <div className="lightbox" onClick={onClose} role="dialog" aria-modal="true" aria-label="نمایش عکس" {...dialog}>
       <button className="lightbox-close" onClick={onClose} aria-label="بستن">
         <X size={24} />
       </button>
