@@ -138,8 +138,8 @@ export default function Health() {
       <Chart
         points={pts.map((p) => ({ t: p.t, cpu: p.cpu, mem: pct(p.memUsed, p.memTotal) }))}
         lines={[
-          { key: 'cpu', label: 'پردازنده', color: '#6366f1' },
-          { key: 'mem', label: 'رم', color: '#10b981' },
+          { key: 'cpu', label: 'پردازنده', color: 'var(--chart-1)' },
+          { key: 'mem', label: 'رم', color: 'var(--chart-2)' },
         ]}
         max={100}
         format={(v) => `${toFa(Math.round(v))}٪`}
@@ -148,8 +148,8 @@ export default function Health() {
       <Chart
         points={pts}
         lines={[
-          { key: 'netRx', label: 'دریافت', color: '#0ea5e9' },
-          { key: 'netTx', label: 'ارسال', color: '#f59e0b' },
+          { key: 'netRx', label: 'دریافت', color: 'var(--chart-3)' },
+          { key: 'netTx', label: 'ارسال', color: 'var(--chart-4)' },
         ]}
         format={rate}
       />
@@ -162,14 +162,14 @@ export default function Health() {
       <Chart
         points={pts}
         lines={[
-          { key: 'online', label: 'آنلاین', color: '#8b5cf6' },
-          { key: 'voice', label: 'در ویس‌چت', color: '#ec4899' },
-          { key: 'calls', label: 'تماس', color: '#14b8a6' },
+          { key: 'online', label: 'آنلاین', color: 'var(--chart-5)' },
+          { key: 'voice', label: 'در ویس‌چت', color: 'var(--chart-6)' },
+          { key: 'calls', label: 'تماس', color: 'var(--chart-7)' },
         ]}
         format={(v) => toFa(Math.round(v))}
       />
       <h4>دیسک (٪)</h4>
-      <Chart points={pts.map((p) => ({ t: p.t, disk: pct(p.diskUsed, p.diskTotal) }))} lines={[{ key: 'disk', label: 'دیسک', color: '#ef4444' }]} max={100} format={(v) => `${toFa(Math.round(v))}٪`} height={80} />
+      <Chart points={pts.map((p) => ({ t: p.t, disk: pct(p.diskUsed, p.diskTotal) }))} lines={[{ key: 'disk', label: 'دیسک', color: 'var(--chart-8)' }]} max={100} format={(v) => `${toFa(Math.round(v))}٪`} height={80} />
 
       {data.cert && (
         <>

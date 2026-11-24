@@ -1,0 +1,76 @@
+/* Reduced motion and lite mode. Imported LAST in main.jsx so these rules win over every
+   theme and component rule (several of the overrides rely on later order at equal specificity).
+   Reduced motion follows the OS setting; data-motion='reduce' is reserved for a future in-app
+   switch. Lite mode (data-lite, set by appearance.js) is for weak phones: blur is the most
+   expensive effect on old WebViews, then big shadows and animations. */
+
+/* ---------- Kill animations and transitions ---------- */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+:root[data-motion='reduce'] *,
+:root[data-motion='reduce'] *::before,
+:root[data-motion='reduce'] *::after,
+:root[data-lite] *,
+:root[data-lite] *::before,
+:root[data-lite] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
+}
+
+/* ---------- Exceptions (must stay after the kill rules) ----------
+   ":root .x" has the same specificity as ":root[data-lite] *" and comes later, so it wins;
+   inside the media query it beats the bare "*" anyway.
+   Spinners keep turning on purpose: they are the only "still working" signal, and a frozen
+   one looks like a hang. Rotation is cheap. */
+:root .spinner,
+:root .icon-btn.spin svg,
+:root .ring.indeterminate {
+  animation-duration: 1s !important;
+  animation-iteration-count: infinite !important;
+}
+/* Jump-to-message highlight: show it as a static ring for as long as the class is on
+   (ChatView removes it after 1.4s) instead of the animated flash. */
+@media (prefers-reduced-motion: reduce) {
+  :root .flash .bubble {
+    box-shadow: 0 0 0 3px var(--accent);
+  }
+}
+:root[data-motion='reduce'] .flash .bubble,
+:root[data-lite] .flash .bubble {
+  box-shadow: 0 0 0 3px var(--accent);
+}
+
+/* ---------- Lite mode ---------- */
+/* [data-mode][data-theme] raises specificity above the per-theme dark rules in themes.css
+   (e.g. telegram/amoled set their own --glass); appearance.js always sets both. */
+:root[data-lite][data-mode][data-theme] {
+  --glass: var(--panel);
+  --shadow: var(--shadow-sm);
+  --shadow-lg: var(--shadow-sm);
+  --shadow-menu: var(--shadow-sm);
+  --glow-accent: none;
+  --glow-accent-lg: none;
+  --glow-hangup: none;
+}
+:root[data-lite] *,
+:root[data-lite] *::before,
+:root[data-lite] *::after {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+/* The glow wallpaper is two big radial gradients attached to the scrolling list:
+   repainted on every scroll frame. The other wallpapers are cheap tiles. */
+:root[data-lite][data-wall='glow'] .messages {
+  background-image: none;
+  background-attachment: scroll;
+}

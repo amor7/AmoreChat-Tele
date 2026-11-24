@@ -1,58 +1,3 @@
-:root {
-  --bg: #f1f5f9;
-  --panel: #ffffff;
-  --panel-2: #f8fafc;
-  --border: #e2e8f0;
-  --text: #0f172a;
-  --muted: #64748b;
-  --accent: #2563eb;
-  --accent-soft: #dbeafe;
-  --danger: #dc2626;
-  --bubble-in: #ffffff;
-  --bubble-out: #dcf8c6;
-  --chat-bg: #e7ebe4;
-  --hover: #f1f5f9;
-  --shadow: 0 8px 30px rgb(0 0 0 / 0.15);
-  --radius: 12px;
-  color-scheme: light;
-}
-
-@media (prefers-color-scheme: dark) {
-  :root:not([data-mode]) {
-    --bg: #0b1220;
-    --panel: #111a2e;
-    --panel-2: #0f172a;
-    --border: #1e293b;
-    --text: #e2e8f0;
-    --muted: #94a3b8;
-    --accent: #3b82f6;
-    --accent-soft: #1e3a8a;
-    --danger: #f87171;
-    --bubble-in: #1e293b;
-    --bubble-out: #1d4ed8;
-    --chat-bg: #0b1324;
-    --hover: #1e293b;
-    --shadow: 0 8px 30px rgb(0 0 0 / 0.5);
-    color-scheme: dark;
-  }
-}
-:root[data-mode='dark'] {
-  --bg: #0b1220;
-  --panel: #111a2e;
-  --panel-2: #0f172a;
-  --border: #1e293b;
-  --text: #e2e8f0;
-  --muted: #94a3b8;
-  --accent: #3b82f6;
-  --accent-soft: #1e3a8a;
-  --danger: #f87171;
-  --bubble-in: #1e293b;
-  --bubble-out: #1d4ed8;
-  --chat-bg: #0b1324;
-  --hover: #1e293b;
-  --shadow: 0 8px 30px rgb(0 0 0 / 0.5);
-  color-scheme: dark;
-}
 
 * {
   box-sizing: border-box;
@@ -160,7 +105,7 @@ code {
 .btn.primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
 }
 .btn.danger {
   color: var(--danger);
@@ -285,16 +230,16 @@ code {
 }
 .offline-bar {
   grid-area: offline;
-  background: #f59e0b;
-  color: #111;
+  background: var(--warn);
+  color: var(--on-warn);
   text-align: center;
   font-size: 13px;
   padding: 4px;
 }
 .emergency-banner {
   grid-area: emergency;
-  background: var(--danger);
-  color: #fff;
+  background: var(--danger-strong);
+  color: var(--on-accent);
   display: flex;
   align-items: center;
 }
@@ -302,14 +247,14 @@ code {
   flex: 1;
   background: none;
   border: 0;
-  color: #fff;
+  color: var(--on-accent);
   text-align: start;
   padding: 10px 16px;
   cursor: pointer;
   font-weight: 600;
 }
 .emergency-banner .icon-btn {
-  color: #fff;
+  color: var(--on-accent);
 }
 
 .sidebar {
@@ -358,11 +303,11 @@ code {
 }
 .chat-item.active {
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
 }
 .chat-item.active .time,
 .chat-item.active .preview {
-  color: #e0e7ff;
+  color: rgb(255 255 255 / 0.85);
 }
 .chat-item.emergency:not(.active) {
   background: color-mix(in srgb, var(--danger) 8%, transparent);
@@ -398,7 +343,7 @@ code {
 }
 .badge {
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   border-radius: 12px;
   font-size: 12px;
   min-width: 22px;
@@ -410,7 +355,7 @@ code {
   flex-shrink: 0;
 }
 .chat-item.active .badge {
-  background: #fff;
+  background: var(--on-accent);
   color: var(--accent);
 }
 .fab {
@@ -422,7 +367,7 @@ code {
   border-radius: 50%;
   border: 0;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   font-size: 22px;
   cursor: pointer;
   box-shadow: var(--shadow);
@@ -443,7 +388,7 @@ code {
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #fff;
+  color: var(--on-accent);
   font-weight: 600;
 }
 .online-dot {
@@ -453,7 +398,7 @@ code {
   width: 12px;
   height: 12px;
   border-radius: 50%;
-  background: #22c55e;
+  background: var(--ok);
   border: 2px solid var(--panel);
 }
 
@@ -659,22 +604,6 @@ code {
 .msg-row.mine .bubble {
   background: var(--bubble-out);
 }
-@media (prefers-color-scheme: dark) {
-  :root:not([data-mode]) .msg-row.mine .bubble {
-    color: #fff;
-  }
-  :root:not([data-mode]) .msg-row.mine .bubble .meta,
-  :root:not([data-mode]) .msg-row.mine .bubble a {
-    color: #dbeafe;
-  }
-}
-:root[data-mode='dark'] .msg-row.mine .bubble {
-  color: #fff;
-}
-:root[data-mode='dark'] .msg-row.mine .bubble .meta,
-:root[data-mode='dark'] .msg-row.mine .bubble a {
-  color: #dbeafe;
-}
 .bubble.deleted {
   color: var(--muted);
 }
@@ -705,7 +634,7 @@ code {
   margin-top: 1px;
 }
 .ticks.read {
-  color: #0ea5e9;
+  color: var(--tick-read);
 }
 .msg-more {
   position: absolute;
@@ -761,7 +690,7 @@ code {
   display: block;
   border: 0;
   padding: 0;
-  background: #0002;
+  background: rgb(0 0 0 / 0.13);
   border-radius: 11px;
   overflow: hidden;
   max-width: 100%;
@@ -777,7 +706,7 @@ code {
 }
 video.media {
   object-fit: contain;
-  background: #000;
+  background: var(--media-bg);
 }
 .voice {
   max-width: 100%;
@@ -859,7 +788,7 @@ video.media {
   border-radius: 50%;
   border: 0;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   font-size: 18px;
   cursor: pointer;
   flex-shrink: 0;
@@ -900,7 +829,7 @@ video.media {
   max-height: 50vh;
   object-fit: contain;
   border-radius: 10px;
-  background: #0002;
+  background: rgb(0 0 0 / 0.13);
 }
 .progress {
   position: relative;
@@ -926,7 +855,7 @@ video.media {
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  background: rgb(0 0 0 / 0.45);
+  background: var(--overlay);
   z-index: 58; /* above the full-screen voice room / call (55), below the lightbox (60) */
   display: flex;
   align-items: center;
@@ -1218,8 +1147,8 @@ details.boxed summary {
   bottom: 24px;
   left: 50%;
   transform: translateX(-50%);
-  background: #111827;
-  color: #fff;
+  background: var(--inverse-bg);
+  color: var(--text-on-media);
   padding: 10px 18px;
   border-radius: 12px;
   z-index: 70;
@@ -1279,7 +1208,7 @@ details.boxed summary {
   border-radius: 50%;
   border: 0;
   background: var(--accent);
-  color: #fff;
+  color: var(--on-accent);
   cursor: pointer;
   flex-shrink: 0;
   font-size: 14px;
@@ -1303,9 +1232,6 @@ details.boxed summary {
 }
 .wave span.on {
   background: var(--accent);
-}
-.msg-row.mine .wave span.on {
-  background: color-mix(in srgb, var(--accent) 80%, #000);
 }
 .voice-meta {
   display: flex;
@@ -1350,7 +1276,7 @@ details.boxed summary {
 }
 .video-poster {
   position: relative;
-  background: #000;
+  background: var(--media-bg);
 }
 .video-poster img {
   width: 100%;
@@ -1365,7 +1291,7 @@ details.boxed summary {
   height: 56px;
   border-radius: 50%;
   background: rgb(0 0 0 / 0.55);
-  color: #fff;
+  color: var(--text-on-media);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1376,7 +1302,7 @@ details.boxed summary {
   bottom: 6px;
   inset-inline-start: 6px;
   background: rgb(0 0 0 / 0.55);
-  color: #fff;
+  color: var(--text-on-media);
   border-radius: 8px;
   padding: 1px 8px;
   font-size: 12px;
@@ -1393,7 +1319,7 @@ details.boxed summary {
   font-size: 12px;
   border-radius: 8px;
   background: rgb(0 0 0 / 0.6);
-  color: #fff;
+  color: var(--text-on-media);
   border: 0;
 }
 .expired {
@@ -1524,7 +1450,7 @@ details.boxed summary {
 .file-icon,
 .dl-btn {
   position: relative;
-  color: #fff;
+  color: var(--on-accent);
 }
 .dl-btn {
   width: 40px;
@@ -1570,7 +1496,7 @@ details.boxed summary {
   stroke: rgb(255 255 255 / 0.3);
 }
 .ring-bar {
-  stroke: #fff;
+  stroke: var(--on-accent);
   stroke-linecap: round;
   transition: stroke-dashoffset 0.15s;
 }
