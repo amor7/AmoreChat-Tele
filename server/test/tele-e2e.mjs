@@ -409,6 +409,23 @@ async function part1() {
   await stopServer();
 }
 
+// Puts the spare account's saved session in place for `username`, the way a real install has it:
+// an account row that owns data/tele-sessions/<id>. (A folder with no row is someone else's
+// leftover login: the server wipes it when a new account gets that id, and at start.)
+function plantSession(DATA_DIR, username) {
+  const db = new DatabaseSync(path.join(DATA_DIR, 'amorechat.db'));
+  try {
+    db.exec('PRAGMA busy_timeout = 5000');
+    const user = db.prepare('SELECT id FROM users WHERE username = ?').get(username);
+    assert.ok(user, `user ${username}`);
+    const t = Date.now();
+    const r = db.prepare("INSERT INTO tele_accounts (user_id, phone, status, session_dir, created_at, updated_at) VALUES (?, '', 'disconnected', '', ?, ?)").run(user.id, t, t);
+    fs.cpSync(SESSION_DIR, path.join(DATA_DIR, 'tele-sessions', String(r.lastInsertRowid)), { recursive: true });
+  } finally {
+    db.close();
+  }
+}
+
 // ===================== Part 2: real Telegram, spare account + bot =====================
 let bot = null;
 async function part2() {
@@ -447,8 +464,7 @@ async function part2() {
   const goodId = await addProxies(owner);
 
   log('Alice connects the spare account (its saved session: no code needed)');
-  // Account 1's session directory is data/tele-sessions/1: put the saved session there first.
-  fs.cpSync(SESSION_DIR, path.join(DATA_DIR, 'tele-sessions', '1'), { recursive: true });
+  plantSession(DATA_DIR, 'alice');
   let r = ok(await alice.call('POST', '/api/tele/login/phone', { phone: process.env.TG_TEST_PHONE }), 'alice connect');
   assert.equal(r.status, 'ready', JSON.stringify(r));
   r = ok(await alice.call('GET', '/api/tele/status'), 'status');
@@ -1160,7 +1176,7 @@ async function part3() {
   log('Part 3: the owner connects the spare account; the bot posts in its channel');
   const { owner, alice, bob } = await setupApp({ DATA_DIR });
   await addProxies(owner);
-  fs.cpSync(SESSION_DIR, path.join(DATA_DIR, 'tele-sessions', '1'), { recursive: true });
+  plantSession(DATA_DIR, 'owner');
   let r = ok(await owner.call('POST', '/api/tele/login/phone', { phone: process.env.TG_TEST_PHONE }), 'owner connect');
   assert.equal(r.status, 'ready');
   r = await until('the channel in the owner\'s list', async () => {
