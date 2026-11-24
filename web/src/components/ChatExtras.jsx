@@ -86,9 +86,9 @@ export function MediaGallery({ chatId }) {
 
   return (
     <div className="gallery">
-      <div className="tabs scroll">
+      <div className="tabs scroll" role="tablist">
         {TABS.map(([k, label, Icon]) => (
-          <button key={k} className={kind === k ? 'active' : ''} onClick={() => setKind(k)}>
+          <button key={k} role="tab" aria-selected={kind === k} className={kind === k ? 'active' : ''} onClick={() => setKind(k)}>
             <Icon size={15} /> {label}
           </button>
         ))}

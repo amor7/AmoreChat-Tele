@@ -207,7 +207,13 @@ function EmergencyBanner() {
   );
 }
 
+// The live region stays in the page and only its content changes: screen readers announce
+// changes inside an existing region, not a region that appears together with its text.
 function Toast() {
   const toast = useStore((s) => s.toast);
-  return toast ? <div className="toast">{toast.text}</div> : null;
+  return (
+    <div className="toast-live" role="status" aria-live="polite" aria-atomic="true">
+      {toast && <div className="toast">{toast.text}</div>}
+    </div>
+  );
 }

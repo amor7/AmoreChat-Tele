@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
 import { createPortal } from 'react-dom';
 import { api, upload, CANCELLED, LATE } from '../api';
 import { useStore, dataSaverNow } from '../store';
@@ -6,6 +6,7 @@ import { emitTyping, resetTyping, isChatMuted } from '../socket';
 import { enqueue, enqueueVoice, flushOutbox, newClientId } from '../offline';
 import { loadDraft, clearDraft } from '../drafts';
 import { useDraftSaver } from '../useDrafts';
+import { useDialog } from '../a11y';
 import { EmojiPicker, RichText } from './Emoji';
 import PreviewIcon from './PreviewIcon';
 import Avatar from './Avatar';
@@ -629,12 +630,17 @@ function SendFileDialog({ file, chat, onClose }) {
     }
   }
 
+  // Escape behaves like a backdrop tap: ignored while sending (the cancel button stops it).
+  const closeIdle = () => progress === null && onClose();
+  const titleId = useId();
+  const dialog = useDialog({ onClose: closeIdle, labelledBy: titleId });
+
   // Portal: the composer bar uses backdrop-filter, which would otherwise trap this
   // "fixed" overlay inside the bar (half of it ended up below the screen).
   return createPortal(
-    <div className="modal-backdrop" onClick={() => progress === null && onClose()}>
-      <div className="modal small" onClick={(e) => e.stopPropagation()}>
-        <h3>ارسال {isImage ? 'عکس' : isVideo ? 'ویدیو' : 'فایل'}</h3>
+    <div className="modal-backdrop" onClick={closeIdle}>
+      <div className="modal small" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" {...dialog}>
+        <h3 id={titleId}>ارسال {isImage ? 'عکس' : isVideo ? 'ویدیو' : 'فایل'}</h3>
         {isImage && <img className="send-preview" src={preview} alt="" />}
         {isVideo && <video className="send-preview" src={preview} controls muted playsInline />}
         {!isImage && !isVideo && (
@@ -649,24 +655,24 @@ function SendFileDialog({ file, chat, onClose }) {
           </div>
         )}
         {isImage && (
-          <div className="segmented">
-            <button className={compress ? 'active' : ''} onClick={() => setCompress(true)}>
+          <div className="segmented" role="group" aria-label="کیفیت عکس">
+            <button className={compress ? 'active' : ''} aria-pressed={compress} onClick={() => setCompress(true)}>
               فشرده (کم‌حجم)
             </button>
-            <button className={!compress ? 'active' : ''} onClick={() => setCompress(false)}>
+            <button className={!compress ? 'active' : ''} aria-pressed={!compress} onClick={() => setCompress(false)}>
               کیفیت اصلی ({formatSize(file.size)})
             </button>
           </div>
         )}
         {isVideo && videoProcessing && (
           <>
-            <div className="segmented">
+            <div className="segmented" role="group" aria-label="کیفیت ویدیو">
               {[
                 ['360', 'کم‌حجم (360p)'],
                 ['720', 'متوسط (720p)'],
                 ['original', 'اصلی'],
               ].map(([q, label]) => (
-                <button key={q} className={videoQ === q ? 'active' : ''} onClick={() => setVideoQ(q)}>
+                <button key={q} className={videoQ === q ? 'active' : ''} aria-pressed={videoQ === q} onClick={() => setVideoQ(q)}>
                   {label}
                 </button>
               ))}

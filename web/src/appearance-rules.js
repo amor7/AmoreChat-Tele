@@ -5,6 +5,12 @@ export const LITE_MODES = [
   ['on', 'روشن'],
   ['off', 'خاموش'],
 ];
+// In-app "less motion" on top of the phone's own setting (old WebViews don't report
+// prefers-reduced-motion at all, so this is the only way there).
+export const MOTION_MODES = [
+  ['auto', 'مثل تنظیمات گوشی'],
+  ['reduce', 'کاهش حرکت'],
+];
 export const TEXT_SIZES = [
   ['14', 'کوچک'],
   ['15', 'معمولی'],
@@ -42,6 +48,11 @@ export function validWallpaper(value) {
 export function validTextSize(value) {
   const n = Number(value);
   return TEXT_SIZES.some(([k]) => Number(k) === n) ? n : DEFAULT_TEXT_SIZE;
+}
+
+// Only 'reduce' sets data-motion; anything else (missing, stale, hand-edited) follows the OS.
+export function motionReduced(pref) {
+  return pref === 'reduce';
 }
 
 // Color for the browser / Android system bars. Android's Color.parseColor only takes

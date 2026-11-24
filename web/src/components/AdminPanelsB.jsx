@@ -89,11 +89,11 @@ export function Reports() {
 
   return (
     <>
-      <div className="segmented">
-        <button className={status === 'open' ? 'active' : ''} onClick={() => setStatus('open')}>
+      <div className="segmented" role="group" aria-label="وضعیت گزارش‌ها">
+        <button className={status === 'open' ? 'active' : ''} aria-pressed={status === 'open'} onClick={() => setStatus('open')}>
           باز
         </button>
-        <button className={status === 'closed' ? 'active' : ''} onClick={() => setStatus('closed')}>
+        <button className={status === 'closed' ? 'active' : ''} aria-pressed={status === 'closed'} onClick={() => setStatus('closed')}>
           بسته‌شده
         </button>
       </div>

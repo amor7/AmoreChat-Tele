@@ -94,11 +94,13 @@ test('only tokens.css has a pre-render dark block, and it stays tiny', () => {
   assert.ok(vars.length > 0 && vars.length <= 4, `first-paint block: ${vars.join(' ')}`);
 });
 
-test('motion.css is imported last, tokens.css first, and lite mode turns blur off', () => {
+test('motion.css is imported last, a11y.css right before it, tokens.css first, and lite mode turns blur off', () => {
   const main = fs.readFileSync(path.join(SRC, 'main.jsx'), 'utf8');
   const cssImports = [...main.matchAll(/import '\.\/([\w-]+\.css)'/g)].map((m) => m[1]);
   assert.equal(cssImports[0], 'tokens.css');
   assert.equal(cssImports.at(-1), 'motion.css');
+  // Focus ring / touch sizes must beat component rules, but lite and reduced motion beat them.
+  assert.equal(cssImports.at(-2), 'a11y.css');
   const motion = read(path.join(SRC, 'motion.css'));
   assert.match(motion, /\[data-lite\][^{]*\{[^}]*backdrop-filter: none/);
 });

@@ -223,9 +223,9 @@ export default function TeleView({ dialogId }) {
           />
         )}
         {connected && (
-          <div className="folder-tabs">
+          <div className="folder-tabs" role="group" aria-label="دسته‌ها">
             {TABS.map(([k, label]) => (
-              <button key={k} className={tab === k ? 'active' : ''} onClick={() => setTab(k)}>
+              <button key={k} className={tab === k ? 'active' : ''} aria-pressed={tab === k} onClick={() => setTab(k)}>
                 {label}
                 {!picking && unreadOf(k) > 0 && <span className="tab-badge">{toFa(unreadOf(k))}</span>}
               </button>

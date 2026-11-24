@@ -41,9 +41,9 @@ export default function Admin({ onClose }) {
 
   return (
     <Modal title="پنل مدیریت" onClose={onClose} size="large">
-      <div className="tabs scroll">
+      <div className="tabs scroll" role="tablist">
         {tabs.map(([key, label, , Icon]) => (
-          <button key={key} className={tab === key ? 'active' : ''} onClick={() => setTab(key)}>
+          <button key={key} role="tab" aria-selected={tab === key} className={tab === key ? 'active' : ''} onClick={() => setTab(key)}>
             <Icon size={16} /> {label}
           </button>
         ))}

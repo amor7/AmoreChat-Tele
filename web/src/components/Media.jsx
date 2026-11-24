@@ -4,6 +4,7 @@ import { useStore, useDataSaver } from '../store';
 import { formatSize, formatClock, decodeWaveform } from '../util';
 import { startDownload, cancelDownload } from '../download';
 import { claimPlayback } from '../playback';
+import { asButton } from '../a11y';
 import { Play, Pause, Download, X, Image as ImageIcon } from 'lucide-react';
 
 const SPEEDS = [1, 1.5, 2];
@@ -31,6 +32,16 @@ export function VoicePlayer({ file, mine }) {
     if (dur) audio.current.currentTime = ratio * dur;
   }
 
+  // Keyboard seek on the waveform: arrows move 5 seconds (it is drawn left-to-right).
+  function seekKey(e) {
+    const a = audio.current;
+    if (!dur || !a) return;
+    const to = { ArrowRight: a.currentTime + 5, ArrowUp: a.currentTime + 5, ArrowLeft: a.currentTime - 5, ArrowDown: a.currentTime - 5, Home: 0, End: dur }[e.key];
+    if (to === undefined) return;
+    e.preventDefault();
+    a.currentTime = Math.min(dur, Math.max(0, to));
+  }
+
   const progress = dur ? pos / dur : 0;
   return (
     <div className={`voice-player ${mine ? 'mine' : ''}`}>
@@ -38,7 +49,19 @@ export function VoicePlayer({ file, mine }) {
         {playing ? <Pause size={18} fill="currentColor" /> : <Play size={18} fill="currentColor" />}
       </button>
       <div className="voice-body">
-        <div className="wave" dir="ltr" onClick={seek}>
+        <div
+          className="wave"
+          dir="ltr"
+          role="slider"
+          tabIndex={0}
+          aria-label="جای پخش"
+          aria-valuemin={0}
+          aria-valuemax={Math.round(dur)}
+          aria-valuenow={Math.round(pos)}
+          aria-valuetext={formatClock(pos)}
+          onClick={seek}
+          onKeyDown={seekKey}
+        >
           {bars.map((b, i) => (
             <span key={i} className={i / bars.length < progress ? 'on' : ''} style={{ height: `${Math.max(12, b * 100)}%` }} />
           ))}
@@ -133,12 +156,9 @@ export function VideoMessage({ file }) {
     return (
       <div
         className="media video-poster"
-        role="button"
-        tabIndex={0}
+        {...asButton(() => setStarted(true))}
         aria-label="پخش ویدیو"
         style={{ aspectRatio: ratio }}
-        onClick={() => setStarted(true)}
-        onKeyDown={(e) => e.key === 'Enter' && setStarted(true)}
       >
         {file.thumb && !dataSaver && <img src={`${fileUrl(file.id)}?thumb=1`} alt="" loading="lazy" />}
         <span className="play-overlay">
@@ -235,7 +255,7 @@ export function FileCard({ file }) {
   const dl = useStore((s) => s.downloads[key]);
   const start = () => (dl ? cancelDownload(key) : startDownload(key, dlUrl(file.id), file.name));
   return (
-    <div className="file-card" role="button" tabIndex={0} onClick={start} onKeyDown={(e) => e.key === 'Enter' && start()}>
+    <div className="file-card" {...asButton(start)}>
       <span className={`file-icon ${dl ? 'active' : ''}`}>
         {dl && <Ring progress={dl.progress} />}
         <span className="dl-icon">{dl ? <X size={16} /> : <Download size={18} />}</span>

@@ -13,7 +13,7 @@ import { ArrowLeft, ChevronDown, Timer, Phone, Video, Mic, Search, Pin, PinOff, 
 import { startCall, joinVoice } from '../rtc';
 import { isChatMuted } from '../socket';
 import { outboxMessage, retryOutbox, dropFromOutbox, voiceUrl, loadVoiceUrl, releaseVoiceUrls } from '../offline';
-import { useBackClose } from '../backnav';
+import { useDialog, asButton } from '../a11y';
 
 export default function ChatView({ chatId }) {
   const chat = useStore((s) => s.chats[chatId]);
@@ -300,7 +300,8 @@ function Outbox({ chat, me }) {
       {items.map((o) => (
         <div
           key={o.tmpId}
-          onClick={(e) => {
+          // A div, not a button: the message inside has its own buttons (voice play).
+          {...asButton((e) => {
             if (!o.error) {
               // Playing a queued voice is not a request to cancel it.
               if (e.target.closest?.('button, a, input, .wave')) return;
@@ -312,7 +313,7 @@ function Outbox({ chat, me }) {
             }
             if (confirm(`ارسال نشد: ${o.error}\nدوباره تلاش شود؟ (لغو = حذف پیام)`)) retryOutbox(o.tmpId);
             else dropFromOutbox(o.tmpId);
-          }}
+          })}
         >
           <Message m={outboxMessage(o, me)} chat={chat} mine grouped={false} onJump={() => {}} onMenu={() => {}} />
         </div>
@@ -433,8 +434,9 @@ function PinnedBar({ chat, messages, onJump }) {
 }
 
 function MessageMenu({ m, x, y, mine, canPin, canDelete, canReport, canReaders, onAction, onClose: close }) {
-  const ref = useRef(null);
-  useBackClose(true, close);
+  // Back and Escape close at once (the 450ms guard below is only for touch events), focus moves in.
+  const dialog = useDialog({ onClose: close });
+  const ref = dialog.ref;
   // Ignore the touch events that opened the menu (finger lifting, Android's own contextmenu).
   const openedAt = useRef(Date.now());
   const onClose = (e) => {
@@ -460,12 +462,17 @@ function MessageMenu({ m, x, y, mine, canPin, canDelete, canReport, canReaders, 
   }, [x, y]);
 
   const [picker, setPicker] = useState(false);
+  // The picker replaces the menu element, and the focused "more" button goes with it: put focus
+  // on the new panel so screen readers (and Tab) don't fall back to the start of the page.
+  useEffect(() => {
+    if (picker) ref.current?.focus({ preventScroll: true });
+  }, [picker]); // eslint-disable-line react-hooks/exhaustive-deps
   const deleted = m.type === 'deleted';
   if (picker) {
     return (
       <>
         <div className="menu-backdrop" onClick={onClose} />
-        <div className="menu floating picker-host" ref={ref} style={pos}>
+        <div className="menu floating picker-host" style={pos} role="dialog" aria-modal="true" aria-label="انتخاب واکنش" {...dialog}>
           <EmojiPicker onPick={(ch) => onAction('react', ch)} onClose={close} />
         </div>
       </>
@@ -474,11 +481,11 @@ function MessageMenu({ m, x, y, mine, canPin, canDelete, canReport, canReaders, 
   return (
     <>
       <div className="menu-backdrop" onClick={onClose} onContextMenu={onClose} />
-      <div className="menu floating" ref={ref} style={pos} onContextMenu={(e) => e.preventDefault()}>
+      <div className="menu floating" style={pos} onContextMenu={(e) => e.preventDefault()} role="dialog" aria-modal="true" aria-label="کارهای پیام" {...dialog}>
         {!deleted && (
           <div className="quick-reactions">
             {QUICK_REACTIONS.map((e) => (
-              <button key={e} onClick={() => onAction('react', e)} aria-label={e}>
+              <button key={e} onClick={() => onAction('react', e)} aria-label={`واکنش ${e}`}>
                 <EmojiImg ch={e} size={28} />
               </button>
             ))}

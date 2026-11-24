@@ -1,9 +1,9 @@
-// Appearance: color theme, light/dark/auto, lite mode, message text size and chat wallpaper.
+// Appearance: color theme, light/dark/auto, lite mode, less motion, message text size and chat wallpaper.
 // Stored per device (prefs); applied as attributes on <html> that tokens.css / themes.css read.
 import { getPrefs } from './util';
-import { liteEnabled, validWallpaper, validTextSize, barColor } from './appearance-rules';
+import { liteEnabled, validWallpaper, validTextSize, barColor, motionReduced } from './appearance-rules';
 
-export { LITE_MODES, TEXT_SIZES, WALLPAPERS, liteEnabled, validWallpaper, validTextSize } from './appearance-rules';
+export { LITE_MODES, MOTION_MODES, TEXT_SIZES, WALLPAPERS, liteEnabled, validWallpaper, validTextSize } from './appearance-rules';
 
 export const THEMES = [
   { id: 'indigo', name: 'نیلی', colors: ['#6366f1', '#a855f7'] },
@@ -34,6 +34,8 @@ export function applyAppearance(prefs = getPrefs()) {
   root.dataset.wall = validWallpaper(prefs.wallpaper);
   if (liteEnabled(prefs.lite || 'auto', typeof navigator !== 'undefined' ? navigator : null)) root.dataset.lite = '';
   else delete root.dataset.lite;
+  if (motionReduced(prefs.motion)) root.dataset.motion = 'reduce';
+  else delete root.dataset.motion;
   root.style.setProperty('--msg-size', `${validTextSize(prefs.textSize)}px`);
   // Browser / phone bars follow the theme. index.html has a light and a dark (media) meta for
   // the first paint; from here on both carry the chosen color, so drop the media condition.

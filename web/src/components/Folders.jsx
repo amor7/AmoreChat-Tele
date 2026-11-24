@@ -4,7 +4,7 @@ import { api } from '../api';
 import { useStore } from '../store';
 import { isChatMuted } from '../socket';
 import { Modal } from './Modals';
-import { useBackClose } from '../backnav';
+import { useDialog } from '../a11y';
 import Avatar from './Avatar';
 
 export const FOLDER_TYPES = [
@@ -46,14 +46,14 @@ export function FolderTabs({ value, onChange }) {
   const tab = (f, label) => {
     const n = unread(f);
     return (
-      <button key={f?.id || 'all'} className={(value || null) === (f?.id || null) ? 'active' : ''} onClick={() => onChange(f?.id || null)}>
+      <button key={f?.id || 'all'} className={(value || null) === (f?.id || null) ? 'active' : ''} aria-pressed={(value || null) === (f?.id || null)} onClick={() => onChange(f?.id || null)}>
         {label}
         {n > 0 && <span className="tab-badge">{n}</span>}
       </button>
     );
   };
   return (
-    <div className="folder-tabs">
+    <div className="folder-tabs" role="group" aria-label="پوشه‌ها">
       {tab(null, 'همه')}
       {folders.map((f) => tab(f, `${f.emoji ? f.emoji + ' ' : ''}${f.name}`))}
       <button className="folder-edit" aria-label="مدیریت پوشه‌ها" onClick={() => openModal('folders')}>
@@ -68,9 +68,9 @@ export function ChatMenu({ chat, x, y, onClose }) {
   const folders = useStore((s) => s.folders);
   const showToast = useStore((s) => s.showToast);
   const openModal = useStore((s) => s.openModal);
-  const ref = useRef(null);
   const openedAt = useRef(Date.now());
-  useBackClose(true, onClose);
+  const dialog = useDialog({ onClose }); // also Android Back
+  const ref = dialog.ref;
   const [pos, setPos] = useState({ left: x, top: y });
   useLayoutEffect(() => {
     const r = ref.current.getBoundingClientRect();
@@ -94,7 +94,7 @@ export function ChatMenu({ chat, x, y, onClose }) {
   return (
     <>
       <div className="menu-backdrop" onClick={close} onContextMenu={close} />
-      <div className="menu floating" ref={ref} style={pos} onContextMenu={(e) => e.preventDefault()}>
+      <div className="menu floating" style={pos} onContextMenu={(e) => e.preventDefault()} role="dialog" aria-modal="true" aria-label={`کارهای «${chat.title}»`} {...dialog}>
         <button onClick={run(async () => upsert(await api('PATCH', `/chats/${chat.id}/pin`, { pinned: !chat.pinnedAt })))}>
           {chat.pinnedAt ? <PinOff size={17} /> : <Pin size={17} />} {chat.pinnedAt ? 'برداشتن سنجاق' : 'سنجاق بالای لیست'}
         </button>

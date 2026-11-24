@@ -1,7 +1,7 @@
 /* Reduced motion and lite mode. Imported LAST in main.jsx so these rules win over every
    theme and component rule (several of the overrides rely on later order at equal specificity).
-   Reduced motion follows the OS setting; data-motion='reduce' is reserved for a future in-app
-   switch. Lite mode (data-lite, set by appearance.js) is for weak phones: blur is the most
+   Reduced motion follows the OS setting, or data-motion='reduce' from the in-app switch
+   (Appearance → حرکت‌ها, set by appearance.js). Lite mode (data-lite, set by appearance.js) is for weak phones: blur is the most
    expensive effect on old WebViews, then big shadows and animations. */
 
 /* ---------- Kill animations and transitions ---------- */

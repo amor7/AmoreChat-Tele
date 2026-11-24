@@ -62,7 +62,11 @@ export default function Auth({ invite: initialInvite }) {
               className="otp-input"
             />
           </label>
-          {error && <div className="error">{error}</div>}
+          {error && (
+            <div className="error" role="alert">
+              {error}
+            </div>
+          )}
           <button className="btn primary" disabled={busy || code.trim().length < 6}>
             {busy ? '…' : 'تأیید'}
           </button>
@@ -85,11 +89,11 @@ export default function Auth({ invite: initialInvite }) {
           </p>
         )}
         {!config.needsSetup && canRegister && (
-          <div className="tabs">
-            <button type="button" className={mode === 'login' ? 'active' : ''} onClick={() => setMode('login')}>
+          <div className="tabs" role="tablist">
+            <button type="button" role="tab" aria-selected={mode === 'login'} className={mode === 'login' ? 'active' : ''} onClick={() => setMode('login')}>
               ورود
             </button>
-            <button type="button" className={mode === 'register' ? 'active' : ''} onClick={() => setMode('register')}>
+            <button type="button" role="tab" aria-selected={mode === 'register'} className={mode === 'register' ? 'active' : ''} onClick={() => setMode('register')}>
               ثبت‌نام
             </button>
           </div>
@@ -130,7 +134,11 @@ export default function Auth({ invite: initialInvite }) {
             <input value={form.invite} onChange={set('invite')} required dir="ltr" autoCapitalize="none" />
           </label>
         )}
-        {error && <div className="error">{error}</div>}
+        {error && (
+          <div className="error" role="alert">
+            {error}
+          </div>
+        )}
         <button className="btn primary" disabled={busy}>
           {busy ? '…' : mode === 'login' ? 'ورود' : 'ساخت حساب'}
         </button>

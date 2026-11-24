@@ -1,0 +1,112 @@
+/* Keyboard focus and finger-sized targets. Imported right before motion.css: late enough to win
+   over component rules at equal specificity, early enough that lite / reduced-motion still win.
+   No :has(), no nesting: old Android WebViews must parse every rule here. */
+
+/* ---------- Focus ring ----------
+   Only for keyboard focus (:focus-visible); a tap or click shows nothing new. WebViews without
+   :focus-visible drop these rules and look exactly as before. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+/* Text fields already show focus with the accent border and soft ring (styles.css / theme.css);
+   a second outline around them would be noise. Checkboxes, radios and sliders keep the ring. */
+input:not([type='checkbox']):not([type='radio']):not([type='range']):focus-visible,
+textarea:focus-visible,
+select:focus-visible {
+  outline: none;
+}
+/* The music timeline / volume turn their outline off (features.css, higher specificity). */
+input.music-seek:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+/* Dialogs and menus take focus themselves (tabIndex=-1) when they have nothing focusable
+   to start on: a ring around the whole panel would only look like a glitch. */
+[tabindex='-1']:focus-visible {
+  outline: none;
+}
+
+/* Always in the page so screen readers announce new toasts (App.jsx); takes no space. */
+.toast-live {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 0;
+  height: 0;
+}
+
+/* ---------- Touch targets (phones and tablets only) ----------
+   At least var(--tap) for anything a finger presses. Desktop (fine pointer) is untouched. */
+@media (pointer: coarse) {
+  .icon-btn,
+  .send-btn,
+  .segmented button,
+  .tabs button,
+  .tele-add-tabs button,
+  .chip-btn,
+  .ep-tabs button {
+    min-width: var(--tap);
+    min-height: var(--tap);
+  }
+  .menu button,
+  .tele-more-menu button,
+  .tele-msg-menu button,
+  .tile-menu button {
+    min-height: var(--tap);
+  }
+  /* The whole line is the target; the padding replaces the old margin so a one-line label
+     takes about the same room. calc() below 0 clamps to 0 for long multi-line labels. */
+  label.check {
+    min-height: var(--tap);
+    margin: 0;
+    padding-top: calc((var(--tap) - 1.6em) / 2);
+    padding-bottom: calc((var(--tap) - 1.6em) / 2);
+  }
+
+  /* The quick reactions stay their size: eight of them must fit one row of the message menu,
+     and they sit edge to edge, so a bigger hit area would only steal from the neighbour. */
+
+  /* Controls that can't grow without breaking their row: same look, bigger invisible hit area.
+     - music bar: a single dense line under the header
+     - stage list: one row per speaker, already tight
+     - folder pills: a scrolling strip; growing them would make the pills tall
+     - chip "x": inside a small pill
+     - voice play button: inside the message bubble */
+  .music-bar .icon-btn,
+  .stage-list .icon-btn {
+    min-width: 0;
+    min-height: 0;
+    position: relative;
+  }
+  .music-bar .icon-btn::after,
+  .stage-list .icon-btn::after,
+  .folder-tabs button::after,
+  .chip button::after,
+  .play-btn::after {
+    content: '';
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    width: var(--tap);
+    height: var(--tap);
+    transform: translate(-50%, -50%);
+    border-radius: 50%;
+  }
+  .folder-tabs button,
+  .chip button,
+  .play-btn {
+    position: relative;
+  }
+  .folder-tabs button::after {
+    width: 100%;
+    border-radius: 0;
+  }
+  /* Room above and below the pills inside the scroller, which would clip the hit area;
+     the negative margin keeps the strip where it was. */
+  .folder-tabs {
+    padding-top: 6px;
+    margin-top: -6px;
+    padding-bottom: 6px;
+  }
+}
