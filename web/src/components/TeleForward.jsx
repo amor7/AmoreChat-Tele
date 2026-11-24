@@ -5,6 +5,7 @@ import { toFa, postBlockReason } from '../util';
 import { Modal } from './Modals';
 import Avatar from './Avatar';
 import { TeleLockScreen } from './TelePasscode';
+import { confirmDialog } from '../confirm';
 
 // Forwarding between Telegram and the app's own chats (both ways). Photos and voice go along only
 // for users an admin allowed them; otherwise the text (and the file's name) is sent.
@@ -213,7 +214,7 @@ export function TeleSessions({ onClose }) {
               </small>
             </span>
             {!s.current && (
-              <button className="btn sm danger" disabled={busy} onClick={() => confirm('این نشست بسته شود؟') && run(() => api('DELETE', `/tele/sessions/${s.id}`))}>
+              <button className="btn sm danger" disabled={busy} onClick={async () => (await confirmDialog({ title: 'این نشست پایان یابد؟', message: 'آن دستگاه از حساب تلگرام شما خارج می‌شود.', confirmLabel: 'پایان نشست', danger: true })) && run(() => api('DELETE', `/tele/sessions/${s.id}`))}>
                 بستن
               </button>
             )}
@@ -225,7 +226,7 @@ export function TeleSessions({ onClose }) {
           بستن پنجره
         </button>
         {others.length > 0 && (
-          <button className="btn danger" disabled={busy} onClick={() => confirm(`همه ${toFa(others.length)} نشست دیگر بسته شوند؟`) && run(() => api('POST', '/tele/sessions/end-others', {}))}>
+          <button className="btn danger" disabled={busy} onClick={async () => (await confirmDialog({ title: `همه‌ی ${toFa(others.length)} نشست دیگر پایان یابند؟`, message: 'آن دستگاه‌ها از حساب تلگرام شما خارج می‌شوند.', confirmLabel: 'پایان همه', danger: true })) && run(() => api('POST', '/tele/sessions/end-others', {}))}>
             بستن همه نشست‌های دیگر
           </button>
         )}

@@ -14,6 +14,11 @@ import { startCall, joinVoice } from '../rtc';
 import { isChatMuted } from '../socket';
 import { outboxMessage, retryOutbox, dropFromOutbox, voiceUrl, loadVoiceUrl, releaseVoiceUrls } from '../offline';
 import { useDialog, asButton } from '../a11y';
+import { Menu, MenuItem } from './Menu';
+import { useAnchoredPosition } from '../anchor';
+import { confirmDialog, promptDialog } from '../confirm';
+import { sendErrorText } from '../confirm-rules';
+import { EmptyState, BusyState } from './States';
 
 export default function ChatView({ chatId }) {
   const chat = useStore((s) => s.chats[chatId]);
@@ -165,14 +170,16 @@ export default function ChatView({ chatId }) {
   }
 
   if (!chat) {
-    if (publicVoice) return <div className="empty-pane">در حال ورود به کانال…</div>;
+    if (publicVoice) return <BusyState text="در حال ورود به کانال…" />;
     return (
-      <div className="empty-pane">
-        <p>این گفتگو در دسترس نیست.</p>
-        <a className="btn" href="#/">
-          بازگشت
-        </a>
-      </div>
+      <EmptyState
+        hint="این گفتگو در دسترس نیست."
+        action={
+          <a className="btn" href="#/">
+            بازگشت
+          </a>
+        }
+      />
     );
   }
 
@@ -187,9 +194,9 @@ export default function ChatView({ chatId }) {
       if (action === 'toTele') st().openModal('chatToTele', { message: m });
       if (action === 'readers') st().openModal('readers', { message: m });
       if (action === 'pin' || action === 'unpin') await api('POST', `/messages/${m.id}/pin`, { pinned: action === 'pin' });
-      if (action === 'delete' && confirm('این پیام برای همه حذف شود؟')) await api('DELETE', `/messages/${m.id}`);
+      if (action === 'delete' && (await confirmDialog({ title: 'این پیام برای همه حذف شود؟', confirmLabel: 'حذف', danger: true }))) await api('DELETE', `/messages/${m.id}`);
       if (action === 'report') {
-        const reason = prompt('دلیل گزارش این پیام (اختیاری):');
+        const reason = await promptDialog({ title: 'این پیام گزارش شود؟', message: 'گزارش برای مدیران فرستاده می‌شود.', label: 'دلیل گزارش، اختیاری', confirmLabel: 'گزارش' });
         if (reason !== null) {
           await api('POST', `/messages/${m.id}/report`, { reason });
           st().showToast('گزارش برای مدیران ارسال شد');
@@ -301,18 +308,28 @@ function Outbox({ chat, me }) {
         <div
           key={o.tmpId}
           // A div, not a button: the message inside has its own buttons (voice play).
-          {...asButton((e) => {
+          {...asButton(async (e) => {
             if (!o.error) {
               // Playing a queued voice is not a request to cancel it.
               if (e.target.closest?.('button, a, input, .wave')) return;
               // Still waiting (e.g. a voice uploading on a slow link): it can be taken back. A
               // voice upload in progress is stopped; a text already on its way may still arrive.
               const what = o.kind === 'voice' ? 'پیام صوتی' : 'پیام';
-              if (confirm(`این ${what} هنوز ارسال نشده است. ارسالش لغو و از صف حذف شود؟`)) dropFromOutbox(o.tmpId);
+              if (await confirmDialog({ title: `ارسال این ${what} لغو شود؟`, message: 'هنوز ارسال نشده است و از صف ارسال برداشته می‌شود.', confirmLabel: 'لغو ارسال', cancelLabel: 'بستن', danger: true })) dropFromOutbox(o.tmpId);
               return;
             }
-            if (confirm(`ارسال نشد: ${o.error}\nدوباره تلاش شود؟ (لغو = حذف پیام)`)) retryOutbox(o.tmpId);
-            else dropFromOutbox(o.tmpId);
+            // Three answers: send again, delete (an explicit button), or close. Closing (Escape,
+            // Back, a tap outside) leaves the message as it is: window.confirm's Cancel used to
+            // delete it, which a stray tap must never do.
+            const choice = await confirmDialog({
+              title: 'پیام ارسال نشد',
+              message: sendErrorText(o.error),
+              confirmLabel: 'ارسال دوباره',
+              cancelLabel: 'بستن',
+              extra: { label: 'حذف پیام', danger: true, value: 'delete' },
+            });
+            if (choice === true) retryOutbox(o.tmpId);
+            else if (choice === 'delete') dropFromOutbox(o.tmpId);
           })}
         >
           <Message m={outboxMessage(o, me)} chat={chat} mine grouped={false} onJump={() => {}} onMenu={() => {}} />
@@ -434,111 +451,58 @@ function PinnedBar({ chat, messages, onJump }) {
 }
 
 function MessageMenu({ m, x, y, mine, canPin, canDelete, canReport, canReaders, onAction, onClose: close }) {
-  // Back and Escape close at once (the 450ms guard below is only for touch events), focus moves in.
-  const dialog = useDialog({ onClose: close });
-  const ref = dialog.ref;
   // Ignore the touch events that opened the menu (finger lifting, Android's own contextmenu).
+  // Back and Escape close at once; the 450ms guard is only for touch events on the backdrop.
   const openedAt = useRef(Date.now());
-  const onClose = (e) => {
+  const onBackdrop = (e) => {
     e?.preventDefault?.();
     if (Date.now() - openedAt.current > 450) close();
   };
-  const [pos, setPos] = useState({ left: x, top: y });
-
-  useLayoutEffect(() => {
-    // Keep it on screen, also when it grows after opening (emoji images, the emoji picker).
-    const place = () => {
-      if (!ref.current) return;
-      const r = ref.current.getBoundingClientRect();
-      setPos({
-        left: Math.max(8, Math.min(x, window.innerWidth - r.width - 8)),
-        top: Math.max(8, Math.min(y, window.innerHeight - r.height - 8)),
-      });
-    };
-    place();
-    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(place) : null;
-    ro?.observe(ref.current);
-    return () => ro?.disconnect();
-  }, [x, y]);
-
   const [picker, setPicker] = useState(false);
-  // The picker replaces the menu element, and the focused "more" button goes with it: put focus
-  // on the new panel so screen readers (and Tab) don't fall back to the start of the page.
-  useEffect(() => {
-    if (picker) ref.current?.focus({ preventScroll: true });
-  }, [picker]); // eslint-disable-line react-hooks/exhaustive-deps
   const deleted = m.type === 'deleted';
-  if (picker) {
-    return (
-      <>
-        <div className="menu-backdrop" onClick={onClose} />
-        <div className="menu floating picker-host" style={pos} role="dialog" aria-modal="true" aria-label="انتخاب واکنش" {...dialog}>
-          <EmojiPicker onPick={(ch) => onAction('react', ch)} onClose={close} />
+  // The picker is a dialog of its own (a grid, not a list of actions); it replaces the menu.
+  if (picker) return <ReactionPicker x={x} y={y} onPick={(ch) => onAction('react', ch)} onBackdrop={onBackdrop} onClose={close} />;
+  const item = (action, icon, label, danger) => (
+    <MenuItem icon={icon} danger={danger} onClick={() => onAction(action)}>
+      {label}
+    </MenuItem>
+  );
+  return (
+    <Menu label="کارهای پیام" className="menu floating" anchor={{ x, y }} onClose={close} onBackdrop={onBackdrop} onContextMenu={(e) => e.preventDefault()}>
+      {!deleted && (
+        <div className="quick-reactions" role="group" aria-label="واکنش سریع">
+          {QUICK_REACTIONS.map((e) => (
+            <button key={e} tabIndex={-1} onClick={() => onAction('react', e)} aria-label={`واکنش ${e}`}>
+              <EmojiImg ch={e} size={28} />
+            </button>
+          ))}
+          <button className="more-reactions" tabIndex={-1} onClick={() => setPicker(true)} aria-label="ایموجی‌های بیشتر">
+            <Plus size={20} />
+          </button>
         </div>
-      </>
-    );
-  }
+      )}
+      {!deleted && item('reply', <Reply size={17} />, 'پاسخ')}
+      {!deleted && item('forward', <Forward size={17} />, 'فوروارد')}
+      {!deleted && m.type !== 'call' && item('toTele', <Send size={17} />, 'ارسال به تلگرام')}
+      {!deleted && m.text && item('copy', <Copy size={17} />, 'کپی متن')}
+      {!deleted && canReaders && item('readers', <Eye size={17} />, 'دیده‌شده توسط')}
+      {!deleted && mine && item('edit', <Pencil size={17} />, 'ویرایش')}
+      {!deleted && canPin && item(m.pinned ? 'unpin' : 'pin', m.pinned ? <PinOff size={17} /> : <Pin size={17} />, m.pinned ? 'برداشتن سنجاق' : 'سنجاق کردن')}
+      {!deleted && canReport && item('report', <Flag size={17} />, 'گزارش')}
+      {!deleted && canDelete && item('delete', <Trash2 size={17} />, 'حذف', true)}
+    </Menu>
+  );
+}
+
+// The full emoji picker, where the message menu was.
+function ReactionPicker({ x, y, onPick, onBackdrop, onClose }) {
+  const dialog = useDialog({ onClose });
+  const pos = useAnchoredPosition(dialog.ref, { x, y });
   return (
     <>
-      <div className="menu-backdrop" onClick={onClose} onContextMenu={onClose} />
-      <div className="menu floating" style={pos} onContextMenu={(e) => e.preventDefault()} role="dialog" aria-modal="true" aria-label="کارهای پیام" {...dialog}>
-        {!deleted && (
-          <div className="quick-reactions">
-            {QUICK_REACTIONS.map((e) => (
-              <button key={e} onClick={() => onAction('react', e)} aria-label={`واکنش ${e}`}>
-                <EmojiImg ch={e} size={28} />
-              </button>
-            ))}
-            <button className="more-reactions" onClick={() => setPicker(true)} aria-label="ایموجی‌های بیشتر">
-              <Plus size={20} />
-            </button>
-          </div>
-        )}
-        {!deleted && (
-          <button onClick={() => onAction('reply')}>
-            <Reply size={17} /> پاسخ
-          </button>
-        )}
-        {!deleted && (
-          <button onClick={() => onAction('forward')}>
-            <Forward size={17} /> فوروارد
-          </button>
-        )}
-        {!deleted && m.type !== 'call' && (
-          <button onClick={() => onAction('toTele')}>
-            <Send size={17} /> ارسال به تلگرام
-          </button>
-        )}
-        {!deleted && m.text && (
-          <button onClick={() => onAction('copy')}>
-            <Copy size={17} /> کپی متن
-          </button>
-        )}
-        {!deleted && canReaders && (
-          <button onClick={() => onAction('readers')}>
-            <Eye size={17} /> دیده‌شده توسط
-          </button>
-        )}
-        {!deleted && mine && (
-          <button onClick={() => onAction('edit')}>
-            <Pencil size={17} /> ویرایش
-          </button>
-        )}
-        {!deleted && canPin && (
-          <button onClick={() => onAction(m.pinned ? 'unpin' : 'pin')}>
-            {m.pinned ? <PinOff size={17} /> : <Pin size={17} />} {m.pinned ? 'برداشتن سنجاق' : 'سنجاق کردن'}
-          </button>
-        )}
-        {!deleted && canReport && (
-          <button onClick={() => onAction('report')}>
-            <Flag size={17} /> گزارش
-          </button>
-        )}
-        {!deleted && canDelete && (
-          <button className="danger" onClick={() => onAction('delete')}>
-            <Trash2 size={17} /> حذف
-          </button>
-        )}
+      <div className="menu-backdrop" onClick={onBackdrop} />
+      <div className="menu floating picker-host" style={pos} role="dialog" aria-modal="true" aria-label="انتخاب واکنش" {...dialog}>
+        <EmojiPicker onPick={onPick} onClose={onClose} />
       </div>
     </>
   );

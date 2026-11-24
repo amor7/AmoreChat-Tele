@@ -8,6 +8,7 @@ import { Modal } from './Modals';
 import Avatar from './Avatar';
 import QrCode from './QrCode';
 import { plainHttpUrl } from '../transfer';
+import { confirmDialog, isolate } from '../confirm';
 
 // ---------- "Share to AmoreChat" from the gallery or another app: pick the chat ----------
 export function ShareTarget({ files, text, onClose }) {
@@ -163,8 +164,14 @@ export function AndroidSettings() {
                   {s.name}
                 </span>
                 <small className={s.connected ? 'ok' : 'bad'}>{s.connected ? 'متصل' : s.status || '…'}</small>
-                <button className="icon-btn" aria-label="خروج کامل از این سرور" title="خروج کامل از این سرور" onClick={() => confirm(`از «${s.name}» کامل خارج شوید؟
-ورود شما، پیام‌های ذخیره‌شده روی این گوشی و اعلان‌های این سرور پاک می‌شود.`) && removeServer(s.url)}>
+                <button
+                  className="icon-btn"
+                  aria-label="خروج کامل از این سرور"
+                  title="خروج کامل از این سرور"
+                  onClick={async () =>
+                    (await confirmDialog({ title: `از «${isolate(s.name)}» کامل خارج شوید؟`, message: 'ورود شما، پیام‌های ذخیره‌شده روی این گوشی و اعلان‌های این سرور پاک می‌شود.', confirmLabel: 'خروج کامل', danger: true })) && removeServer(s.url)
+                  }
+                >
                   <Trash2 size={16} />
                 </button>
               </li>
@@ -175,7 +182,7 @@ export function AndroidSettings() {
           </button>
         </>
       ) : (
-        <button className="btn wide" onClick={() => confirm('از این سرور خارج شوید و آدرس دیگری وارد کنید؟') && changeServer()}>
+        <button className="btn wide" onClick={async () => (await confirmDialog({ title: 'از این سرور خارج شوید؟', message: 'بعد از خروج می‌توانید آدرس سرور دیگری وارد کنید.', confirmLabel: 'تغییر سرور' })) && changeServer()}>
           <Server size={17} /> تغییر سرور
         </button>
       )}

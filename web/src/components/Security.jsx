@@ -5,6 +5,7 @@ import { api } from '../api';
 import { useStore } from '../store';
 import { formatDay, formatTime, toFa, copyText } from '../util';
 import { TelePasscodeSettings } from './TelePasscode';
+import { confirmDialog } from '../confirm';
 
 const when = (t) => (Date.now() - t < 2 * 60 * 1000 ? 'همین حالا' : `${formatDay(t)} ${formatTime(t)}`);
 
@@ -28,7 +29,7 @@ function Devices() {
     }
   }
   async function revokeOthers() {
-    if (!confirm('از همهٔ دستگاه‌های دیگر خارج شوید؟')) return;
+    if (!(await confirmDialog({ title: 'از همه‌ی دستگاه‌های دیگر خارج شوید؟', message: 'روی آن دستگاه‌ها باید دوباره وارد شوید.', confirmLabel: 'خروج', danger: true }))) return;
     const { loggedOut } = await api('POST', '/me/sessions/revoke-others');
     showToast(`${toFa(loggedOut)} دستگاه خارج شد`);
     load();
@@ -58,7 +59,7 @@ function Devices() {
       </ul>
       {list.length > 1 && (
         <button className="btn danger" onClick={revokeOthers}>
-          <LogOut size={17} /> خروج از همهٔ دستگاه‌های دیگر
+          <LogOut size={17} /> خروج از همه‌ی دستگاه‌های دیگر
         </button>
       )}
     </>

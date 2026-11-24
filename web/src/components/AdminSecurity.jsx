@@ -3,12 +3,14 @@ import { api } from '../api';
 import { useStore } from '../store';
 import { toFa, formatDateTime } from '../util';
 import { ShieldAlert, Ban, BellRing } from 'lucide-react';
+import { Skeleton, ErrorState } from './States';
 
 // Failed logins per IP, banned IPs (ban / unban), and the owner's security alerts.
 export default function AdminSecurity() {
   const me = useStore((s) => s.me);
   const showToast = useStore((s) => s.showToast);
   const [data, setData] = useState(null);
+  const [error, setError] = useState('');
   const [ip, setIp] = useState('');
   const [minutes, setMinutes] = useState('');
   const [reason, setReason] = useState('');
@@ -16,12 +18,15 @@ export default function AdminSecurity() {
 
   const load = () =>
     api('GET', '/admin/security')
-      .then(setData)
-      .catch((e) => showToast(e.message));
+      .then((d) => {
+        setError('');
+        setData(d);
+      })
+      .catch((e) => (data ? showToast(e.message) : setError(e.message)));
   useEffect(() => {
     load();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  if (!data) return <p className="muted">…</p>;
+  if (!data) return error ? <ErrorState message={error} onRetry={load} /> : <Skeleton lines={4} />;
 
   const ban = async (target, extra = {}) => {
     try {

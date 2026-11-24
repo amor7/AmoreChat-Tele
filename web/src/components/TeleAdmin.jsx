@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react';
 import { api } from '../api';
 import { useStore } from '../store';
-import { toFa, faDigits, formatDateTime } from '../util';
+import { toFa, faDigits, formatDateTime, copyText } from '../util';
+import { confirmDialog, copyDialog } from '../confirm';
 import TeleAddProxy from './TeleProxyForm';
 import { QrButton } from './QrCode';
 import { RefreshCw, Trash2, Activity, Power, BellRing, BarChart3, Copy, UserCheck, FileDown, LineChart, Plus, CircleCheck, Circle, TriangleAlert, ChevronLeft } from 'lucide-react';
+import { Skeleton, ErrorState } from './States';
 
 // Sub-pages of the Telegram and VPN tabs, so each shows one thing at a time.
 function Segments({ items, value, onChange }) {
@@ -22,20 +24,24 @@ function Segments({ items, value, onChange }) {
 export default function VpnAdmin() {
   const showToast = useStore((s) => s.showToast);
   const [data, setData] = useState(null);
+  const [error, setError] = useState('');
   const [probing, setProbing] = useState(null); // proxy id, or 'all'
   const [page, setPage] = useState('proxies');
   const [adding, setAdding] = useState(false);
 
   const load = () =>
     api('GET', '/admin/tele/proxies')
-      .then(setData)
-      .catch((e) => showToast(e.message));
+      .then((d) => {
+        setError('');
+        setData(d);
+      })
+      .catch((e) => (data ? showToast(e.message) : setError(e.message)));
 
   useEffect(() => {
     load();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (!data) return <p className="muted">…</p>;
+  if (!data) return error ? <ErrorState message={error} onRetry={load} /> : <Skeleton lines={4} />;
 
   const policy = data.policy || {};
   const proxies = data.proxies || [];
@@ -65,7 +71,7 @@ export default function VpnAdmin() {
   };
 
   const remove = async (id) => {
-    if (!confirm('حذف شود؟')) return;
+    if (!(await confirmDialog({ title: 'این پروکسی حذف شود؟', confirmLabel: 'حذف', danger: true }))) return;
     try {
       await api('DELETE', `/admin/tele/proxies/${id}`);
       await load();
@@ -342,7 +348,7 @@ function TeleOverview({ go, onVpn }) {
     const quiet = (url) => api('GET', url).catch(() => null);
     Promise.all([quiet('/admin/tele/accounts'), quiet('/admin/tele/proxies'), me.role === 'owner' ? quiet('/admin/tele/mirrors') : null]).then(([accounts, net, mirrors]) => setD({ accounts, net, mirrors }));
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  if (!d) return <p className="muted">…</p>;
+  if (!d) return <Skeleton lines={4} />;
 
   const users = d.accounts?.accounts || [];
   const proxies = d.net?.proxies || [];
@@ -867,11 +873,8 @@ function TeleMirrors() {
     }
     setBusy(false);
   };
-  const copy = (text) =>
-    navigator.clipboard?.writeText(text).then(
-      () => showToast('لینک کپی شد'),
-      () => prompt('لینک دعوت:', text),
-    ) ?? prompt('لینک دعوت:', text);
+  // No clipboard at all (plain http, old WebView): show the link to copy by hand.
+  const copy = async (text) => ((await copyText(text)) ? showToast('لینک کپی شد') : copyDialog({ title: 'لینک دعوت', value: text }));
   const used = new Set(data.mirrors.map((m) => m.tgChatId));
   const free = (channels || []).filter((c) => !used.has(c.tgChatId));
   const addForm = (
@@ -991,7 +994,7 @@ function TeleMirrors() {
                           <Copy size={14} /> کپی
                         </button>
                         <QrButton value={inviteLink(m.inviteCode)} title="کد QR لینک دعوت" />
-                        <button type="button" className="btn sm" disabled={busy} onClick={() => confirm('لینک تازه ساخته شود؟ لینک قبلی دیگر کار نمی‌کند (کسانی که عضو شده‌اند می‌مانند).') && act(() => api('POST', `/admin/tele/mirrors/${m.id}/invite`), 'لینک تازه ساخته شد')}>
+                        <button type="button" className="btn sm" disabled={busy} onClick={async () => (await confirmDialog({ title: 'لینک دعوت جدید ساخته شود؟', message: 'لینک قبلی دیگر کار نمی‌کند. کسانی که عضو شده‌اند می‌مانند.', confirmLabel: 'ساخت لینک جدید' })) && act(() => api('POST', `/admin/tele/mirrors/${m.id}/invite`), 'لینک تازه ساخته شد')}>
                           لینک تازه
                         </button>
                       </span>
@@ -1008,7 +1011,7 @@ function TeleMirrors() {
                       <button className="btn sm" disabled={busy} onClick={() => act(() => api('PATCH', `/admin/tele/mirrors/${m.id}`, { enabled: !m.enabled }))}>
                         {m.enabled ? 'توقف' : 'ادامه'}
                       </button>
-                      <button className="btn sm danger" disabled={busy} onClick={() => confirm('انتشار این کانال متوقف و حذف شود؟ (کانال برنامه و پست‌هایش می‌مانند)') && act(() => api('DELETE', `/admin/tele/mirrors/${m.id}`))}>
+                      <button className="btn sm danger" disabled={busy} onClick={async () => (await confirmDialog({ title: 'انتشار این کانال متوقف و حذف شود؟', message: 'کانال برنامه و پست‌هایش می‌مانند.', confirmLabel: 'حذف', danger: true })) && act(() => api('DELETE', `/admin/tele/mirrors/${m.id}`))}>
                         <Trash2 size={14} /> حذف انتشار
                       </button>
                     </div>

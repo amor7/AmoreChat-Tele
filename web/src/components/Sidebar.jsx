@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { FolderTabs, ChatMenu, inFolder, sortChats } from './Folders';
-import { useDialog } from '../a11y';
+import { Menu as PopMenu, MenuItem } from './Menu';
+import { EmptyState } from './States';
+import { cancelAllDialogs } from '../confirm';
 import { MessageResults, openMessage } from './Modals';
 import { VoiceChannels } from './Voice';
 import { RichText } from './Emoji';
@@ -113,6 +115,7 @@ export default function Sidebar() {
   const isAdmin = me.role === 'owner' || me.role === 'admin';
 
   async function logout() {
+    cancelAllDialogs();
     await api('POST', '/auth/logout').catch(() => {});
     await wipeLocal();
     disconnectSocket();
@@ -120,48 +123,45 @@ export default function Sidebar() {
     location.reload();
   }
 
-  const menuDialog = useDialog({ onClose: () => setMenu(false), open: menu });
-
-  const item = (label, action) => (
-    <button
+  const closeMenu = () => setMenu(false);
+  const item = (icon, label, action) => (
+    <MenuItem
+      icon={icon}
       onClick={() => {
         setMenu(false);
         action();
       }}
     >
       {label}
-    </button>
+    </MenuItem>
   );
 
   return (
     <aside className="sidebar">
       <header className="sidebar-head">
-        <button className="icon-btn menu-btn" aria-label="منو" aria-expanded={menu} onClick={() => setMenu(!menu)}>
+        <button className="icon-btn menu-btn" aria-label="منو" aria-haspopup="menu" aria-expanded={menu} onClick={() => setMenu(!menu)}>
           <Menu size={22} />
           {otherUnread && <i className="menu-dot" />}
         </button>
         <input className="search" placeholder="جستجو" value={query} onChange={(e) => setQuery(e.target.value)} />
         {menu && (
-          <>
-            <div className="menu-backdrop" onClick={() => setMenu(false)} />
-            <div className="menu" role="dialog" aria-modal="true" aria-label="منو" {...menuDialog}>
-              <div className="menu-user">
-                <Avatar id={me.id} name={me.displayName} file={me.avatar} size={40} />
-                <div>
-                  <b>{me.displayName}</b>
-                  <small dir="ltr">@{me.username}</small>
-                </div>
+          <PopMenu label="منو" onClose={closeMenu}>
+            <div className="menu-user">
+              <Avatar id={me.id} name={me.displayName} file={me.avatar} size={40} />
+              <div>
+                <b>{me.displayName}</b>
+                <small dir="ltr">@{me.username}</small>
               </div>
-              {multiServer && <ServerSwitcher onPick={() => setMenu(false)} />}
-              {item(<><UserRound size={18} /> پروفایل و تنظیمات</>, () => openModal('profile'))}
-              {item(<><Cable size={18} /> تلگرام</>, () => (location.hash = '#/tele'))}
-              {item(<><SquarePen size={18} /> گفتگوی جدید</>, () => openModal('newChat'))}
-              {item(<><Compass size={18} /> کاوش گروه‌ها و کانال‌ها</>, () => openModal('discover'))}
-              {item(<><FolderPlus size={18} /> پوشه‌های گفتگو</>, () => openModal('folders'))}
-              {isAdmin && hasAnyAdminPerm(me) && item(<><Shield size={18} /> پنل مدیریت</>, () => openModal('admin'))}
-              {item(<><LogOut size={18} /> خروج</>, logout)}
             </div>
-          </>
+            {multiServer && <ServerSwitcher onPick={closeMenu} />}
+            {item(<UserRound size={18} />, 'پروفایل و تنظیمات', () => openModal('profile'))}
+            {item(<Cable size={18} />, 'تلگرام', () => (location.hash = '#/tele'))}
+            {item(<SquarePen size={18} />, 'گفتگوی جدید', () => openModal('newChat'))}
+            {item(<Compass size={18} />, 'کاوش گروه‌ها و کانال‌ها', () => openModal('discover'))}
+            {item(<FolderPlus size={18} />, 'پوشه‌های گفتگو', () => openModal('folders'))}
+            {isAdmin && hasAnyAdminPerm(me) && item(<Shield size={18} />, 'پنل مدیریت', () => openModal('admin'))}
+            {item(<LogOut size={18} />, 'خروج', logout)}
+          </PopMenu>
         )}
       </header>
       <div className="site-name">
@@ -214,7 +214,26 @@ export default function Sidebar() {
             </li>
           );
         })}
-        {!list.length && !found?.length && <li className="muted center pad">گفتگویی پیدا نشد</li>}
+        {!list.length && !found?.length && (
+          <li>
+            {query ? (
+              <EmptyState compact hint="گفتگویی پیدا نشد" />
+            ) : folder ? (
+              <EmptyState compact title="این پوشه خالی است" hint="از منوی هر گفتگو (نگه‌داشتن یا کلیک راست) می‌توانید آن را به این پوشه اضافه کنید." />
+            ) : (
+              <EmptyState
+                compact
+                title="هنوز گفتگویی ندارید"
+                hint="با یک نفر گفتگو کنید یا به گروه و کانالی بپیوندید."
+                action={
+                  <button className="btn sm primary" onClick={() => openModal('newChat')}>
+                    <SquarePen size={16} /> گفتگوی جدید
+                  </button>
+                }
+              />
+            )}
+          </li>
+        )}
         {found?.length > 0 && (
           <li>
             <div className="list-section">پیام‌ها</div>
@@ -236,9 +255,9 @@ function ServerSwitcher({ onPick }) {
   useStore((s) => s.nativeTick);
   const servers = appServers();
   return (
-    <div className="server-switcher">
+    <div className="server-switcher" role="group" aria-label="سرورها">
       {servers.map((s) => (
-        <button
+        <MenuItem
           key={s.url}
           className={s.current ? 'current' : ''}
           onClick={() => {
@@ -252,16 +271,17 @@ function ServerSwitcher({ onPick }) {
           </span>
           {!s.current && s.unread > 0 && <span className="badge">{s.unread}</span>}
           {s.current && <span className="tag">فعلی</span>}
-        </button>
+        </MenuItem>
       ))}
-      <button
+      <MenuItem
+        icon={<Plus size={17} />}
         onClick={() => {
           onPick();
           addServer();
         }}
       >
-        <Plus size={17} /> افزودن سرور دیگر
-      </button>
+        افزودن سرور دیگر
+      </MenuItem>
     </div>
   );
 }

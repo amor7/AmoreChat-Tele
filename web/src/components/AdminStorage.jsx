@@ -4,6 +4,8 @@ import { api } from '../api';
 import { formatSize, formatDateTime, toFa } from '../util';
 import { useLoad } from './AdminPanelsA1';
 import { HardDrive, Trash2, X } from 'lucide-react';
+import { confirmDialog, promptDialog } from '../confirm';
+import { Skeleton, ErrorState } from './States';
 
 const LABELS = { image: 'عکس', video: 'ویدیو', music: 'موزیک', voice: 'پیام صوتی', app: 'برنامه', archive: 'فشرده', document: 'سند', other: 'متفرقه' };
 const CHAT_LABELS = { dm: 'گفتگوی خصوصی', saved: 'پیام‌های ذخیره‌شده' };
@@ -50,7 +52,7 @@ export default function AdminStorage({ start }) {
   const [more, setMore] = useState(false);
   const [ticked, setTicked] = useState([]);
   const [busy, setBusy] = useState(false);
-  const [s, reload] = useLoad(`/admin/storage?${queryOf(filter)}`);
+  const [s, reload, error] = useLoad(`/admin/storage?${queryOf(filter)}`);
 
   const page = async (offset) => {
     try {
@@ -92,12 +94,20 @@ export default function AdminStorage({ start }) {
     refresh();
   };
 
-  const removeShown = (f, count, size) => {
-    const password = prompt(`${toFa(count)} فایل (${formatSize(size)}) برای همیشه از سرور حذف می‌شوند و در چت‌ها «حذف شده» نشان داده می‌شوند.\nبرای تأیید رمز عبور خود را بنویسید:`);
+  const removeShown = async (f, count, size) => {
+    const password = await promptDialog({
+      title: `${toFa(count)} فایل به حجم ${formatSize(size)} برای همیشه حذف شود؟`,
+      message: 'از سرور پاک می‌شوند و در چت‌ها «حذف شده» نشان داده می‌شوند.',
+      label: 'رمز عبور خودتان',
+      type: 'password',
+      confirmLabel: 'حذف',
+      required: true,
+      danger: true,
+    });
     if (password) remove({ filter: f, password });
   };
 
-  if (!s) return <p className="muted">…</p>;
+  if (!s) return error ? <ErrorState message={error} onRetry={reload} /> : <Skeleton lines={4} />;
   const filtered = Object.keys(filterOf(filter)).length > 0;
   const cards = [
     ['دیسک آزاد', s.disk ? `${formatSize(s.disk.free)} از ${formatSize(s.disk.total)}` : '—'],
@@ -131,7 +141,7 @@ export default function AdminStorage({ start }) {
             disabled={busy}
             title="بعد از حذف پیام و فایل زیاد، فضای خالی دیتابیس را به دیسک برمی‌گرداند"
             onClick={async () => {
-              if (!confirm('تا پایان فشرده‌سازی (روی دیتابیس بزرگ چند دقیقه) برنامه برای همه جواب نمی‌دهد. ادامه؟')) return;
+              if (!(await confirmDialog({ title: 'دیتابیس فشرده شود؟', message: 'تا پایان فشرده‌سازی، که روی دیتابیس بزرگ چند دقیقه طول می‌کشد، برنامه برای همه جواب نمی‌دهد.', confirmLabel: 'فشرده‌سازی' }))) return;
               setBusy(true);
               try {
                 const r = await api('POST', '/admin/storage/compact', {}, { timeout: 10 * 60000 });
@@ -220,7 +230,7 @@ export default function AdminStorage({ start }) {
 
       <div className="storage-actions">
         {ticked.length > 0 && (
-          <button className="btn sm danger" disabled={busy} onClick={() => confirm(`${toFa(ticked.length)} فایل برای همیشه حذف شود؟`) && remove({ ids: ticked })}>
+          <button className="btn sm danger" disabled={busy} onClick={async () => (await confirmDialog({ title: `${toFa(ticked.length)} فایل برای همیشه حذف شود؟`, confirmLabel: 'حذف', danger: true })) && remove({ ids: ticked })}>
             <Trash2 size={15} /> حذف انتخاب‌شده‌ها ({toFa(ticked.length)})
           </button>
         )}

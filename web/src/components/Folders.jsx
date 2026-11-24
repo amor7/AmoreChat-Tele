@@ -1,10 +1,11 @@
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { Pin, PinOff, Bell, BellOff, CheckCheck, FolderPlus, Settings2, Trash2, ArrowUp, ArrowDown, Plus, Check } from 'lucide-react';
 import { api } from '../api';
 import { useStore } from '../store';
 import { isChatMuted } from '../socket';
 import { Modal } from './Modals';
-import { useDialog } from '../a11y';
+import { Menu, MenuItem } from './Menu';
+import { confirmDialog, isolate } from '../confirm';
 import Avatar from './Avatar';
 
 export const FOLDER_TYPES = [
@@ -69,14 +70,8 @@ export function ChatMenu({ chat, x, y, onClose }) {
   const showToast = useStore((s) => s.showToast);
   const openModal = useStore((s) => s.openModal);
   const openedAt = useRef(Date.now());
-  const dialog = useDialog({ onClose }); // also Android Back
-  const ref = dialog.ref;
-  const [pos, setPos] = useState({ left: x, top: y });
-  useLayoutEffect(() => {
-    const r = ref.current.getBoundingClientRect();
-    setPos({ left: Math.max(8, Math.min(x, innerWidth - r.width - 8)), top: Math.max(8, Math.min(y, innerHeight - r.height - 8)) });
-  }, [x, y]);
-  const close = (e) => {
+  // A backdrop tap right after the long-press is the finger lifting, not "close".
+  const onBackdrop = (e) => {
     e?.preventDefault?.();
     if (Date.now() - openedAt.current > 450) onClose();
   };
@@ -92,43 +87,42 @@ export function ChatMenu({ chat, x, y, onClose }) {
   const muted = isChatMuted(chat);
 
   return (
-    <>
-      <div className="menu-backdrop" onClick={close} onContextMenu={close} />
-      <div className="menu floating" style={pos} onContextMenu={(e) => e.preventDefault()} role="dialog" aria-modal="true" aria-label={`کارهای «${chat.title}»`} {...dialog}>
-        <button onClick={run(async () => upsert(await api('PATCH', `/chats/${chat.id}/pin`, { pinned: !chat.pinnedAt })))}>
-          {chat.pinnedAt ? <PinOff size={17} /> : <Pin size={17} />} {chat.pinnedAt ? 'برداشتن سنجاق' : 'سنجاق بالای لیست'}
-        </button>
-        {chat.type !== 'saved' && (
-          <button
-            onClick={run(async () => {
-              const r = await api('PATCH', `/chats/${chat.id}/notify`, { mutedUntil: muted ? null : -1 });
-              useStore.getState().upsertChat({ ...chat, notifyMutedUntil: r.notifyMutedUntil });
-            })}
+    <Menu label={`کارهای «${chat.title}»`} className="menu floating" anchor={{ x, y }} onClose={onClose} onBackdrop={onBackdrop} onContextMenu={(e) => e.preventDefault()}>
+      <MenuItem icon={chat.pinnedAt ? <PinOff size={17} /> : <Pin size={17} />} onClick={run(async () => upsert(await api('PATCH', `/chats/${chat.id}/pin`, { pinned: !chat.pinnedAt })))}>
+        {chat.pinnedAt ? 'برداشتن سنجاق' : 'سنجاق بالای لیست'}
+      </MenuItem>
+      {chat.type !== 'saved' && (
+        <MenuItem
+          icon={muted ? <Bell size={17} /> : <BellOff size={17} />}
+          onClick={run(async () => {
+            const r = await api('PATCH', `/chats/${chat.id}/notify`, { mutedUntil: muted ? null : -1 });
+            useStore.getState().upsertChat({ ...chat, notifyMutedUntil: r.notifyMutedUntil });
+          })}
+        >
+          {muted ? 'روشن کردن اعلان' : 'بی‌صدا'}
+        </MenuItem>
+      )}
+      {chat.unread > 0 && (
+        <MenuItem icon={<CheckCheck size={17} />} onClick={run(async () => upsert(await api('POST', `/chats/${chat.id}/read-all`)))}>
+          خوانده شد
+        </MenuItem>
+      )}
+      {folders.map((f) => {
+        const inside = f.chatIds.includes(chat.id);
+        return (
+          <MenuItem
+            key={f.id}
+            icon={inside ? <Check size={17} /> : <FolderPlus size={17} />}
+            onClick={run(() => api('PATCH', `/folders/${f.id}`, { chatIds: inside ? f.chatIds.filter((id) => id !== chat.id) : [...f.chatIds, chat.id] }))}
           >
-            {muted ? <Bell size={17} /> : <BellOff size={17} />} {muted ? 'روشن کردن اعلان' : 'بی‌صدا'}
-          </button>
-        )}
-        {chat.unread > 0 && (
-          <button onClick={run(async () => upsert(await api('POST', `/chats/${chat.id}/read-all`)))}>
-            <CheckCheck size={17} /> خوانده شد
-          </button>
-        )}
-        {folders.map((f) => {
-          const inside = f.chatIds.includes(chat.id);
-          return (
-            <button
-              key={f.id}
-              onClick={run(() => api('PATCH', `/folders/${f.id}`, { chatIds: inside ? f.chatIds.filter((id) => id !== chat.id) : [...f.chatIds, chat.id] }))}
-            >
-              {inside ? <Check size={17} /> : <FolderPlus size={17} />} {inside ? 'در پوشه' : 'افزودن به'} «{f.name}»
-            </button>
-          );
-        })}
-        <button onClick={run(() => openModal('folderEdit', { folder: null, chatIds: [chat.id] }))}>
-          <Plus size={17} /> پوشه جدید با این گفتگو
-        </button>
-      </div>
-    </>
+            {inside ? 'در پوشه' : 'افزودن به'} «{f.name}»
+          </MenuItem>
+        );
+      })}
+      <MenuItem icon={<Plus size={17} />} onClick={run(() => openModal('folderEdit', { folder: null, chatIds: [chat.id] }))}>
+        پوشه جدید با این گفتگو
+      </MenuItem>
+    </Menu>
   );
 }
 
@@ -195,7 +189,7 @@ export function FolderEditor({ folder, chatIds: initialChats = [], onClose }) {
     }
   }
   async function remove() {
-    if (!confirm(`پوشه «${folder.name}» حذف شود؟ (گفتگوها حذف نمی‌شوند)`)) return;
+    if (!(await confirmDialog({ title: `پوشه‌ی «${isolate(folder.name)}» حذف شود؟`, message: 'گفتگوها حذف نمی‌شوند.', confirmLabel: 'حذف', danger: true }))) return;
     await api('DELETE', `/folders/${folder.id}`).catch((e) => showToast(e.message));
     await useStore.getState().loadFolders();
     onClose();

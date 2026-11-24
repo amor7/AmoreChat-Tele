@@ -71,3 +71,21 @@ export function isKeyboardNavKey(key) {
   if (typeof key !== 'string') return false;
   return key === 'Tab' || key === 'Enter' || key === ' ' || key.startsWith('Arrow');
 }
+
+// What arrow keys reach inside a role="menu": its items, plus plain buttons in a role="group"
+// row of the menu (the message menu's quick reactions). Disabled buttons can't take focus.
+export const MENU_ITEMS = ['[role="menuitem"]:not([disabled])', '[role="group"] button:not([disabled])'].join(', ');
+
+// Where a key moves focus in a vertical menu of `count` items when `index` has focus (-1 = the
+// menu itself or outside). Down/Up step and wrap; Home/End jump to the ends. Up and down mean
+// the same in RTL, so left/right are not used. null = not a menu key; -1 = nothing to focus.
+export function nextMenuIndex(count, index, key) {
+  const down = key === 'ArrowDown' || key === 'Down';
+  const up = key === 'ArrowUp' || key === 'Up';
+  if (!down && !up && key !== 'Home' && key !== 'End') return null;
+  if (!(count > 0)) return -1;
+  if (key === 'Home') return 0;
+  if (key === 'End') return count - 1;
+  if (!(index >= 0 && index < count)) return down ? 0 : count - 1;
+  return (index + (down ? 1 : -1) + count) % count;
+}

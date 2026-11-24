@@ -50,6 +50,10 @@
 - [جزئی · v1.0.43] `TeleForgot` در `TelePasscode.jsx` با Back بسته نمی‌شود؛ منوهای `.tele-more-menu`/`.tele-msg-menu` Escape ندارند؛ `pipProps` در CallView کیبورد ندارد.
 - [جزئی · v1.0.43] تست DOM برای `useDialog` (Escape دولایه، wrap Tab، بازگرداندن focus) نیست؛ پیشنهاد: گام کوچک در `ui-e2e.mjs`.
 
+- [جزئی · v1.0.44] `parseAnswer` در `web/src/api.js` (آپلودها) 401 را به `SIGNED_OUT_EVENT` نمی‌رساند (url ندارد).
+- [جزئی · v1.0.44] e2e برای «تأیید و بلافاصله navigate» (`whenHistorySettled` در `confirm.js` به ترتیب flush افکت‌های React تکیه دارد)؛ اسکلتون با `background-position` روی WebView ضعیف repaint می‌کند (در حالت سبک خاموش).
+- [جزئی · v1.0.44] Modal دیگر prop تازه نگیرد؛ Lightbox/sheet مرحله‌ی ۴ مستقیم روی `useDialog`/`useLayer` (architect).
+
 ## ایده‌ها
 - [کم] UI تلگرام با polling کار می‌کند (هر 5/10/60 ثانیه) در حالی که Socket.IO هست؛ در مقیاس <۵۰ کاربر اولویت پایین، ولی روی نت کند push مصرف داده را کم می‌کند.
   - همراهش: اعلان پیام تلگرام برای چت‌های «مهم» (الان در `server/src/tele/` هیچ notify/push نیست). با `TELE_IDLE_MINUTES` و `assertQuota` در تنش است؛ اول طراحی و تصمیم درباره‌ی بودجه‌ی ترافیک VPN.

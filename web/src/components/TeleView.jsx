@@ -6,6 +6,9 @@ import Avatar from './Avatar';
 import { loadDraft } from '../drafts';
 import { useDrafts, useDraftSaver, draftPreview } from '../useDrafts';
 import { TeleLockScreen, useTeleLockEvent } from './TelePasscode';
+import { Menu, MenuItem } from './Menu';
+import { EmptyState, ErrorState, SkeletonList, BusyState } from './States';
+import { confirmDialog, isolate } from '../confirm';
 import { ArrowRight, Check, LogOut, Megaphone, Plus, RefreshCw, Search, SendHorizontal, Users, X, CircleMinus, Reply, ImagePlus, Mic, Play, Forward, Trash2, ShieldCheck, Paperclip, FileText, Film, Download, UserPlus, Lock, MessageSquare, DoorOpen, MoreVertical, Send, TriangleAlert } from 'lucide-react';
 
 // Telegram, in the same look as the app's own chats: chat list on the side, the open chat beside it.
@@ -39,11 +42,22 @@ export default function TeleView({ dialogId }) {
   const showToast = useStore((s) => s.showToast);
   const drafts = useDrafts(useStore((s) => s.me?.id || 0), 'tele');
 
+  const [loadError, setLoadError] = useState('');
+  const hasStatus = useRef(false);
   // poll: an automatic check (see POLL). A TELE_LOCKED (423) is no error to show: the lock screen takes over.
   const load = (poll = false) =>
     api('GET', '/tele/status', undefined, poll ? POLL : undefined)
-      .then(setStatus)
-      .catch((e) => e.status !== TELE_LOCKED && showToast(e.message));
+      .then((s) => {
+        hasStatus.current = true;
+        setLoadError('');
+        setStatus(s);
+      })
+      .catch((e) => {
+        if (e.status === TELE_LOCKED) return;
+        // Nothing on screen yet: say so in the list, with a retry, instead of loading forever.
+        if (!hasStatus.current && !poll) setLoadError(e.message);
+        else showToast(e.message);
+      });
   // Passcode lock: whatever request heard it, drop everything shown (dialogs here; the open chat's
   // messages and its polls go with TeleChat, which is no longer rendered).
   useTeleLockEvent(
@@ -144,7 +158,7 @@ export default function TeleView({ dialogId }) {
   };
 
   const logout = async () => {
-    if (!confirm('اتصال حساب تلگرام قطع شود؟')) return;
+    if (!(await confirmDialog({ title: 'اتصال حساب تلگرام قطع شود؟', confirmLabel: 'قطع اتصال', danger: true }))) return;
     try {
       await api('POST', '/tele/disconnect');
       location.hash = '#/tele';
@@ -183,15 +197,15 @@ export default function TeleView({ dialogId }) {
                 <Plus size={21} />
               </button>
               <TeleMore>
-                <button role="menuitem" disabled={syncing} onClick={() => syncList()}>
-                  <RefreshCw size={17} /> به‌روزرسانی فهرست
-                </button>
-                <button role="menuitem" aria-label="نشست‌های فعال تلگرام" onClick={() => useStore.getState().openModal('teleSessions')}>
-                  <ShieldCheck size={17} /> دستگاه‌های فعال تلگرام
-                </button>
-                <button role="menuitem" className="danger" onClick={logout}>
-                  <LogOut size={17} /> خروج از حساب تلگرام
-                </button>
+                <MenuItem icon={<RefreshCw size={17} />} disabled={syncing} onClick={() => syncList()}>
+                  به‌روزرسانی فهرست
+                </MenuItem>
+                <MenuItem icon={<ShieldCheck size={17} />} aria-label="نشست‌های فعال تلگرام" onClick={() => useStore.getState().openModal('teleSessions')}>
+                  دستگاه‌های فعال تلگرام
+                </MenuItem>
+                <MenuItem icon={<LogOut size={17} />} danger onClick={logout}>
+                  خروج از حساب تلگرام
+                </MenuItem>
               </TeleMore>
             </>
           )}
@@ -233,7 +247,7 @@ export default function TeleView({ dialogId }) {
           </div>
         )}
         <ul className="chat-list">
-          {!status && <li className="muted center pad">در حال بارگذاری…</li>}
+          {!status && <li>{loadError ? <ErrorState message={loadError} onRetry={() => load()} /> : <SkeletonList rows={6} avatar />}</li>}
           {status?.access === false && <li className="muted center pad">دسترسی شما به تلگرام بسته است.</li>}
           {/* On phones only this column is visible until a chat is open, so the login lives here. */}
           {status && status.access !== false && !connected && (phone ? <li><TeleLogin status={status} reload={load} /></li> : <li className="muted center pad">بعد از اتصال، گفتگوهای شما اینجا می‌آیند.</li>)}
@@ -255,13 +269,13 @@ export default function TeleView({ dialogId }) {
               ),
             )}
           {connected && !list.length && (
-            <li className="muted center pad">
-              {picking ? (
-                syncing ? 'در حال دریافت گفتگوها از تلگرام…' : 'گفتگویی پیدا نشد'
-              ) : mine.length ? (
-                'گفتگویی پیدا نشد'
+            <li>
+              {picking && syncing ? (
+                <BusyState compact text="در حال دریافت گفتگوها از تلگرام…" />
+              ) : picking || mine.length ? (
+                <EmptyState compact hint="گفتگویی پیدا نشد" />
               ) : (
-                'هنوز گفتگویی انتخاب نکرده‌اید.'
+                <EmptyState compact title="هنوز گفتگویی انتخاب نکرده‌اید" hint="با دکمه‌ی «+» بالای این فهرست گفتگوهای تلگرامتان را اضافه کنید." />
               )}
             </li>
           )}
@@ -269,35 +283,40 @@ export default function TeleView({ dialogId }) {
       </aside>
       <main className="chat-pane">
         {!status ? null : status.access === false ? (
-          <div className="empty-pane">
-            <Lock size={64} className="muted" />
-            <h2>تلگرام</h2>
-            <p>دسترسی شما به بخش تلگرام را مدیر بسته است. اگر فکر می‌کنید اشتباه شده، به مدیر خبر دهید.</p>
-          </div>
+          <EmptyState
+            icon={<Lock size={64} className="muted" />}
+            title="تلگرام"
+            hint="دسترسی شما به بخش تلگرام را مدیر بسته است. اگر فکر می‌کنید اشتباه شده، به مدیر خبر دهید."
+          />
         ) : !connected ? (
           <TeleLogin status={status} reload={load} />
         ) : active ? (
           <TeleChat key={active.id} dialog={active} onChanged={load} onRemove={() => remove(active)} allowMedia={!!account?.allowMedia} allowVoice={!!account?.allowVoice} allowFiles={!!account?.allowFiles} allowExplore={!!account?.allowExplore} mediaMaxMb={status?.mediaMaxMb || 5} fileMaxMb={status?.fileMaxMb || 20} />
+        ) : mine.length ? (
+          <EmptyState
+            icon={
+              <span className="tele-logo">
+                <Send size={34} />
+              </span>
+            }
+            title="یک گفتگو را انتخاب کنید"
+            hint="گفتگوی تازه می‌خواهید؟ با دکمه + از فهرست تلگرامتان اضافه کنید."
+          />
         ) : (
-          <div className="empty-pane">
-            <span className="tele-logo">
-              <Send size={34} />
-            </span>
-            {mine.length ? (
-              <>
-                <h2>یک گفتگو را انتخاب کنید</h2>
-                <p>گفتگوی تازه می‌خواهید؟ با دکمه + از فهرست تلگرامتان اضافه کنید.</p>
-              </>
-            ) : (
-              <>
-                <h2>گفتگوهایتان را انتخاب کنید</h2>
-                <p>فقط گفتگوهایی که انتخاب می‌کنید به‌روز می‌مانند تا اینترنت کمتری مصرف شود.</p>
-                <button className="btn primary" onClick={startPicking}>
-                  <Plus size={16} /> انتخاب گفتگو
-                </button>
-              </>
-            )}
-          </div>
+          <EmptyState
+            icon={
+              <span className="tele-logo">
+                <Send size={34} />
+              </span>
+            }
+            title="گفتگوهایتان را انتخاب کنید"
+            hint="فقط گفتگوهایی که انتخاب می‌کنید به‌روز می‌مانند تا اینترنت کمتری مصرف شود."
+            action={
+              <button className="btn primary" onClick={startPicking}>
+                <Plus size={16} /> انتخاب گفتگو
+              </button>
+            }
+          />
         )}
       </main>
     </>
@@ -451,13 +470,14 @@ function TeleMore({ children }) {
   }, [open]);
   return (
     <span className="tele-more">
-      <button className="icon-btn" aria-label="بیشتر" aria-expanded={open} title="بیشتر" onClick={() => setOpen(!open)}>
+      <button className="icon-btn" aria-label="بیشتر" aria-haspopup="menu" aria-expanded={open} title="بیشتر" onClick={() => setOpen(!open)}>
         <MoreVertical size={20} />
       </button>
+      {/* No backdrop: the document listener above closes it on any tap and lets the tap through. */}
       {open && (
-        <div className="tele-more-menu" role="menu">
+        <Menu label="بیشتر" className="tele-more-menu" backdrop={false} onClose={() => setOpen(false)}>
           {children}
-        </div>
+        </Menu>
       )}
     </span>
   );
@@ -878,16 +898,19 @@ function TeleChat({ dialog, onChanged, onRemove, allowMedia, allowVoice, allowFi
             {(dialog.selected || (allowExplore && dialog.kind !== 'private')) && (
               <TeleMore>
                 {dialog.selected && (
-                  <button role="menuitem" onClick={() => confirm(`«${dialog.title || 'این گفتگو'}» از فهرست شما حذف شود؟ در تلگرام چیزی پاک نمی‌شود.`) && onRemove()}>
-                    <CircleMinus size={17} /> حذف از گفتگوهای من
-                  </button>
+                  <MenuItem
+                    icon={<CircleMinus size={17} />}
+                    onClick={async () => (await confirmDialog({ title: `${dialog.title ? `«${isolate(dialog.title)}»` : 'این گفتگو'} از فهرست شما حذف شود؟`, message: 'در تلگرام چیزی پاک نمی‌شود.', confirmLabel: 'حذف', danger: true })) && onRemove()}
+                  >
+                    حذف از گفتگوهای من
+                  </MenuItem>
                 )}
                 {allowExplore && dialog.kind !== 'private' && (
-                  <button
-                    role="menuitem"
-                    className="danger"
+                  <MenuItem
+                    icon={<DoorOpen size={17} />}
+                    danger
                     onClick={async () => {
-                      if (!confirm(`از «${dialog.title || 'این گفتگو'}» در تلگرام خارج می‌شوید (عضویتتان در خود تلگرام هم برداشته می‌شود). ادامه؟`)) return;
+                      if (!(await confirmDialog({ title: `از ${dialog.title ? `«${isolate(dialog.title)}»` : 'این گفتگو'} در تلگرام خارج شوید؟`, message: 'عضویتتان در خود تلگرام هم برداشته می‌شود.', confirmLabel: 'خروج', danger: true }))) return;
                       try {
                         await api('POST', `/tele/dialogs/${dialog.id}/leave`);
                         location.hash = '#/tele';
@@ -897,8 +920,8 @@ function TeleChat({ dialog, onChanged, onRemove, allowMedia, allowVoice, allowFi
                       }
                     }}
                   >
-                    <DoorOpen size={17} /> خروج از این {dialog.kind === 'channel' ? 'کانال' : 'گروه'} در تلگرام
-                  </button>
+                    خروج از این {dialog.kind === 'channel' ? 'کانال' : 'گروه'} در تلگرام
+                  </MenuItem>
                 )}
               </TeleMore>
             )}
@@ -981,7 +1004,7 @@ function TeleChat({ dialog, onChanged, onRemove, allowMedia, allowVoice, allowFi
                 className="icon-btn"
                 aria-label="حذف پیام صوتی"
                 disabled={sending}
-                onClick={() => confirm('این پیام صوتی حذف شود؟') && setFailedVoice(null)}
+                onClick={async () => (await confirmDialog({ title: 'این پیام صوتی حذف شود؟', confirmLabel: 'حذف', danger: true })) && setFailedVoice(null)}
               >
                 <X size={20} />
               </button>
@@ -1196,31 +1219,34 @@ function TeleMessage({ m, grouped, showSender, showAvatar, withDate, allowMedia,
             </button>
           )}
           {menu && (
-            <div className="tele-msg-menu" onClick={(e) => e.stopPropagation()}>
+            // Inside the bubble, no backdrop (as before): it closes with its own button, Escape or Back.
+            <Menu label="کارهای پیام" className="tele-msg-menu" backdrop={false} onClose={() => setMenu(false)}>
               {onReply && (
-                <button
+                <MenuItem
+                  icon={<Reply size={16} />}
                   onClick={() => {
                     setMenu(false);
                     onReply(m);
                   }}
                 >
-                  <Reply size={16} /> پاسخ
-                </button>
+                  پاسخ
+                </MenuItem>
               )}
               {onForward && (
-                <button
+                <MenuItem
+                  icon={<Forward size={16} />}
                   onClick={() => {
                     setMenu(false);
                     onForward(m);
                   }}
                 >
-                  <Forward size={16} /> ارسال به چت داخلی
-                </button>
+                  ارسال به چت داخلی
+                </MenuItem>
               )}
-              <button onClick={() => setMenu(false)}>
-                <X size={16} /> بستن
-              </button>
-            </div>
+              <MenuItem icon={<X size={16} />} onClick={() => setMenu(false)}>
+                بستن
+              </MenuItem>
+            </Menu>
           )}
         </div>
       </div>

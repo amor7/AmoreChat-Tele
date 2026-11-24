@@ -2,7 +2,7 @@
 // Usage: node --test server/test/a11y-rules.test.mjs
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { FOCUSABLE, isTextEntry, nextFocusIndex, pushLayer, removeLayer, topLayer, isActivationKey, topLiveLayer, isKeyboardNavKey } from '../../web/src/a11y-rules.js';
+import { FOCUSABLE, isTextEntry, nextFocusIndex, pushLayer, removeLayer, topLayer, isActivationKey, topLiveLayer, isKeyboardNavKey, MENU_ITEMS, nextMenuIndex } from '../../web/src/a11y-rules.js';
 
 test('focusable selectors cover the usual controls and skip disabled / hidden / tabindex=-1', () => {
   const list = FOCUSABLE.split(', ');
@@ -96,4 +96,41 @@ test('Escape / Tab go to the top layer that is on screen, skipping empty ones ab
 test('keyboard navigation keys; events without a key (autofill) are not', () => {
   for (const k of ['Tab', 'Enter', ' ', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight']) assert.equal(isKeyboardNavKey(k), true, k);
   for (const k of [undefined, null, 0, {}, '', 'a', 'Escape', 'Shift', 'Unidentified']) assert.equal(isKeyboardNavKey(k), false, String(k));
+});
+
+test('menu: ArrowDown / ArrowUp step and wrap at both ends', () => {
+  assert.equal(nextMenuIndex(3, 0, 'ArrowDown'), 1);
+  assert.equal(nextMenuIndex(3, 2, 'ArrowDown'), 0);
+  assert.equal(nextMenuIndex(3, 1, 'ArrowUp'), 0);
+  assert.equal(nextMenuIndex(3, 0, 'ArrowUp'), 2);
+  assert.equal(nextMenuIndex(1, 0, 'ArrowDown'), 0);
+  // Old Edge / IE key names.
+  assert.equal(nextMenuIndex(3, 0, 'Down'), 1);
+  assert.equal(nextMenuIndex(3, 0, 'Up'), 2);
+});
+
+test('menu: from the menu itself (opened by pointer) Down enters at the first item, Up at the last', () => {
+  assert.equal(nextMenuIndex(4, -1, 'ArrowDown'), 0);
+  assert.equal(nextMenuIndex(4, -1, 'ArrowUp'), 3);
+  assert.equal(nextMenuIndex(4, 7, 'ArrowDown'), 0);
+});
+
+test('menu: Home / End jump to the ends', () => {
+  assert.equal(nextMenuIndex(5, 2, 'Home'), 0);
+  assert.equal(nextMenuIndex(5, 2, 'End'), 4);
+  assert.equal(nextMenuIndex(5, -1, 'End'), 4);
+});
+
+test('menu: other keys are not menu keys (null); an empty menu has nothing to focus (-1)', () => {
+  // Left / right are left alone: in RTL they would be ambiguous, and these menus are vertical.
+  for (const k of ['ArrowLeft', 'ArrowRight', 'Tab', 'Enter', ' ', 'Escape', 'a', undefined]) assert.equal(nextMenuIndex(3, 0, k), null, String(k));
+  assert.equal(nextMenuIndex(0, -1, 'ArrowDown'), -1);
+  assert.equal(nextMenuIndex(0, -1, 'Home'), -1);
+});
+
+test('menu items: menuitems and buttons of a group row, never disabled ones; old-WebView selectors', () => {
+  const list = MENU_ITEMS.split(', ');
+  assert.ok(list.includes('[role="menuitem"]:not([disabled])'));
+  assert.ok(list.includes('[role="group"] button:not([disabled])'));
+  assert.doesNotMatch(MENU_ITEMS, /:is\(|:where\(|:has\(/);
 });

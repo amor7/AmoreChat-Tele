@@ -1,12 +1,13 @@
+import { sendErrorText } from '../confirm-rules';
 import { useEffect, useId, useRef, useState, useSyncExternalStore } from 'react';
-import { createPortal } from 'react-dom';
 import { api, upload, CANCELLED, LATE } from '../api';
 import { useStore, dataSaverNow } from '../store';
 import { emitTyping, resetTyping, isChatMuted } from '../socket';
 import { enqueue, enqueueVoice, flushOutbox, newClientId } from '../offline';
 import { loadDraft, clearDraft } from '../drafts';
 import { useDraftSaver } from '../useDrafts';
-import { useDialog } from '../a11y';
+import { Modal } from './Modals';
+import { confirmDialog } from '../confirm';
 import { EmojiPicker, RichText } from './Emoji';
 import PreviewIcon from './PreviewIcon';
 import Avatar from './Avatar';
@@ -281,6 +282,7 @@ export default function Composer({ chat, droppedFile, onDroppedHandled }) {
           }}
         />
         <textarea
+          data-focus-fallback
           ref={inputRef}
           rows={1}
           dir="auto"
@@ -521,7 +523,7 @@ async function sendVoiceDirect(v) {
     if (e.status === CANCELLED) return;
     patchDirect(v.id, { sending: false, error: e.message });
     // A lost answer may mean it was sent: look at the chat first (the message itself says so).
-    useStore.getState().showToast(e.message === LATE ? `پیام صوتی: ${LATE}` : `پیام صوتی ارسال نشد: ${e.message} — «ارسال دوباره» را بزنید`);
+    useStore.getState().showToast(e.message === LATE ? `پیام صوتی: ${LATE}` : `پیام صوتی ارسال نشد: ${sendErrorText(e.message)} — «ارسال دوباره» را بزنید`);
   } finally {
     directAborts.delete(v.id);
   }
@@ -548,8 +550,8 @@ function DirectVoices({ chatId }) {
       <button
         className="icon-btn"
         aria-label="حذف پیام صوتی"
-        onClick={() => {
-          if (!confirm('این پیام صوتی حذف شود؟')) return;
+        onClick={async () => {
+          if (!(await confirmDialog({ title: 'این پیام صوتی حذف شود؟', confirmLabel: 'حذف', danger: true }))) return;
           directAborts.get(v.id)?.abort();
           setDirect((l) => l.filter((x) => x.id !== v.id));
         }}
@@ -633,88 +635,84 @@ function SendFileDialog({ file, chat, onClose }) {
   // Escape behaves like a backdrop tap: ignored while sending (the cancel button stops it).
   const closeIdle = () => progress === null && onClose();
   const titleId = useId();
-  const dialog = useDialog({ onClose: closeIdle, labelledBy: titleId });
 
   // Portal: the composer bar uses backdrop-filter, which would otherwise trap this
   // "fixed" overlay inside the bar (half of it ended up below the screen).
-  return createPortal(
-    <div className="modal-backdrop" onClick={closeIdle}>
-      <div className="modal small" onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" {...dialog}>
-        <h3 id={titleId}>ارسال {isImage ? 'عکس' : isVideo ? 'ویدیو' : 'فایل'}</h3>
-        {isImage && <img className="send-preview" src={preview} alt="" />}
-        {isVideo && <video className="send-preview" src={preview} controls muted playsInline />}
-        {!isImage && !isVideo && (
-          <div className="file-card">
-            <span className="file-icon">
-              <FileText size={20} />
-            </span>
-            <span>
-              <span className="file-name">{file.name}</span>
-              <small>{formatSize(file.size)}</small>
-            </span>
-          </div>
-        )}
-        {isImage && (
-          <div className="segmented" role="group" aria-label="کیفیت عکس">
-            <button className={compress ? 'active' : ''} aria-pressed={compress} onClick={() => setCompress(true)}>
-              فشرده (کم‌حجم)
-            </button>
-            <button className={!compress ? 'active' : ''} aria-pressed={!compress} onClick={() => setCompress(false)}>
-              کیفیت اصلی ({formatSize(file.size)})
-            </button>
-          </div>
-        )}
-        {isVideo && videoProcessing && (
-          <>
-            <div className="segmented" role="group" aria-label="کیفیت ویدیو">
-              {[
-                ['360', 'کم‌حجم (360p)'],
-                ['720', 'متوسط (720p)'],
-                ['original', 'اصلی'],
-              ].map(([q, label]) => (
-                <button key={q} className={videoQ === q ? 'active' : ''} aria-pressed={videoQ === q} onClick={() => setVideoQ(q)}>
-                  {label}
-                </button>
-              ))}
-            </div>
-            <p className="hint">
-              حجم فایل: {formatSize(file.size)}. سرور نسخه‌های کم‌حجم‌تر را می‌سازد تا گیرنده هم بتواند کیفیت را انتخاب کند.
-              {videoQ !== 'original' && ' نسخه اصلی نگه داشته نمی‌شود.'}
-            </p>
-          </>
-        )}
-        {isVideo && !videoProcessing && <p className="hint">حجم: {formatSize(file.size)}</p>}
-        <input placeholder="توضیح (اختیاری)" value={caption} onChange={(e) => setCaption(e.target.value)} dir="auto" maxLength={4000} />
-        {progress !== null && (
-          <div className="progress">
-            <div style={{ width: `${Math.round(progress * 100)}%` }} />
-            <span>{toFa(Math.round(progress * 100))}٪</span>
-          </div>
-        )}
-        {waiting && <p className="hint upload-waiting">اتصال قطع شد؛ با برگشتن اینترنت ارسال از همان‌جا ادامه پیدا می‌کند…</p>}
-        {error && <div className="error">{error}</div>}
-        <div className="actions">
-          {progress !== null ? (
-            <button className="btn danger" onClick={() => abort.current?.abort()}>
-              لغو ارسال
-            </button>
-          ) : (
-            <button className="btn" onClick={onClose}>
-              انصراف
-            </button>
-          )}
-          <button className="btn primary" onClick={send} disabled={progress !== null || tooBig}>
-            ارسال
+  return (
+    <Modal bare size="small" labelledBy={titleId} onClose={onClose} onBackdrop={closeIdle} portal>
+      <h3 id={titleId}>ارسال {isImage ? 'عکس' : isVideo ? 'ویدیو' : 'فایل'}</h3>
+      {isImage && <img className="send-preview" src={preview} alt="" />}
+      {isVideo && <video className="send-preview" src={preview} controls muted playsInline />}
+      {!isImage && !isVideo && (
+        <div className="file-card">
+          <span className="file-icon">
+            <FileText size={20} />
+          </span>
+          <span>
+            <span className="file-name">{file.name}</span>
+            <small>{formatSize(file.size)}</small>
+          </span>
+        </div>
+      )}
+      {isImage && (
+        <div className="segmented" role="group" aria-label="کیفیت عکس">
+          <button className={compress ? 'active' : ''} aria-pressed={compress} onClick={() => setCompress(true)}>
+            فشرده (کم‌حجم)
+          </button>
+          <button className={!compress ? 'active' : ''} aria-pressed={!compress} onClick={() => setCompress(false)}>
+            کیفیت اصلی ({formatSize(file.size)})
           </button>
         </div>
-        {tooBig && (
-          <div className="error">
-            حجم این فایل ({formatSize(file.size)}) از حد مجاز شما ({formatSize(maxBytes)}) بیشتر است. برای افزایش با مدیر تماس بگیرید.
+      )}
+      {isVideo && videoProcessing && (
+        <>
+          <div className="segmented" role="group" aria-label="کیفیت ویدیو">
+            {[
+              ['360', 'کم‌حجم (360p)'],
+              ['720', 'متوسط (720p)'],
+              ['original', 'اصلی'],
+            ].map(([q, label]) => (
+              <button key={q} className={videoQ === q ? 'active' : ''} aria-pressed={videoQ === q} onClick={() => setVideoQ(q)}>
+                {label}
+              </button>
+            ))}
           </div>
+          <p className="hint">
+            حجم فایل: {formatSize(file.size)}. سرور نسخه‌های کم‌حجم‌تر را می‌سازد تا گیرنده هم بتواند کیفیت را انتخاب کند.
+            {videoQ !== 'original' && ' نسخه اصلی نگه داشته نمی‌شود.'}
+          </p>
+        </>
+      )}
+      {isVideo && !videoProcessing && <p className="hint">حجم: {formatSize(file.size)}</p>}
+      <input placeholder="توضیح (اختیاری)" value={caption} onChange={(e) => setCaption(e.target.value)} dir="auto" maxLength={4000} />
+      {progress !== null && (
+        <div className="progress">
+          <div style={{ width: `${Math.round(progress * 100)}%` }} />
+          <span>{toFa(Math.round(progress * 100))}٪</span>
+        </div>
+      )}
+      {waiting && <p className="hint upload-waiting">اتصال قطع شد؛ با برگشتن اینترنت ارسال از همان‌جا ادامه پیدا می‌کند…</p>}
+      {error && <div className="error">{error}</div>}
+      <div className="actions">
+        {progress !== null ? (
+          <button className="btn danger" onClick={() => abort.current?.abort()}>
+            لغو ارسال
+          </button>
+        ) : (
+          <button className="btn" onClick={onClose}>
+            انصراف
+          </button>
         )}
+        <button className="btn primary" onClick={send} disabled={progress !== null || tooBig}>
+          ارسال
+        </button>
       </div>
-    </div>,
-    document.body,
+      {tooBig && (
+        <div className="error">
+          حجم این فایل ({formatSize(file.size)}) از حد مجاز شما ({formatSize(maxBytes)}) بیشتر است. برای افزایش با مدیر تماس بگیرید.
+        </div>
+      )}
+    </Modal>
   );
 }
 

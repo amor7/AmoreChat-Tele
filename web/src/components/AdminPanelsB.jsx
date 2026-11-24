@@ -5,15 +5,16 @@ import { formatDateTime, messagePreview } from '../util';
 import { EmojiImg } from './Emoji';
 import { RtcSettings } from './AdminRtc';
 import { useLoad } from './AdminPanelsA1';
+import { Skeleton, ErrorState } from './States';
 
 export function Settings() {
   const showToast = useStore((s) => s.showToast);
-  const [data] = useLoad('/admin/settings');
+  const [data, load, error] = useLoad('/admin/settings');
   const [f, setF] = useState(null);
   useEffect(() => {
     if (data) setF(data.settings);
   }, [data]);
-  if (!f) return <p className="muted">…</p>;
+  if (!f) return error ? <ErrorState message={error} onRetry={load} /> : <Skeleton lines={4} />;
 
   async function save(e) {
     e.preventDefault();

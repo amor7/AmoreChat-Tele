@@ -5,16 +5,18 @@ import { formatDateTime, formatSize, toFa, copyText } from '../util';
 import { DatabaseBackup, Download, Megaphone, Volume2, Users as UsersIcon } from 'lucide-react';
 import { useLoad } from './AdminPanelsA1';
 import { QrButton } from './QrCode';
+import { confirmDialog, promptDialog, isolate } from '../confirm';
+import { Skeleton, ErrorState } from './States';
 
 export function Backups() {
   const showToast = useStore((s) => s.showToast);
-  const [data, load] = useLoad('/admin/backups');
+  const [data, load, error] = useLoad('/admin/backups');
   const [busy, setBusy] = useState(false);
-  if (!data) return <p className="muted">…</p>;
+  if (!data) return error ? <ErrorState message={error} onRetry={load} /> : <Skeleton lines={4} />;
   return (
     <div className="backup-tab">
       <p className="hint">
-        پشتیبان شامل همهٔ پیام‌ها، کاربران و هش رمزهاست؛ فایلش را جای امن نگه دارید. سرور هر روز خودکار یک نسخه از دیتابیس می‌گیرد.
+        پشتیبان شامل همه‌ی پیام‌ها، کاربران و هش رمزهاست؛ فایلش را جای امن نگه دارید. سرور هر روز خودکار یک نسخه از دیتابیس می‌گیرد.
       </p>
       <div className="backup-cards">
         <a className="backup-card" href="/api/admin/backup/db" download>
@@ -24,7 +26,7 @@ export function Backups() {
         </a>
         <a className="backup-card" href="/api/admin/backup/full" download>
           <Download size={26} />
-          <b>پشتیبان کامل (دیتابیس + همهٔ فایل‌ها)</b>
+          <b>پشتیبان کامل (دیتابیس + همه‌ی فایل‌ها)</b>
           <small>حدود {formatSize(data.dbSize + data.uploadsSize)} · فایل tar</small>
         </a>
       </div>
@@ -72,7 +74,15 @@ export function Backups() {
               className="btn sm danger"
               disabled={busy}
               onClick={async () => {
-                const password = prompt(`همه چیز به ${formatDateTime(f.createdAt)} برمی‌گردد و پیام‌های بعد از آن از بین می‌رود (فایل‌های آپلودی پاک نمی‌شوند). برنامه حدود یک دقیقه در دسترس نیست و شاید دوباره باید وارد شوید.\nبرای ادامه رمز عبور خود را بنویسید:`);
+                const password = await promptDialog({
+                  title: `همه چیز به ${formatDateTime(f.createdAt)} برگردد؟`,
+                  message: 'پیام‌های بعد از آن از بین می‌رود؛ فایل‌های آپلودی پاک نمی‌شوند. برنامه حدود یک دقیقه در دسترس نیست و شاید دوباره باید وارد شوید.',
+                  label: 'رمز عبور خودتان',
+                  type: 'password',
+                  confirmLabel: 'بازگردانی',
+                  required: true,
+                  danger: true,
+                });
                 if (!password) return;
                 setBusy(true);
                 try {
@@ -211,8 +221,8 @@ export function Chats({ onClose }) {
             {!c.isEmergency && (
               <button
                 className="btn sm danger"
-                onClick={() =>
-                  confirm(`«${c.title}» برای همه حذف شود؟`) &&
+                onClick={async () =>
+                  (await confirmDialog({ title: `«${isolate(c.title)}» برای همه حذف شود؟`, confirmLabel: 'حذف', danger: true })) &&
                   api('DELETE', `/chats/${c.id}`)
                     .then(load)
                     .catch((e) => showToast(e.message))

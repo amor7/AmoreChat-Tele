@@ -10,6 +10,8 @@ import Sidebar from './components/Sidebar';
 import ChatView from './components/ChatView';
 import TeleView from './components/TeleView';
 import Modals from './components/Modals';
+import ConfirmHost from './components/ConfirmDialog';
+import { EmptyState } from './components/States';
 import { VoiceBar, RoomView, IncomingCall, useAutoExpandCalls } from './components/Voice';
 import { MusicBar } from './components/Music';
 import { initNative } from './native';
@@ -24,7 +26,17 @@ function parseHash() {
   return { kind, value };
 }
 
+// The shared confirm / prompt dialogs work on every screen (sign-in and server list included).
 export default function App() {
+  return (
+    <>
+      <Screens />
+      <ConfirmHost />
+    </>
+  );
+}
+
+function Screens() {
   const me = useStore((s) => s.me);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -177,13 +189,7 @@ function QueueBar() {
 
 function Empty() {
   const siteName = useStore((s) => s.config?.siteName);
-  return (
-    <div className="empty-pane">
-      <img src="/icon.svg" alt="" width="72" height="72" />
-      <h2>{siteName}</h2>
-      <p>یک گفتگو را انتخاب کنید یا گفتگوی جدیدی شروع کنید.</p>
-    </div>
-  );
+  return <EmptyState icon={<img src="/icon.svg" alt="" width="72" height="72" />} title={siteName} hint="یک گفتگو را انتخاب کنید یا گفتگوی جدیدی شروع کنید." />;
 }
 
 function EmergencyBanner() {

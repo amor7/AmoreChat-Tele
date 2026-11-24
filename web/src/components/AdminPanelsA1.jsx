@@ -6,29 +6,43 @@ import Avatar from './Avatar';
 import { LimitsEditor } from './AdminRtc';
 import { TriangleAlert, SlidersHorizontal } from 'lucide-react';
 import { ACTION_LABELS } from './AdminPanelsB';
+import { confirmDialog, copyDialog, isolate } from '../confirm';
+import { Skeleton, ErrorState } from './States';
 
+/**
+ * GET `url` now and on load(). [data, load, error]: `error` is the message of the last failed
+ * load while nothing has loaded yet (panels show it with a retry instead of loading forever);
+ * once there is data, a failed refresh is only a toast.
+ */
 export function useLoad(url) {
   const showToast = useStore((s) => s.showToast);
   const [data, setData] = useState(null);
+  const [error, setError] = useState('');
   const latest = useRef(url);
+  const has = useRef(false);
   latest.current = url;
   const load = () =>
     api('GET', url)
-      .then((d) => latest.current === url && setData(d))
-      .catch((e) => showToast(e.message));
+      .then((d) => {
+        if (latest.current !== url) return;
+        has.current = true;
+        setError('');
+        setData(d);
+      })
+      .catch((e) => (has.current ? showToast(e.message) : setError(e.message)));
   useEffect(() => {
     load();
   }, [url]); // eslint-disable-line react-hooks/exhaustive-deps
-  return [data, load];
+  return [data, load, error];
 }
 
 export function Stats() {
-  const [s, load] = useLoad('/admin/stats');
+  const [s, load, error] = useLoad('/admin/stats');
   useEffect(() => {
     const t = setInterval(load, 10000);
     return () => clearInterval(t);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  if (!s) return <p className="muted">…</p>;
+  if (!s) return error ? <ErrorState message={error} onRetry={load} /> : <Skeleton lines={4} />;
   const memUsed = s.memory.total - s.memory.free;
   const cards = [
     ['نسخه', 'v' + useStore.getState().config.version],
@@ -282,8 +296,8 @@ export function UserActions({ u, me, run, onStorage }) {
         <div className="inline-form">
           <button
             className={`btn sm ${u.banned ? '' : 'danger'}`}
-            onClick={() =>
-              (u.banned || confirm(`${u.displayName} مسدود شود؟ فوراً از همه دستگاه‌ها خارج می‌شود.`)) &&
+            onClick={async () =>
+              (u.banned || (await confirmDialog({ title: `${isolate(u.displayName)} مسدود شود؟`, message: 'فوراً از همه‌ی دستگاه‌ها خارج می‌شود.', confirmLabel: 'مسدود کردن', danger: true }))) &&
               run(() => api('POST', `/admin/users/${u.id}/ban`, { banned: !u.banned }), u.banned ? 'رفع مسدودیت شد' : 'مسدود شد')
             }
           >
@@ -292,9 +306,10 @@ export function UserActions({ u, me, run, onStorage }) {
           <button
             className="btn sm"
             onClick={async () => {
-              if (!confirm('رمز عبور این کاربر بازنشانی شود؟')) return;
+              if (!(await confirmDialog({ title: 'رمز عبور این کاربر بازنشانی شود؟', message: 'رمز فعلی‌اش دیگر کار نمی‌کند و یک رمز تازه ساخته می‌شود.', confirmLabel: 'بازنشانی' }))) return;
               const r = await run(() => api('POST', `/admin/users/${u.id}/reset-password`));
-              if (r) prompt('رمز جدید (برای کاربر بفرستید):', r.password);
+              // Only the hash is stored (server/src/routes/admin.js): this is the one time it shows.
+              if (r) await copyDialog({ title: 'رمز جدید', message: 'این رمز را برای کاربر بفرستید.\nبعد از بستن این پنجره دیگر نشان داده نمی‌شود.', value: r.password });
             }}
           >
             بازنشانی رمز
@@ -302,7 +317,7 @@ export function UserActions({ u, me, run, onStorage }) {
           <button
             className="btn sm"
             onClick={async () => {
-              if (!confirm(`${u.displayName} از همهٔ دستگاه‌ها خارج شود؟`)) return;
+              if (!(await confirmDialog({ title: `${isolate(u.displayName)} از همه‌ی دستگاه‌ها خارج شود؟`, confirmLabel: 'خروج' }))) return;
               const r = await run(() => api('POST', `/admin/users/${u.id}/logout-all`));
               if (r) useStore.getState().showToast(`${toFa(r.loggedOut)} دستگاه خارج شد`);
             }}
@@ -312,8 +327,14 @@ export function UserActions({ u, me, run, onStorage }) {
           {(u.twoFactor || u.locked) && (
             <button
               className="btn sm"
-              onClick={() =>
-                confirm('ورود دومرحله‌ای این کاربر خاموش و قفل حسابش باز شود؟ (برای وقتی که گوشی‌اش را گم کرده)') &&
+              onClick={async () =>
+                // reset-2fa turns two-step login off and also clears a temporary lock: with 2FA on
+                // that is the main effect (and a security downgrade), otherwise only the unlock.
+                (await confirmDialog(
+                  u.twoFactor
+                    ? { title: 'ورود دومرحله‌ای این کاربر خاموش شود؟', message: 'برای وقتی که گوشی‌اش را گم کرده است. اگر حسابش قفل شده باشد، قفلش هم باز می‌شود.', confirmLabel: 'خاموش کردن', danger: true }
+                    : { title: 'قفل حساب این کاربر باز شود؟', message: 'می‌تواند دوباره وارد شود.', confirmLabel: 'باز کردن' },
+                )) &&
                 run(() => api('POST', `/admin/users/${u.id}/reset-2fa`), 'انجام شد')
               }
             >

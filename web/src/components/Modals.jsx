@@ -1,4 +1,5 @@
-import { useEffect, useId, useState } from 'react';
+import { createContext, useContext, useEffect, useId, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useStore } from '../store';
 import { api, fileUrl } from '../api';
 import { toFa, postBlockReason, messagePreview, formatListTime } from '../util';
@@ -18,23 +19,50 @@ import { useBackClose } from '../backnav';
 import { useDialog } from '../a11y';
 import { TeleToChat, ChatToTele, TeleSessions } from './TeleForward';
 
-export function Modal({ title, onClose, children, size = '' }) {
-  const titleId = useId();
-  // Back is registered once for whichever modal is open, by Modals() below.
-  const dialog = useDialog({ onClose, labelledBy: titleId, back: false });
-  return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className={`modal ${size}`} onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" {...dialog}>
-        <header className="modal-head">
-          <h3 id={titleId}>{title}</h3>
-          <button className="icon-btn" aria-label="بستن" onClick={onClose}>
-            <X size={20} />
-          </button>
-        </header>
-        <div className="modal-body">{children}</div>
+/**
+ * The app's dialog frame: backdrop, panel, title bar with a close button, focus handling.
+ * - `bare`: no title bar and no padded body; the caller renders its own heading and passes its
+ *   id as `labelledBy` (the compact "small" dialogs: send file, start stream).
+ * - `onBackdrop`: what a backdrop tap, Escape and Back do, when that differs from the close
+ *   button (e.g. refuse while an upload is running). Defaults to onClose.
+ * - `back`: register Android / browser Back. On by default; off for the one dialog the store
+ *   host Modals() renders (it registers Back itself, see HostedByStore). Dialogs nested inside
+ *   that one (a QR code, the Telegram "forgot passcode" form) get their own Back again.
+ * - `portal`: render into <body>, out of ancestors that would trap a fixed overlay
+ *   (backdrop-filter on the composer bar) or sit below other layers.
+ */
+// True only directly under Modals(): the dialog it renders must not register Back a second time.
+const HostedByStore = createContext(false);
+
+export function Modal({ title, onClose, children, size = '', bare = false, labelledBy, describedBy, onBackdrop, back, portal = false, initialFocus, bodyClassName = '', backdropClassName = '' }) {
+  const ownId = useId();
+  const titleId = labelledBy || ownId;
+  const dismiss = onBackdrop || onClose;
+  const hosted = useContext(HostedByStore);
+  const dialog = useDialog({ onClose: dismiss, labelledBy: titleId, describedBy, initialFocus, back: back ?? !hosted });
+  const view = (
+    // Reset for everything inside: a dialog opened from this one registers its own Back.
+    <HostedByStore.Provider value={false}>
+      <div className={`modal-backdrop ${backdropClassName}`.trim()} onClick={dismiss}>
+        <div className={`modal ${size}`.trim()} onClick={(e) => e.stopPropagation()} role="dialog" aria-modal="true" {...dialog}>
+          {bare ? (
+            children
+          ) : (
+            <>
+              <header className="modal-head">
+                <h3 id={titleId}>{title}</h3>
+                <button className="icon-btn" aria-label="بستن" onClick={onClose}>
+                  <X size={20} />
+                </button>
+              </header>
+              <div className={`modal-body ${bodyClassName}`.trim()}>{children}</div>
+            </>
+          )}
+        </div>
       </div>
-    </div>
+    </HostedByStore.Provider>
   );
+  return portal ? createPortal(view, document.body) : view;
 }
 
 // Debounced user search with a result list; used for DMs, group creation and adding members.
@@ -385,6 +413,11 @@ export default function Modals() {
   const close = useStore((s) => s.closeModal);
   useBackClose(!!modal, close);
   if (!modal) return null;
+  // The store's dialog: Back is registered once above, so its Modal leaves it out (back={false}).
+  return <HostedByStore.Provider value={true}>{storeDialog(modal, close)}</HostedByStore.Provider>;
+}
+
+function storeDialog(modal, close) {
   switch (modal.type) {
     case 'newChat':
       return <NewChat onClose={close} />;
