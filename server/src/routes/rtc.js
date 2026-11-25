@@ -326,9 +326,17 @@ export default async function rtcRoutes(app) {
 
   app.post('/api/admin/live/end', async (req) => {
     if (!hasSitePerm(req.user, 'manage_chats')) fail(403, 'دسترسی ندارید');
-    if (req.body?.callId) endCall(String(req.body.callId), 'ended');
-    if (req.body?.chatId) await deleteRoom(chatRoom(Number(req.body.chatId)));
-    audit(req.user.id, 'voice.end', req.body?.chatId || req.body?.callId || '');
+    const callId = req.body?.callId;
+    const chatId = req.body?.chatId;
+    // Nothing (or garbage) to end is a 400, not an "ended" line in the audit log.
+    if (callId == null && chatId == null) fail(400, 'تماس یا اتاقی مشخص نشده است');
+    if (callId != null && (typeof callId !== 'string' || !callId)) fail(400, 'شناسه تماس نامعتبر است');
+    if (chatId != null && !(Number.isInteger(Number(chatId)) && Number(chatId) > 0 && typeof chatId !== 'boolean')) fail(400, 'شناسه گفتگو نامعتبر است');
+    if (chatId != null && !getChat(Number(chatId))) fail(404, 'گفتگو پیدا نشد');
+    if (callId != null && !getCall(callId)) fail(404, 'تماس پیدا نشد (شاید تمام شده است)');
+    if (callId != null) endCall(callId, 'ended');
+    if (chatId != null) await deleteRoom(chatRoom(Number(chatId)));
+    audit(req.user.id, 'voice.end', chatId ?? callId);
     return { ok: true };
   });
 }

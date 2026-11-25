@@ -3,7 +3,7 @@
  * notification) when Telegram stops working for users, when it works again, when a proxy breaks,
  * and when a user reaches the monthly traffic cap. Each kind can be turned off.
  */
-import { all, get } from '../db.js';
+import { all, get, tx } from '../db.js';
 import { hasSitePerm } from '../perms.js';
 import { ensureSavedChat, systemMessage } from '../chats.js';
 import { getTeleSetting, setTeleSetting, getRoutePolicy, onHealthChange } from './proxies.js';
@@ -27,21 +27,29 @@ export function getAlertSettings() {
 
 export function setAlertSettings(p = {}) {
   const bad = (m) => Object.assign(new Error(m), { statusCode: 400 });
-  if (p.enabled != null) setTeleSetting('tele_alert_enabled', p.enabled ? '1' : '0');
+  // Checked first, written together: a bad field saves nothing.
+  const w = {};
+  if (p.enabled != null) {
+    if (typeof p.enabled !== 'boolean') throw bad('مقدار باید true یا false باشد');
+    w.tele_alert_enabled = p.enabled ? '1' : '0';
+  }
   if (p.events != null) {
     if (!Array.isArray(p.events) || p.events.some((k) => !ALERT_KINDS.includes(k))) throw bad('نوع هشدار نامعتبر است');
-    setTeleSetting('tele_alert_events', [...new Set(p.events)].join(','));
+    w.tele_alert_events = [...new Set(p.events)].join(',');
   }
   if (p.to != null) {
     if (!['owner', 'admins'].includes(p.to)) throw bad('گیرنده هشدار نامعتبر است');
-    setTeleSetting('tele_alert_to', p.to);
+    w.tele_alert_to = p.to;
   }
   for (const [key, field, max] of [['tele_alert_delay_min', 'delayMin', 1440], ['tele_alert_repeat_min', 'repeatMin', 10080]]) {
     if (p[field] == null) continue;
-    const n = Number(p[field]);
+    const n = typeof p[field] === 'number' || (typeof p[field] === 'string' && p[field].trim() !== '') ? Number(p[field]) : NaN;
     if (!Number.isInteger(n) || n < 0 || n > max) throw bad(`عدد بین ۰ و ${max} دقیقه`);
-    setTeleSetting(key, String(n));
+    w[key] = String(n);
   }
+  tx(() => {
+    for (const [k, v] of Object.entries(w)) setTeleSetting(k, v);
+  });
   return getAlertSettings();
 }
 

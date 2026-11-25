@@ -77,7 +77,7 @@ docker compose -f docker-compose.isolated.yml ...   # تست بدون اینتر
 
 ## نقاط حساس
 - **کلید نشست تلگرام** (`server/src/tele/accounts.js:192-218`): از `TELE_SESSION_KEY` در `.env`؛ اگر نباشد کلید در `DATA_DIR/tele-sessions/.key` کنار نشست‌ها ساخته می‌شود. عوض یا گم شدن کلید = از کار افتادن بی‌صدای همه‌ی نشست‌ها. هر تغییر در deploy/backup/restore باید حفظش کند.
-- **migrationها** در `db.js` (الان v26).
+- **migrationها** در `db.js` (الان v27).
 - **رمز تلگرام**: هر route یا رویداد socket جدیدی که داده‌ی تلگرام کاربر را خارج از `/api/tele/` برمی‌گرداند باید `assertTeleUnlocked` بگیرد؛ hook در `routes/tele.js` آن را پوشش نمی‌دهد. بکاپ‌های جدید هم باید از `redactTeleLocked` رد شوند.
 - **ماژول‌های بزرگ و درهم Tele**: `TeleView.jsx` (~1258 خط)، `TeleAdmin.jsx` (~1043)، `accounts.js`، `messages.js`، `routes/tele.js` (~569، import از ~15 ماژول)؛ unit test ندارند → تغییر در Tele شعاع اثر بزرگ دارد.
 - **سرویس `ovpn`** در compose با `user: root` و `NET_ADMIN` و دسترسی به `./data`.

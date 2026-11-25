@@ -235,7 +235,7 @@ export function TelePasscodeSettings() {
           <div className="row-gap tele-pass-actions">
             {info.unlocked && (
               <button className="btn sm" disabled={busy} onClick={lockNow}>
-                <Lock size={16} /> همین حالا قفل کن
+                <Lock size={16} /> قفل کردن
               </button>
             )}
             <button className="btn sm" onClick={() => open('change')}>

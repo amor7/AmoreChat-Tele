@@ -4,7 +4,7 @@
 // or "a long time ago". Profile photos are not part of this: everyone always sees them.
 import { get, all, now } from './db.js';
 import { isOnline } from './realtime.js';
-import { knowsUser } from './lookup.js';
+import { knowsUser, VISIBLE_SHARED } from './lookup.js';
 
 export const LAST_SEEN_MODES = ['everyone', 'contacts', 'nobody'];
 const RECENT_MS = 3 * 24 * 3600 * 1000;
@@ -36,7 +36,7 @@ export function presenceAudience(userId) {
        JOIN chat_members b ON b.chat_id = a.chat_id AND b.user_id != a.user_id
        JOIN chats c ON c.id = a.chat_id
        JOIN users u ON u.id = b.user_id
-     WHERE a.user_id = ? AND c.type IN ('group', 'voice', 'dm') AND IFNULL(u.last_seen_privacy, 'everyone') != 'nobody'`,
+     WHERE a.user_id = ? AND (${VISIBLE_SHARED}) AND IFNULL(u.last_seen_privacy, 'everyone') != 'nobody'`,
     userId,
   ).map((r) => r.id);
 }

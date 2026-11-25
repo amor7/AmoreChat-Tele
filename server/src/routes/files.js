@@ -40,15 +40,20 @@ const num = (v) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Number(v) : nu
 
 export const newRel = () => path.posix.join(new Date().toISOString().slice(0, 7), crypto.randomBytes(16).toString('hex'));
 
+const QUOTA_FULL = 'سهمیه فضای شما پر شده است';
+
 function checkLimits(user, size = 0) {
   assertAllowed(user, 'media');
   const limits = effectiveLimits(user);
   if (size > limits.uploadMb * 1024 * 1024) fail(413, `حداکثر حجم فایل برای شما ${limits.uploadMb} مگابایت است`);
+  // Bytes still free under the quota (Infinity without one).
+  let room = Infinity;
   if (limits.quotaMb > 0) {
     const used = get('SELECT IFNULL(SUM(size), 0) AS s FROM files WHERE owner_id = ?', user.id).s;
-    if (used + size > limits.quotaMb * 1024 * 1024 || (!size && used >= limits.quotaMb * 1024 * 1024)) fail(413, 'سهمیه فضای شما پر شده است');
+    room = limits.quotaMb * 1024 * 1024 - used;
+    if (size > room || (!size && room <= 0)) fail(413, QUOTA_FULL);
   }
-  return limits;
+  return { ...limits, room };
 }
 
 // Records a finished upload (already at UPLOAD_DIR/rel) and starts voice/video processing.
@@ -157,6 +162,8 @@ export default async function fileRoutes(app) {
       const offset = Number(req.headers['upload-offset']);
       // Out of sync (e.g. the previous chunk did arrive although the reply got lost): tell the client.
       if (offset !== have) return reply.code(409).send({ error: 'offset', offset: have });
+      // Any other body type would count as an empty chunk and the client would resend it forever.
+      if ((req.body != null && !Buffer.isBuffer(req.body)) || req.isMultipart?.()) fail(415, 'بخش فایل باید application/octet-stream باشد');
       const chunk = Buffer.isBuffer(req.body) ? req.body : Buffer.alloc(0);
       if (have + chunk.length > s.size) fail(400, 'داده بیش از حجم اعلام‌شده است');
       if (chunk.length) await fs.promises.appendFile(partPath(s.id), chunk);
@@ -191,8 +198,10 @@ export default async function fileRoutes(app) {
   app.post('/api/upload', async (req, reply) => {
     const limits = checkLimits(req.user);
     const maxBytes = limits.uploadMb * 1024 * 1024;
+    // The size is only known once it has arrived: stop at what the quota still allows.
+    const overQuota = limits.room < maxBytes;
 
-    const part = await req.file({ limits: { fileSize: maxBytes, files: 1 } });
+    const part = await req.file({ limits: { fileSize: Math.min(maxBytes, limits.room), files: 1 } });
     if (!part) fail(400, 'فایلی ارسال نشده');
 
     const rel = newRel();
@@ -207,7 +216,14 @@ export default async function fileRoutes(app) {
     }
     if (part.file.truncated) {
       fs.rmSync(abs, { force: true });
-      fail(413, `حداکثر حجم فایل برای شما ${limits.uploadMb} مگابایت است`);
+      fail(413, overQuota ? QUOTA_FULL : `حداکثر حجم فایل برای شما ${limits.uploadMb} مگابایت است`);
+    }
+    // Against the quota as it is now (other uploads may have finished meanwhile).
+    try {
+      checkLimits(req.user, fs.statSync(abs).size);
+    } catch (e) {
+      fs.rmSync(abs, { force: true });
+      throw e;
     }
 
     const file = await registerFile(req.user, { rel, mime: part.mimetype, name: part.filename, q: req.query || {} });

@@ -5,7 +5,7 @@ import { formatDateTime, formatSize, toFa, copyText } from '../util';
 import { DatabaseBackup, Download, Megaphone, Volume2, Users as UsersIcon } from 'lucide-react';
 import { useLoad } from './AdminPanelsA1';
 import { QrButton } from './QrCode';
-import { confirmDialog, promptDialog, isolate } from '../confirm';
+import { confirmDialog, promptDialog, copyDialog, isolate } from '../confirm';
 import { Skeleton, ErrorState, EmptyState } from './States';
 
 export function Backups() {
@@ -117,13 +117,16 @@ export function Invites() {
   const [data, load, error] = useLoad('/admin/invites');
   const [f, setF] = useState({ maxUses: '1', expiresInHours: '72', note: '' });
   const link = (code) => `${location.origin}/#/invite/${code}`;
+  // No clipboard (http, an old WebView): show the link to copy by hand.
+  const copy = async (code, done) => ((await copyText(link(code))) ? showToast(done) : copyDialog({ title: 'لینک دعوت', value: link(code) }));
 
   async function create(e) {
     e.preventDefault();
     try {
       const { invite } = await api('POST', '/admin/invites', f);
-      (await copyText(link(invite.code))) && showToast('لینک دعوت ساخته و کپی شد');
+      setF((x) => ({ ...x, note: '' }));
       load();
+      await copy(invite.code, 'لینک دعوت ساخته و کپی شد');
     } catch (err) {
       showToast(err.message);
     }
@@ -152,12 +155,16 @@ export function Invites() {
                 </small>
               </span>
               {!expired && (
-                <button className="btn sm" onClick={async () => (await copyText(link(i.code))) && showToast('کپی شد')}>
+                <button className="btn sm" onClick={() => copy(i.code, 'کپی شد')}>
                   کپی لینک
                 </button>
               )}
               {!expired && <QrButton value={link(i.code)} title="کد QR لینک دعوت" />}
-              <button className="btn sm danger" onClick={() => api('DELETE', `/admin/invites/${i.id}`).then(load)}>
+              <button className="btn sm danger" onClick={() =>
+                  api('DELETE', `/admin/invites/${i.id}`)
+                    .then(load)
+                    .catch((e) => showToast(e.message))
+                }>
                 حذف
               </button>
             </li>

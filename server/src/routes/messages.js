@@ -1,12 +1,20 @@
 import { get, all, run, now } from '../db.js';
 import { hasSitePerm, hasChatPerm, canPostInChannel } from '../perms.js';
-import { toChat, toAll } from '../realtime.js';
-import { fail, getMember, loadMessage, loadMessages, loadMessagesByIds, postMessage, systemMessage, audit, findMentions, withMine, membersHidden, markRead } from '../chats.js';
+import { toAll } from '../realtime.js';
+import { fail, getMember, loadMessage, loadMessages, loadMessagesByIds, postMessage, systemMessage, audit, findMentions, withMine, membersHidden, markRead, toChatMessage } from '../chats.js';
 import { requireChat } from './chats.js';
 import { assertAllowed, assertBurst } from '../limits.js';
 import { deleteMessage } from '../sweeper.js';
 
 const MAX_TEXT = 4000;
+// Zero-width and direction marks: a text of only these shows as an empty bubble.
+const INVISIBLE = /[\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g;
+const cleanText = (v) => {
+  const text = String(v || '').trim();
+  return text.replace(INVISIBLE, '').trim() ? text : '';
+};
+// Control and direction characters have no place in a reaction (U+202E would flip what follows it).
+const BAD_REACTION = /[\s<>\u0000-\u001f\u007f-\u009f\u200b\u200c\u200e\u200f\u202a-\u202e\u2060-\u2069\ufeff]/;
 // Which file kinds each message type accepts.
 const TYPE_KINDS = { image: ['image'], video: ['video'], voice: ['audio'], file: null };
 
@@ -30,6 +38,13 @@ export function assertCanPost(user, chat, member) {
     const wait = Math.ceil((member.last_post_at + chat.slow_mode * 1000 - now()) / 1000);
     if (wait > 0) fail(429, `حالت آهسته فعال است؛ ${wait} ثانیه دیگر صبر کنید`);
   }
+}
+
+// Channel posts show as the channel: only who may post there now may change or delete them
+// (an admin demoted to member loses their old posts too, like Telegram).
+function canPostAsChannel(user, chat, member) {
+  if (chat.is_emergency) return member?.role === 'owner' || hasSitePerm(user, 'broadcast');
+  return canPostInChannel(member);
 }
 
 function requireMessage(req, id) {
@@ -82,15 +97,17 @@ export default async function messageRoutes(app) {
       // Whatever the search text was, a query it can't run finds nothing (never a server error).
       ids = [];
     }
-    return { messages: loadMessagesByIds(ids) };
+    return { messages: withMine(loadMessagesByIds(ids), req.user.id) };
   });
 
   app.post('/api/messages/:id/react', async (req) => {
     const { m, member } = requireMessage(req, req.params.id);
     if (!member) fail(403, 'شما عضو این گفتگو نیستید');
+    if (m.type === 'system') fail(400, 'به این پیام نمی‌شود واکنش داد');
+    assertAllowed(req.user, 'send');
     assertBurst(req.user.id, 'react');
     const emoji = String(req.body?.emoji || '').trim();
-    if (!emoji || emoji.length > 16 || /[\s<>]/.test(emoji)) fail(400, 'ری‌اکشن نامعتبر');
+    if (!emoji || emoji.length > 16 || BAD_REACTION.test(emoji)) fail(400, 'ری‌اکشن نامعتبر');
     const exists = get('SELECT 1 FROM reactions WHERE message_id = ? AND user_id = ? AND emoji = ?', m.id, req.user.id, emoji);
     if (exists) {
       run('DELETE FROM reactions WHERE message_id = ? AND user_id = ? AND emoji = ?', m.id, req.user.id, emoji);
@@ -100,21 +117,21 @@ export default async function messageRoutes(app) {
       run('INSERT INTO reactions (message_id, user_id, emoji, created_at) VALUES (?, ?, ?, ?)', m.id, req.user.id, emoji, now());
     }
     const msg = loadMessage(m.id);
-    toChat(m.chat_id, 'message:edit', msg);
-    return { message: withMine([structuredClone(msg)], req.user.id)[0] };
+    toChatMessage(m.chat_id, 'message:edit', msg);
+    return { message: withMine([msg], req.user.id)[0] };
   });
 
   app.post('/api/messages/:id/forward', async (req) => {
     const { m, member } = requireMessage(req, req.params.id);
     if (!member) fail(403, 'شما عضو این گفتگو نیستید');
-    if (m.type === 'system') fail(400, 'این پیام قابل فوروارد نیست');
+    if (m.type === 'system' || m.type === 'call') fail(400, 'این پیام قابل فوروارد نیست');
     const src = loadMessage(m.id);
     const from = m.forwarded_from || src.sender?.displayName || '';
     const ids = Array.isArray(req.body?.chatIds) ? [...new Set(req.body.chatIds.map(Number))].slice(0, 20) : [];
-    const sent = [];
     assertAllowed(req.user, 'send');
     if (m.file_id) assertAllowed(req.user, 'media');
-    assertBurst(req.user.id, 'send', ids.length || 1);
+    // Only chats it can really go to count against the send budget.
+    const targets = [];
     for (const chatId of ids) {
       const target = getMember(chatId, req.user.id);
       if (!target) continue;
@@ -124,11 +141,17 @@ export default async function messageRoutes(app) {
       } catch {
         continue;
       }
+      targets.push(chat);
+    }
+    if (!targets.length) fail(400, 'به هیچ‌کدام از گفتگوهای انتخاب‌شده ارسال نشد');
+    assertBurst(req.user.id, 'send', targets.length);
+    const sent = [];
+    for (const chat of targets) {
+      const chatId = chat.id;
       const msg = postMessage({ chatId, senderId: req.user.id, type: m.type, text: m.text, fileId: m.file_id, forwardedFrom: from });
       if (chat.is_emergency) toAll('emergency', msg);
       sent.push(chatId);
     }
-    if (!sent.length) fail(400, 'به هیچ‌کدام از گفتگوهای انتخاب‌شده ارسال نشد');
     return { sent };
   });
 
@@ -143,7 +166,7 @@ export default async function messageRoutes(app) {
       'INSERT INTO reports (message_id, reporter_id, reason, created_at) VALUES (?, ?, ?, ?)',
       m.id,
       req.user.id,
-      String(req.body?.reason || '').slice(0, 500),
+      typeof req.body?.reason === 'string' ? req.body.reason.slice(0, 500) : '',
       now(),
     );
     return { ok: true };
@@ -152,7 +175,7 @@ export default async function messageRoutes(app) {
   app.get('/api/chats/:id/pinned', async (req) => {
     const { chat } = requireChat(req, req.params.id, { allowModerator: true });
     const ids = all('SELECT id FROM messages WHERE chat_id = ? AND pinned = 1 AND deleted = 0 ORDER BY id DESC LIMIT 50', chat.id);
-    return { messages: ids.map((r) => loadMessage(r.id)) };
+    return { messages: withMine(ids.map((r) => loadMessage(r.id)), req.user.id) };
   });
 
   app.post('/api/chats/:id/messages', async (req) => {
@@ -167,7 +190,7 @@ export default async function messageRoutes(app) {
     assertCanPost(req.user, chat, member);
     assertBurst(req.user.id, 'send');
 
-    const text = String(b.text || '').trim();
+    const text = cleanText(b.text);
     if (text.length > MAX_TEXT) fail(400, `متن پیام حداکثر ${MAX_TEXT} کاراکتر است`);
 
     let type = 'text';
@@ -185,7 +208,7 @@ export default async function messageRoutes(app) {
 
     let replyTo = null;
     if (b.replyTo) {
-      const r = get('SELECT id FROM messages WHERE id = ? AND chat_id = ?', Number(b.replyTo), chat.id);
+      const r = get('SELECT id FROM messages WHERE id = ? AND chat_id = ? AND deleted = 0', Number(b.replyTo), chat.id);
       if (r) replyTo = r.id;
     }
 
@@ -196,23 +219,28 @@ export default async function messageRoutes(app) {
 
   app.patch('/api/messages/:id', async (req) => {
     const { m, chat, member } = requireMessage(req, req.params.id);
-    // Channel posts are anonymous: any admin who may post can edit them.
-    const channelEditor = chat.type === 'channel' && canPostInChannel(member);
-    if (m.sender_id !== req.user.id && !channelEditor) fail(403, 'فقط پیام‌های خودتان را می‌توانید ویرایش کنید');
-    if (m.type === 'system') fail(400, 'نامعتبر');
-    const text = String(req.body?.text || '').trim();
+    if (chat.type === 'channel') {
+      // Channel posts are anonymous: whoever may post there now can edit them, and nobody else.
+      if (!member || !canPostAsChannel(req.user, chat, member)) fail(403, 'فقط مدیرانی که در این کانال پست می‌گذارند می‌توانند ویرایش کنند');
+    } else if (m.sender_id !== req.user.id) fail(403, 'فقط پیام‌های خودتان را می‌توانید ویرایش کنید');
+    if (m.type === 'system' || m.type === 'call') fail(400, 'این پیام قابل ویرایش نیست');
+    // Like Telegram: a forwarded message is someone else's words and stays as it was.
+    if (m.forwarded_from) fail(400, 'پیام فورواردشده قابل ویرایش نیست');
+    assertAllowed(req.user, 'send');
+    const text = cleanText(req.body?.text);
     if (!text && !m.file_id) fail(400, 'پیام خالی است');
     if (text.length > MAX_TEXT) fail(400, 'متن خیلی طولانی است');
     const mentions = findMentions(m.chat_id, text, m.reply_to, m.sender_id);
     run('UPDATE messages SET text = ?, edited_at = ?, mentions = ? WHERE id = ?', text, now(), mentions.length ? JSON.stringify(mentions) : null, m.id);
     const msg = loadMessage(m.id);
-    toChat(m.chat_id, 'message:edit', msg);
+    toChatMessage(m.chat_id, 'message:edit', msg);
     return { message: msg };
   });
 
   app.delete('/api/messages/:id', async (req) => {
     const { m, chat, member } = requireMessage(req, req.params.id);
-    const own = m.sender_id === req.user.id;
+    // A channel post is the channel's: its author deletes it only while still allowed to post there.
+    const own = m.sender_id === req.user.id && (chat.type !== 'channel' || canPostAsChannel(req.user, chat, member));
     if (!own && !hasChatPerm(req.user, member, 'delete_messages')) fail(403, 'دسترسی حذف این پیام را ندارید');
     deleteMessage(m, { by: req.user.id });
     if (!own) audit(req.user.id, 'message.delete', m.id, { chat: chat.id, sender: m.sender_id });
@@ -244,8 +272,10 @@ export default async function messageRoutes(app) {
     const allowed = chat.type === 'dm' || chat.type === 'saved' || hasChatPerm(req.user, member, 'pin_messages');
     if (!allowed) fail(403, 'دسترسی سنجاق کردن ندارید');
     const pinned = req.body?.pinned !== false;
+    // Already so (a double tap, a retried request): no change and no second "pinned" notice.
+    if (!!m.pinned === pinned) return { ok: true };
     run('UPDATE messages SET pinned = ? WHERE id = ?', pinned ? 1 : 0, m.id);
-    toChat(m.chat_id, 'message:edit', loadMessage(m.id));
+    toChatMessage(m.chat_id, 'message:edit', loadMessage(m.id));
     if (pinned && chat.type === 'group') systemMessage(chat.id, `${req.user.display_name} پیامی را سنجاق کرد`);
     return { ok: true };
   });

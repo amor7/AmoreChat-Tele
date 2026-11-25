@@ -28,6 +28,9 @@ const MUTE_OPTIONS = [
   ['همیشه', 100 * 365 * 86400e3],
 ];
 
+// What the app calls each kind of room (as in "new chat").
+const typeName = (type) => (type === 'channel' ? 'کانال' : type === 'voice' ? 'کانال صوتی' : 'گروه');
+
 export default function ChatInfo({ chatId, onClose }) {
   const me = useStore((s) => s.me);
   const chat = useStore((s) => s.chats[chatId]);
@@ -59,7 +62,7 @@ export default function ChatInfo({ chatId, onClose }) {
   };
 
   return (
-    <Modal title={chat.type === 'channel' ? 'اطلاعات کانال' : 'اطلاعات گروه'} onClose={onClose}>
+    <Modal title={`اطلاعات ${typeName(chat.type)}`} onClose={onClose}>
       <InfoHeader chat={chat} canEdit={can('edit_info') && !chat.isEmergency} />
       {chat.description && <p className="description">{chat.description}</p>}
 
@@ -71,7 +74,7 @@ export default function ChatInfo({ chatId, onClose }) {
         {chat.type === 'channel' ? 'مشترکان' : 'اعضا'} ({toFa(chat.memberCount)})
       </h4>
       {data?.membersHidden && <p className="muted tiny">{chat.type === 'channel' ? 'لیست مشترکان کانال فقط برای مدیران کانال قابل مشاهده است.' : 'لیست اعضا فقط برای مدیران قابل مشاهده است. اینجا فقط مدیران را می‌بینید.'}</p>}
-      {can('add_members') && !chat.isEmergency && <AddMembers chatId={chat.id} members={data?.members || []} onDone={load} />}
+      {can('add_members') && !chat.isEmergency && <AddMembers chatId={chat.id} members={data?.members || []} banned={can('ban_members') ? [] : data?.bannedIds || []} onDone={load} />}
       <ul className="user-list">
         {data?.members.map((m) => (
           <MemberRow key={m.id} m={m} chat={chat} me={me} isOwner={isOwner} run={run} />
@@ -117,14 +120,14 @@ export default function ChatInfo({ chatId, onClose }) {
           <button
             className="btn danger"
             onClick={async () =>
-              (await confirmDialog({ title: `این ${chat.type === 'channel' ? 'کانال' : 'گروه'} برای همه حذف شود؟`, message: 'برای همه‌ی اعضا پاک می‌شود.', confirmLabel: 'حذف', danger: true })) &&
+              (await confirmDialog({ title: `این ${typeName(chat.type)} برای همه حذف شود؟`, message: 'برای همه‌ی اعضا پاک می‌شود.', confirmLabel: 'حذف', danger: true })) &&
               run(async () => {
                 await api('DELETE', `/chats/${chat.id}`);
                 onClose();
               })
             }
           >
-            حذف {chat.type === 'channel' ? 'کانال' : 'گروه'}
+            حذف {typeName(chat.type)}
           </button>
         )}
       </div>
@@ -183,7 +186,7 @@ function InfoHeader({ chat, canEdit }) {
         )}
         {chat.fromTelegram && <div className="muted">کپی کانال اصلی در تلگرام است، نه کانال خود AmoreChat</div>}
         <div className="muted">
-          {chat.type === 'channel' ? 'کانال' : 'گروه'} {chat.isPublic ? 'عمومی' : 'خصوصی'} · {toFa(chat.memberCount)} {chat.type === 'channel' ? 'مشترک' : 'عضو'}
+          {typeName(chat.type)} {chat.isPublic ? 'عمومی' : 'خصوصی'} · {toFa(chat.memberCount)} {chat.type === 'channel' ? 'مشترک' : 'عضو'}
         </div>
         {chat.myRole !== 'member' && <span className="role-badge">{ROLE_LABELS[chat.myRole]}</span>}
       </div>
@@ -191,29 +194,43 @@ function InfoHeader({ chat, canEdit }) {
   );
 }
 
-function EditChat({ chat }) {
-  const showToast = useStore((s) => s.showToast);
-  const [open, setOpen] = useState(false);
-  const [f, setF] = useState({
+// The edit form's values for the chat as it is now.
+function chatForm(chat) {
+  return {
     title: chat.title,
-    description: chat.description,
+    description: chat.description ?? '',
     isPublic: chat.isPublic,
     handle: chat.handle || '',
     slowMode: chat.slowMode,
     locked: chat.locked,
     autoDelete: chat.autoDelete || 0,
     ...(chat.type === 'group' ? { voiceStage: chat.voiceStage, hideMembers: chat.hideMembers } : {}),
-  });
+  };
+}
+
+function EditChat({ chat }) {
+  const showToast = useStore((s) => s.showToast);
+  const [open, setOpen] = useState(false);
+  // `start`: the values when the form opened. Only what was changed here is sent, so another
+  // admin's edit in the meantime is kept, and an untouched timer posts no new notice.
+  const [start, setStart] = useState(() => chatForm(chat));
+  const [f, setF] = useState(start);
+
+  function openForm() {
+    const now = chatForm(chat);
+    setStart(now);
+    setF(now);
+    setOpen(true);
+  }
 
   async function save(e) {
     e.preventDefault();
     try {
-      // Only send autoDelete when it changed: the server posts a notice about it.
-      const { autoDelete, handle, ...rest } = f;
-      const body = autoDelete !== (chat.autoDelete || 0) ? { ...rest, autoDelete } : rest;
+      const body = {};
+      for (const k of Object.keys(f)) if (k !== 'handle' && f[k] !== start[k]) body[k] = f[k];
       // The handle field is hidden for a private chat: its old value is not something to save.
-      if (f.isPublic || chat.fromTelegram) body.handle = handle;
-      await api('PATCH', `/chats/${chat.id}`, body);
+      if ((f.isPublic || chat.fromTelegram) && (f.handle !== start.handle || body.isPublic !== undefined)) body.handle = f.handle;
+      if (Object.keys(body).length) await api('PATCH', `/chats/${chat.id}`, body);
       showToast('ذخیره شد');
       setOpen(false);
     } catch (err) {
@@ -223,7 +240,7 @@ function EditChat({ chat }) {
 
   if (!open)
     return (
-      <button className="btn wide" onClick={() => setOpen(true)}>
+      <button className="btn wide" onClick={openForm}>
         <Settings size={17} /> ویرایش و تنظیمات
       </button>
     );
@@ -354,7 +371,7 @@ function InviteLinks({ chatId, isPublic }) {
               کپی
             </button>
             <QrButton value={link(i.code)} title="کد QR لینک دعوت" />
-            <button className="btn sm danger" onClick={() => api('DELETE', `/chats/${chatId}/invites/${i.code}`).then(load)}>
+            <button className="btn sm danger" onClick={() => api('DELETE', `/chats/${chatId}/invites/${i.code}`).then(load, (e) => showToast(e.message))}>
               لغو
             </button>
           </li>
@@ -364,7 +381,8 @@ function InviteLinks({ chatId, isPublic }) {
   );
 }
 
-function AddMembers({ chatId, members, onDone }) {
+// `banned`: left out for an admin who can't lift bans (the server refuses adding them back).
+function AddMembers({ chatId, members, banned, onDone }) {
   const showToast = useStore((s) => s.showToast);
   const [open, setOpen] = useState(false);
   if (!open)
@@ -376,7 +394,7 @@ function AddMembers({ chatId, members, onDone }) {
   return (
     <div className="boxed">
       <UserSearch
-        exclude={members.map((m) => m.id)}
+        exclude={[...members.map((m) => m.id), ...banned]}
         onPick={async (u) => {
           try {
             await api('POST', `/chats/${chatId}/members`, { userIds: [u.id] });
@@ -404,7 +422,8 @@ function MemberRow({ m, chat, me, isOwner, run }) {
   // Mirrors server rules: only the chat owner may act on admins.
   const outranks = m.chatRole === 'member' || (m.chatRole === 'admin' && isOwner);
   const muted = m.mutedUntil && m.mutedUntil > Date.now();
-  const hasActions = !self && (isOwner || (outranks && (can('mute_members') || can('ban_members'))));
+  // The chat's owner can't be removed, banned or muted by anyone (there is no ownership transfer).
+  const hasActions = !self && m.chatRole !== 'owner' && (isOwner || (outranks && (can('mute_members') || can('ban_members'))));
 
   const path = `/chats/${chat.id}/members/${m.id}`;
   const patch = (body, ok) => run(() => api('PATCH', path, body), ok);
@@ -437,7 +456,8 @@ function MemberRow({ m, chat, me, isOwner, run }) {
             <div className="perm-box">
               <b>{m.chatRole === 'admin' ? 'دسترسی‌های ادمین' : 'ارتقا به ادمین با دسترسی‌های:'}</b>
               {Object.entries(CHAT_PERM_LABELS)
-                .filter(([p]) => chat.type === 'channel' || p !== 'post_messages')
+                // The announcements channel is posted in with the site's broadcast right, not this one.
+                .filter(([p]) => (chat.type === 'channel' && !chat.isEmergency) || p !== 'post_messages')
                 .map(([p, label]) => (
                   <label key={p} className="check">
                     <input
@@ -448,6 +468,7 @@ function MemberRow({ m, chat, me, isOwner, run }) {
                     {label}
                   </label>
                 ))}
+              {chat.isEmergency && <p className="muted tiny">ارسال در این کانال فقط با دسترسی سایتی «ارسال در کانال اطلاع‌رسانی» است، نه با دسترسی‌های این کانال.</p>}
               <div className="actions">
                 <button className="btn primary sm" onClick={() => patch({ role: 'admin', perms }, 'ذخیره شد')}>
                   {m.chatRole === 'admin' ? 'ذخیره دسترسی‌ها' : 'ادمین کن'}
@@ -460,7 +481,7 @@ function MemberRow({ m, chat, me, isOwner, run }) {
               </div>
             </div>
           )}
-          {hasActions && outranks && can('mute_members') && chat.type === 'group' && (
+          {hasActions && outranks && can('mute_members') && (chat.type === 'group' || chat.type === 'voice') && (
             <div className="inline-form">
               <span className="with-icon">
                 <VolumeX size={15} /> بی‌صدا:
@@ -479,8 +500,8 @@ function MemberRow({ m, chat, me, isOwner, run }) {
           )}
           {hasActions && outranks && can('ban_members') && !chat.isEmergency && (
             <div className="inline-form">
-              <button className="btn sm danger" onClick={async () => (await confirmDialog({ title: `${isolate(m.displayName)} از ${chat.type === 'channel' ? 'کانال' : 'گروه'} حذف شود؟`, confirmLabel: 'حذف', danger: true })) && run(() => api('DELETE', path), 'حذف شد')}>
-                حذف از {chat.type === 'channel' ? 'کانال' : 'گروه'}
+              <button className="btn sm danger" onClick={async () => (await confirmDialog({ title: `${isolate(m.displayName)} از ${typeName(chat.type)} حذف شود؟`, confirmLabel: 'حذف', danger: true })) && run(() => api('DELETE', path), 'حذف شد')}>
+                حذف از {typeName(chat.type)}
               </button>
               <button
                 className="btn sm danger"

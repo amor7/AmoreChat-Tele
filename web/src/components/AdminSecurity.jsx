@@ -14,6 +14,8 @@ export default function AdminSecurity() {
   const [ip, setIp] = useState('');
   const [minutes, setMinutes] = useState('');
   const [reason, setReason] = useState('');
+  // Bumped when a save is refused, so the number fields show the saved value again.
+  const [rev, setRev] = useState(0);
   const owner = me.role === 'owner';
 
   const load = () =>
@@ -51,6 +53,7 @@ export default function AdminSecurity() {
       setData({ ...data, settings: (await api('PATCH', '/admin/security', patch)).settings });
       showToast('ذخیره شد');
     } catch (e) {
+      setRev((n) => n + 1);
       showToast(e.message);
     }
   };
@@ -150,7 +153,7 @@ export default function AdminSecurity() {
                 dir="ltr"
                 style={{ width: 72 }}
                 defaultValue={s.threshold}
-                key={`t-${s.threshold}`}
+                key={`t-${s.threshold}-${rev}`}
                 onBlur={(e) => Number(e.target.value) !== s.threshold && save({ threshold: Math.round(Number(e.target.value)) })}
               />
               رمز اشتباه از یک آی‌پی در ۱۵ دقیقه
@@ -169,7 +172,7 @@ export default function AdminSecurity() {
                 dir="ltr"
                 style={{ width: 90 }}
                 defaultValue={s.autoBanMinutes}
-                key={`m-${s.autoBanMinutes}`}
+                key={`m-${s.autoBanMinutes}-${rev}`}
                 onBlur={(e) => Number(e.target.value) !== s.autoBanMinutes && save({ autoBanMinutes: Math.round(Number(e.target.value)) || 0 })}
               />
               دقیقه (۰ = تا وقتی دستی برداشته شود)

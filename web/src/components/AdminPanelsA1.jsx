@@ -197,6 +197,7 @@ export function Users({ onStorage }) {
     return () => clearTimeout(t);
   }, [q]);
 
+  // The answer on success, undefined when it failed (the error is shown as a toast).
   const run = async (fn, ok) => {
     try {
       const r = await fn();

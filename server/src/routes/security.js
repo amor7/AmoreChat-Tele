@@ -41,7 +41,7 @@ export default async function securityRoutes(app) {
     needSecurity(req);
     const ip = normalizeIp(decodeURIComponent(req.params.ip));
     if (!ip) fail(400, 'آی‌پی نامعتبر است');
-    unbanIp(ip);
+    if (!unbanIp(ip)) fail(404, 'این آی‌پی بن نیست');
     audit(req.user.id, 'security.unban', ip);
     return { bans: listBans() };
   });

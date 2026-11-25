@@ -1,4 +1,4 @@
-import { get, all, run } from './db.js';
+import { get, all, run, onRollback } from './db.js';
 
 export const DEFAULTS = {
   site_name: 'AmoreChat',
@@ -48,6 +48,10 @@ export const DEFAULTS = {
 };
 
 let cache = null;
+// setSetting reloads the cache inside a transaction; a rollback must not leave those values behind.
+onRollback(() => {
+  if (cache) load();
+});
 
 function load() {
   cache = { ...DEFAULTS };

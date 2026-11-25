@@ -63,6 +63,21 @@ jobs:
           for i in $(seq 1 30); do curl -sf http://localhost:3104/healthz && break; sleep 1; done
           CODE=$(grep -oP 'SETUP CODE: \K\S+' server-acc.log)
           node server/test/account.mjs http://127.0.0.1:3104 "$CODE"
+      - name: Bug-hunt regressions (messages, chats, account, admin)
+        run: |
+          set -e
+          run_one () {
+            name=$1; port=$2; shift 2
+            DATA_DIR=/tmp/hs-$name PORT=$port node server/src/index.js > server-$name.log 2>&1 &
+            for i in $(seq 1 30); do curl -sf http://localhost:$port/healthz && break; sleep 1; done
+            CODE=$(grep -oP 'SETUP CODE: \K\S+' server-$name.log)
+            DATA_DIR=/tmp/hs-$name node server/test/bugs-$name.mjs http://127.0.0.1:$port "$CODE" "$@"
+            ! grep '"level":50' server-$name.log # a refused request is a 4xx, never a hidden 500
+          }
+          run_one messages 3120
+          run_one chats 3121
+          run_one account 3122
+          run_one admin 3123 /tmp/hs-admin
       - name: Storage management and restrictions
         run: |
           DATA_DIR=/tmp/hs-sto PORT=3119 node server/src/index.js > server-sto.log 2>&1 &
@@ -92,7 +107,7 @@ jobs:
           ! grep "\"level\":50" server-dm.log
       - name: Server logs
         if: always()
-        run: cat server.log server-rtc.log server-acc.log server-pen.log server-tl.log server-dm.log
+        run: cat server.log server-rtc.log server-acc.log server-pen.log server-tl.log server-dm.log server-sto.log server-messages.log server-chats.log server-account.log server-admin.log || true
 
   compose:
     runs-on: ubuntu-latest

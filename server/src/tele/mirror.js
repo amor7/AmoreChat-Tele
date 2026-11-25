@@ -10,7 +10,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { get, all, run, now, UPLOAD_DIR } from '../db.js';
 import { settingNumber } from '../settings.js';
-import { createChat, addMember, postMessage, systemMessage, getMember, loadMessage } from '../chats.js';
+import { createChat, addMember, postMessage, systemMessage, getMember, loadMessage, toChatMessage } from '../chats.js';
 import { toChat } from '../realtime.js';
 import { randomCode } from '../auth.js';
 import { liveClient, overQuota } from './accounts.js';
@@ -182,7 +182,7 @@ async function runMirror(m, owner, client, { limit = m.kind === 'group' ? 100 : 
         msg.id, m.account_id, media.remote, media.w || null, media.h || null, media.size || null, media.kind, media.fileType, String(media.name || '').slice(0, 200), media.mime, media.duration,
       );
       // The post was sent before its media note existed: send it again with the placeholder.
-      toChat(m.chat_id, 'message:edit', loadMessage(msg.id));
+      toChatMessage(m.chat_id, 'message:edit', loadMessage(msg.id));
     }
     run('UPDATE tele_mirrors SET last_msg_id = ? WHERE id = ?', p.id, m.id);
   }
@@ -239,7 +239,7 @@ export function loadMirrorMedia(user, messageId) {
         run('UPDATE messages SET type = ?, file_id = ? WHERE id = ?', type, f.id, id);
         run('DELETE FROM tele_mirror_photos WHERE message_id = ?', id);
         const updated = loadMessage(id);
-        toChat(msg.chat_id, 'message:edit', updated);
+        toChatMessage(msg.chat_id, 'message:edit', updated);
         return updated;
       })().finally(() => loading.delete(id)),
     );

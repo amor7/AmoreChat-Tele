@@ -21,7 +21,7 @@ import { checkTotp, useRecoveryCode, passwordProblem, deviceName } from '../secu
 import { presenceOf, presenceAudience, LAST_SEEN_MODES } from '../presence.js';
 import { toUser, disconnectSessions } from '../realtime.js';
 import { mediaReady } from '../media.js';
-import { spendLookup, isUserStaff, searchAcquaintances, knowsUser } from '../lookup.js';
+import { spendLookup, isUserStaff, searchAcquaintances, canViewProfile } from '../lookup.js';
 import { rtcEnabled } from '../livekit.js';
 import { handleTaken } from '../handles.js';
 import { lockSession } from '../tele/passcode.js';
@@ -43,7 +43,9 @@ const WRONG_LOGIN = 'نام کاربری یا رمز عبور اشتباه اس�
 const DEVICE_COOKIE = 'ac_device';
 const DEVICE_MS = 365 * 24 * 3600 * 1000;
 const sha256 = (s) => crypto.createHash('sha256').update(s).digest('hex');
-const deviceFails = new Map(); // "user:token hash" → { n, until, at }
+// Each entry remembers the password hash it was counted under: a new password (changed by the user,
+// reset by an admin or with reset-password-cli) starts the device's count and lock afresh.
+const deviceFails = new Map(); // "user:token hash" → { n, until, at, pw }
 // Forgotten once the lock (if any) has passed and nothing has gone wrong for a while.
 setInterval(() => {
   for (const [k, d] of deviceFails) if ((d.until || 0) < now() && d.at < now() - LOCK_MS) deviceFails.delete(k);
@@ -54,7 +56,11 @@ function trustedDevice(user, req) {
   const hash = sha256(token);
   return get('SELECT 1 AS ok FROM trusted_devices WHERE token_hash = ? AND user_id = ? AND at > ?', hash, user.id, now() - DEVICE_MS) ? `${user.id}:${hash}` : null;
 }
-const isLocked = (user, device) => (device ? (deviceFails.get(device)?.until || 0) > now() : (user?.locked_until || 0) > now());
+function deviceEntry(user, device) {
+  const d = deviceFails.get(device);
+  return d && d.pw === user.password_hash ? d : null;
+}
+const isLocked = (user, device) => (device ? (deviceEntry(user, device)?.until || 0) > now() : (user?.locked_until || 0) > now());
 function rememberDevice(user, req, reply) {
   const token = req.cookies[DEVICE_COOKIE] || randomCode(32);
   run('INSERT OR REPLACE INTO trusted_devices (token_hash, user_id, at) VALUES (?, ?, ?)', sha256(token), user.id, now());
@@ -63,7 +69,7 @@ function rememberDevice(user, req, reply) {
 function noteFailedLogin(user, req) {
   const device = trustedDevice(user, req);
   if (device) {
-    const d = deviceFails.get(device) || { n: 0, until: 0 };
+    const d = deviceEntry(user, device) || { n: 0, until: 0, pw: user.password_hash };
     d.n += 1;
     d.at = now();
     if (d.n >= LOCK_AFTER) Object.assign(d, { n: 0, until: now() + LOCK_MS });
@@ -79,11 +85,19 @@ function noteFailedLogin(user, req) {
   }
 }
 
+function clearFailures(user, device) {
+  if (device) deviceFails.delete(device);
+  // Coming in on a known device during an attack doesn't give the attacker new tries.
+  if ((user.locked_until || 0) <= now()) run('UPDATE users SET failed_logins = 0, locked_until = NULL WHERE id = ?', user.id);
+}
+
 // Password-checked, waiting for the authenticator code. In memory: a restart just asks again.
+// A ticket keeps the password hash and TOTP secret it was issued under, so a password change,
+// an admin reset or turning two-step login off (or on again) makes the old tickets useless.
 const tickets = new Map();
-function issueTicket(userId) {
+function issueTicket(user) {
   const t = randomCode(24);
-  tickets.set(t, { userId, expires: now() + 5 * 60 * 1000, attempts: 0 });
+  tickets.set(t, { userId: user.id, pw: user.password_hash, secret: user.totp_secret, expires: now() + 5 * 60 * 1000, attempts: 0 });
   for (const [k, v] of tickets) if (v.expires < now()) tickets.delete(k);
   return t;
 }
@@ -126,10 +140,10 @@ export default async function authRoutes(app) {
     const mode = getSetting('registration_mode');
 
     if (!firstUser && mode === 'closed') fail(403, 'ثبت‌نام در حال حاضر بسته است');
-    if (!USERNAME_RE.test(username || '')) fail(400, 'نام کاربری باید ۳ تا ۳۲ حرف انگلیسی، عدد یا _ باشد و با حرف شروع شود');
+    if (typeof username !== 'string' || !USERNAME_RE.test(username)) fail(400, 'نام کاربری باید ۳ تا ۳۲ حرف انگلیسی، عدد یا _ باشد و با حرف شروع شود');
     const weak = passwordProblem(password, username);
     if (weak) fail(400, weak);
-    const name = String(displayName || '').trim().slice(0, 64);
+    const name = typeof displayName === 'string' ? displayName.trim().slice(0, 64) : '';
     if (!name) fail(400, 'نام نمایشی را وارد کنید');
 
     let inv = null;
@@ -186,19 +200,28 @@ export default async function authRoutes(app) {
       fail(401, WRONG_LOGIN);
     }
     if (user.banned) fail(403, 'حساب شما مسدود شده است');
-    if (device) deviceFails.delete(device);
-    // Coming in on a known device during an attack doesn't give the attacker new tries.
-    if ((user.locked_until || 0) <= now()) run('UPDATE users SET failed_logins = 0, locked_until = NULL WHERE id = ?', user.id);
-    if (user.totp_enabled) return { twoFactor: true, ticket: issueTicket(user.id) };
+    // With two-step login on, the password alone proves nothing yet: the failure count is kept
+    // until the code checks out too (else wrong codes could be guessed forever, 9 at a time).
+    if (user.totp_enabled) return { twoFactor: true, ticket: issueTicket(user) };
+    clearFailures(user, device);
     startSession(user, req, reply);
     return { user: selfUser(user) };
   });
 
   app.post('/api/auth/2fa', { config: { public: true, ...authLimit } }, async (req, reply) => {
-    const t = tickets.get(String(req.body?.ticket || ''));
-    if (!t || t.expires < now()) fail(401, 'زمان ورود تمام شد؛ دوباره نام کاربری و رمز را وارد کنید');
-    const user = get('SELECT * FROM users WHERE id = ?', t.userId);
-    if (!user || user.banned) fail(403, 'حساب شما مسدود شده است');
+    const key = String(req.body?.ticket || '');
+    const t = tickets.get(key);
+    const user = t && get('SELECT * FROM users WHERE id = ?', t.userId);
+    if (!t || t.expires < now() || !user || !user.totp_enabled || user.password_hash !== t.pw || user.totp_secret !== t.secret) {
+      tickets.delete(key);
+      fail(401, 'زمان ورود تمام شد؛ دوباره نام کاربری و رمز را وارد کنید');
+    }
+    if (user.banned) fail(403, 'حساب شما مسدود شده است');
+    const device = trustedDevice(user, req);
+    if (isLocked(user, device)) {
+      tickets.delete(key);
+      fail(401, 'به خاطر تلاش‌های ناموفق، ورود ۱۵ دقیقه قفل شد');
+    }
     const code = String(req.body?.code || '');
     const step = checkTotp(user.totp_secret, code, user.totp_last_step);
     if (step) {
@@ -206,7 +229,7 @@ export default async function authRoutes(app) {
     } else {
       const left = useRecoveryCode(parseJSON(user.recovery_codes, []), code);
       if (!left) {
-        if (++t.attempts >= 5) tickets.delete(req.body.ticket);
+        if (++t.attempts >= 5) tickets.delete(key);
         noteFailedLogin(user, req);
         noteLoginFailure(req.ip, user.username);
         fail(401, 'کد اشتباه است');
@@ -214,7 +237,8 @@ export default async function authRoutes(app) {
       run('UPDATE users SET recovery_codes = ? WHERE id = ?', JSON.stringify(left), user.id);
       audit(user.id, 'user.recovery_code_used', user.id, { left: left.length });
     }
-    tickets.delete(req.body.ticket);
+    tickets.delete(key);
+    clearFailures(user, device);
     startSession(user, req, reply);
     return { user: selfUser(user) };
   });
@@ -244,32 +268,41 @@ export default async function authRoutes(app) {
     return { ok: true, loggedOut };
   });
 
+  // Everything is checked first and written together: a bad field changes nothing.
   app.patch('/api/me', async (req) => {
     const { displayName, bio, avatar, lastSeenPrivacy } = req.body || {};
     const u = req.user;
+    const set = {};
     if (lastSeenPrivacy !== undefined) {
       if (!LAST_SEEN_MODES.includes(lastSeenPrivacy)) fail(400, 'گزینه نامعتبر است');
-      const before = presenceAudience(u.id);
-      run('UPDATE users SET last_seen_privacy = ? WHERE id = ?', lastSeenPrivacy, u.id);
+      set.last_seen_privacy = lastSeenPrivacy;
+    }
+    if (displayName !== undefined) {
+      const name = typeof displayName === 'string' ? displayName.trim().slice(0, 64) : '';
+      if (!name) fail(400, 'نام نمایشی خالی است');
+      set.display_name = name;
+    }
+    if (bio !== undefined) {
+      if (bio !== null && typeof bio !== 'string') fail(400, 'بیوگرافی نامعتبر است');
+      set.bio = (bio || '').slice(0, 300);
+    }
+    if (avatar !== undefined) {
+      if (avatar !== null) {
+        const f = Number.isSafeInteger(avatar) && get("SELECT 1 AS ok FROM files WHERE id = ? AND owner_id = ? AND kind = 'image'", avatar, u.id);
+        if (!f) fail(400, 'تصویر نامعتبر است');
+      }
+      set.avatar_file_id = avatar;
+    }
+    const cols = Object.keys(set);
+    const before = set.last_seen_privacy !== undefined ? presenceAudience(u.id) : null;
+    if (cols.length) run(`UPDATE users SET ${cols.map((c) => `${c} = ?`).join(', ')} WHERE id = ?`, ...Object.values(set), u.id);
+    if (before) {
       // Whoever has this user on screen sees the change now (shown again, or "recently").
-      const me = { ...u, last_seen_privacy: lastSeenPrivacy };
+      const me = { ...u, last_seen_privacy: set.last_seen_privacy };
       for (const id of new Set([...before, ...presenceAudience(u.id)])) {
         const viewer = get('SELECT id, last_seen_privacy FROM users WHERE id = ?', id);
         toUser(id, 'presence', { userId: u.id, ...presenceOf(viewer, me, true) });
       }
-    }
-    if (displayName !== undefined) {
-      const name = String(displayName).trim().slice(0, 64);
-      if (!name) fail(400, 'نام نمایشی خالی است');
-      run('UPDATE users SET display_name = ? WHERE id = ?', name, u.id);
-    }
-    if (bio !== undefined) run('UPDATE users SET bio = ? WHERE id = ?', String(bio).slice(0, 300), u.id);
-    if (avatar !== undefined) {
-      if (avatar !== null) {
-        const f = get("SELECT * FROM files WHERE id = ? AND owner_id = ? AND kind = 'image'", avatar, u.id);
-        if (!f) fail(400, 'تصویر نامعتبر است');
-      }
-      run('UPDATE users SET avatar_file_id = ? WHERE id = ?', avatar, u.id);
     }
     return { user: selfUser(get('SELECT * FROM users WHERE id = ?', u.id)) };
   });
@@ -297,9 +330,16 @@ export default async function authRoutes(app) {
   });
 
   app.get('/api/users/:id', async (req) => {
-    const u = get('SELECT * FROM users WHERE id = ?', Number(req.params.id));
-    // A profile by its number only for people you share a chat with (no walking through ids).
-    if (!u || (u.id !== req.user.id && !isUserStaff(req.user) && !knowsUser(req.user.id, u.id))) fail(404, 'کاربر پیدا نشد');
-    return { user: { ...publicUser(u), ...presenceOf(req.user, u), banned: !!u.banned } };
+    const id = Number(req.params.id);
+    // A profile by its number only for people you share a chat with. Misses (no such user, or not
+    // one you may see) cost from the lookup budget, so ids can't be walked through; opening the
+    // profiles of people you do know (tapping avatars in a busy group) costs nothing.
+    const u = Number.isSafeInteger(id) && id > 0 ? get('SELECT * FROM users WHERE id = ?', id) : null;
+    if (!u || (u.id !== req.user.id && !isUserStaff(req.user) && !canViewProfile(req.user.id, u.id))) {
+      spendLookup(req.user, 'profile');
+      fail(404, 'کاربر پیدا نشد');
+    }
+    // Whether someone is banned from the site is for the staff, not for everyone sharing a chat.
+    return { user: { ...publicUser(u), ...presenceOf(req.user, u), ...(isUserStaff(req.user) ? { banned: !!u.banned } : {}) } };
   });
 }

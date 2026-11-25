@@ -21,7 +21,7 @@ const MSG_SELECT = `
     f.mime AS f_mime, f.size AS f_size, f.name AS f_name, f.kind AS f_kind,
     f.width AS f_w, f.height AS f_h, f.duration AS f_dur, f.status AS f_status,
     f.variants AS f_variants, f.thumb AS f_thumb, f.waveform AS f_wave, f.purged AS f_purged, f.title AS f_title, f.artist AS f_artist,
-    ch.type AS chat_type, ch.title AS chat_title, ch.avatar_file_id AS chat_avatar, r.text AS r_text, r.type AS r_type, r.deleted AS r_deleted, ru.display_name AS r_sender,
+    ch.type AS chat_type, ch.hide_members AS chat_hide_members, ch.title AS chat_title, ch.avatar_file_id AS chat_avatar, r.text AS r_text, r.type AS r_type, r.deleted AS r_deleted, ru.display_name AS r_sender,
     tp.message_id AS tp_id, tp.w AS tp_w, tp.h AS tp_h, tp.size AS tp_size, tp.kind AS tp_kind, tp.name AS tp_name, tp.duration AS tp_dur,
     dm.message_id AS dm_id
   FROM messages m
@@ -60,10 +60,13 @@ function withReactions(rows) {
 let lastVersion = 0;
 const nextVersion = () => (lastVersion = Math.max(lastVersion + 1, Date.now() * 1000));
 
+// Messages whose `mentions` would reveal members of a group with a hidden member list.
+const hiddenMentions = new WeakSet();
+
 export function serializeMessage(m, reactions = []) {
   if (!m) return null;
   const deleted = !!m.deleted;
-  return {
+  const out = {
     id: m.id,
     v: nextVersion(),
     chatId: m.chat_id,
@@ -118,6 +121,36 @@ export function serializeMessage(m, reactions = []) {
     mentions: deleted || !m.mentions ? [] : parseJSON(m.mentions, []),
     createdAt: m.created_at,
   };
+  // Hidden member list: the server keeps the full list (notifications, unread mentions), but
+  // whatever is sent out says nothing unless made for one viewer (forViewer): fail-safe for every
+  // broadcast and reply, even ones that don't know about this.
+  if (m.chat_type === 'group' && m.chat_hide_members && out.mentions.length) {
+    hiddenMentions.add(out);
+    Object.defineProperty(out, 'toJSON', {
+      value() {
+        return { ...this, mentions: [] };
+      },
+    });
+  }
+  return out;
+}
+
+// The copy of a message one user may see: in a hidden-members group only whether they themselves are mentioned.
+export function forViewer(msg, userId) {
+  if (!msg || !hiddenMentions.has(msg)) return msg;
+  return { ...msg, mentions: msg.mentions.includes(userId) ? [userId] : [] };
+}
+
+// Broadcasts a message to its chat; in a hidden-members group each mentioned member gets their own copy.
+export function toChatMessage(chatId, event, msg) {
+  if (!hiddenMentions.has(msg)) return toChat(chatId, event, msg);
+  const ids = all(
+    'SELECT user_id FROM chat_members WHERE chat_id = ? AND user_id IN (SELECT value FROM json_each(?))',
+    chatId,
+    JSON.stringify(msg.mentions),
+  ).map((r) => r.user_id);
+  toChatExcept(chatId, ids, event, msg);
+  for (const id of ids) toUser(id, event, forViewer(msg, id));
 }
 
 // Members named as @username in the text (groups), plus the author of the replied-to message
@@ -136,25 +169,30 @@ export function findMentions(chatId, text, replyTo = null, senderId = null) {
       ids.add(r.id);
   }
   if (replyTo) {
-    const r = get('SELECT sender_id FROM messages WHERE id = ? AND chat_id = ?', replyTo, chatId);
+    const r = get('SELECT sender_id FROM messages WHERE id = ? AND chat_id = ? AND deleted = 0', replyTo, chatId);
     if (r?.sender_id) ids.add(r.sender_id);
   }
   ids.delete(senderId);
   return [...ids];
 }
 
-// Marks which anonymous (channel) reactions are the viewer's own.
+// The copies one viewer gets: which anonymous (channel) reactions are their own, and only their
+// own mention in a hidden-members group. Never changes the given messages (they may be broadcast too).
 export function withMine(messages, userId) {
-  const anon = messages.filter((m) => m?.reactions?.some((r) => r.count != null));
-  if (!anon.length) return messages;
-  const rows = all(
-    'SELECT message_id, emoji FROM reactions WHERE user_id = ? AND message_id IN (SELECT value FROM json_each(?))',
-    userId,
-    JSON.stringify(anon.map((m) => m.id)),
-  );
+  const isAnon = (m) => m?.reactions?.some((r) => r.count != null);
+  const anon = messages.filter(isAnon);
+  const rows = anon.length
+    ? all(
+        'SELECT message_id, emoji FROM reactions WHERE user_id = ? AND message_id IN (SELECT value FROM json_each(?))',
+        userId,
+        JSON.stringify(anon.map((m) => m.id)),
+      )
+    : [];
   const mine = new Set(rows.map((r) => `${r.message_id}:${r.emoji}`));
-  for (const m of anon) m.reactions = m.reactions.map((r) => ({ ...r, mine: mine.has(`${m.id}:${r.emoji}`) }));
-  return messages;
+  return messages.map((m) => {
+    const v = forViewer(m, userId);
+    return isAnon(m) ? { ...v, reactions: v.reactions.map((r) => ({ ...r, mine: mine.has(`${m.id}:${r.emoji}`) })) } : v;
+  });
 }
 
 // Channels always hide their member list from regular members; groups when the admin turns it on.
@@ -163,6 +201,8 @@ export const membersHidden = (chat) => chat.type === 'channel' || (chat.type ===
 // Read up to a message: the senders get their ticks, and my other devices drop the notification.
 export function markRead(chatId, userId, messageId) {
   const member = getMember(chatId, userId);
+  // Never past this chat's newest message: a made-up id would mark every future message as read by them.
+  messageId = Math.min(messageId, get('SELECT IFNULL(MAX(id), 0) AS id FROM messages WHERE chat_id = ?', chatId).id);
   if (!member || messageId <= member.last_read) return;
   run('UPDATE chat_members SET last_read = ? WHERE chat_id = ? AND user_id = ?', messageId, chatId, userId);
   // With a hidden member list, don't reveal who read: others only learn that someone did.
@@ -239,7 +279,7 @@ function formatSummary(c, userId) {
     unreadMentions: c.unread_mentions,
     pinnedAt: c.pinned_at || null,
     notifyMutedUntil: c.notify_muted_until && c.notify_muted_until > now() ? c.notify_muted_until : null,
-    lastMessage: c.last_msg_id ? loadMessage(c.last_msg_id) : null,
+    lastMessage: c.last_msg_id ? forViewer(loadMessage(c.last_msg_id), userId) : null,
     createdAt: c.created_at,
     peer: null,
   };
@@ -301,7 +341,7 @@ export function postMessage({ chatId, senderId = null, type = 'text', text = '',
     return msgId;
   });
   const msg = loadMessage(id);
-  toChat(chatId, 'message:new', msg);
+  toChatMessage(chatId, 'message:new', msg);
   notifyMessage(msg, senderId);
   return msg;
 }

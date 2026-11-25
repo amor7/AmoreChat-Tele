@@ -59,6 +59,24 @@ export default function ChatView({ chatId }) {
       .catch((e) => st().showToast(e.message));
   }, [chatId, !!chat, publicVoice]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Not in the list I have: e.g. a private chat with no message yet (the server lists those only
+  // once written in) after a reload or a link. Ask for it once before saying it isn't there.
+  const [missing, setMissing] = useState(null); // chatId the server says I can't open
+  useEffect(() => {
+    if (chat || publicVoice) return;
+    let live = true;
+    api('GET', `/chats/${chatId}`)
+      .then(({ chat: c }) => {
+        if (!live) return;
+        if (c?.myRole) st().upsertChat(c);
+        else setMissing(chatId);
+      })
+      .catch(() => live && setMissing(chatId));
+    return () => {
+      live = false;
+    };
+  }, [chatId, !!chat, publicVoice]); // eslint-disable-line react-hooks/exhaustive-deps
+
   useEffect(() => {
     if (!chat) return;
     // A search result may have asked to open this chat at a specific message.
@@ -171,6 +189,7 @@ export default function ChatView({ chatId }) {
 
   if (!chat) {
     if (publicVoice) return <BusyState text="در حال ورود به کانال…" />;
+    if (missing !== chatId) return <BusyState text="در حال باز کردن گفتگو…" />;
     return (
       <EmptyState
         hint="این گفتگو در دسترس نیست."
@@ -482,11 +501,12 @@ function MessageMenu({ m, x, y, mine, canPin, canDelete, canReport, canReaders, 
         </div>
       )}
       {!deleted && item('reply', <Reply size={17} />, 'پاسخ')}
-      {!deleted && item('forward', <Forward size={17} />, 'فوروارد')}
+      {!deleted && m.type !== 'call' && item('forward', <Forward size={17} />, 'فوروارد')}
       {!deleted && m.type !== 'call' && item('toTele', <Send size={17} />, 'ارسال به تلگرام')}
       {!deleted && m.text && item('copy', <Copy size={17} />, 'کپی متن')}
       {!deleted && canReaders && item('readers', <Eye size={17} />, 'دیده‌شده توسط')}
-      {!deleted && mine && item('edit', <Pencil size={17} />, 'ویرایش')}
+      {/* Call logs and forwarded messages (someone else's words) can't be edited, like Telegram. */}
+      {!deleted && mine && m.type !== 'call' && !m.forwardedFrom && item('edit', <Pencil size={17} />, 'ویرایش')}
       {!deleted && canPin && item(m.pinned ? 'unpin' : 'pin', m.pinned ? <PinOff size={17} /> : <Pin size={17} />, m.pinned ? 'برداشتن سنجاق' : 'سنجاق کردن')}
       {!deleted && canReport && item('report', <Flag size={17} />, 'گزارش')}
       {!deleted && canDelete && item('delete', <Trash2 size={17} />, 'حذف', true)}

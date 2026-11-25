@@ -40,7 +40,12 @@ const isMirror = (chatId) => !!get('SELECT 1 AS x FROM tele_mirrors WHERE chat_i
 export function setChatHandle(user, chatId, value) {
   const chat = get('SELECT id, handle, is_public FROM chats WHERE id = ?', chatId);
   const wanted = clean(value);
-  if (wanted.toLowerCase() === (chat.handle || '').toLowerCase()) return;
+  if (wanted === (chat.handle || '')) return;
+  // The same name in other letter case: still this chat's own, nothing else to check.
+  if (chat.handle && wanted.toLowerCase() === chat.handle.toLowerCase()) {
+    run('UPDATE chats SET handle = ? WHERE id = ?', wanted, chat.id);
+    return;
+  }
   if (!wanted) {
     run('UPDATE chats SET handle = NULL WHERE id = ?', chat.id);
     return;

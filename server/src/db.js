@@ -26,6 +26,10 @@ export const get = (sql, ...p) => stmt(sql).get(...p);
 export const all = (sql, ...p) => stmt(sql).all(...p);
 export const run = (sql, ...p) => stmt(sql).run(...p);
 
+// Caches filled from the database inside a transaction (settings) reload when it rolls back.
+const rollbackHooks = new Set();
+export const onRollback = (fn) => rollbackHooks.add(fn);
+
 export function tx(fn) {
   db.exec('BEGIN');
   try {
@@ -34,6 +38,13 @@ export function tx(fn) {
     return r;
   } catch (e) {
     db.exec('ROLLBACK');
+    for (const hook of rollbackHooks) {
+      try {
+        hook();
+      } catch {
+        /* a cache that can't reload keeps its old values */
+      }
+    }
     throw e;
   }
 }
@@ -545,6 +556,12 @@ const migrations = [
     locked_until INTEGER,
     updated_at INTEGER NOT NULL
   );
+  `,
+  // v27: a read pointer past the chat's last message (sent before the server clamped it) made
+  // everyone's future messages show as read; bring every pointer back to its chat's last message.
+  `
+  UPDATE chat_members SET last_read = COALESCE((SELECT MAX(id) FROM messages WHERE chat_id = chat_members.chat_id), 0)
+  WHERE last_read > COALESCE((SELECT MAX(id) FROM messages WHERE chat_id = chat_members.chat_id), 0);
   `,
 ];
 

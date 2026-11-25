@@ -5,20 +5,35 @@ import { fail } from './chats.js';
 export const STREAM_QUALITIES = [480, 720, 1080];
 export const STREAM_FPS = [30, 60];
 
-// Keys an admin can override per user. null/undefined = use the site default.
+// A number or a numeric string; anything else (true, [5], {}) is NaN.
+const numOf = (v) => (typeof v === 'number' || (typeof v === 'string' && v.trim() !== '') ? Number(v) : NaN);
+const wholeIn = (min, max) => (v) => {
+  const n = numOf(v);
+  return Number.isFinite(n) && n >= min && n <= max ? Math.floor(n) : undefined;
+};
+const oneOf = (list) => (v) => (list.includes(numOf(v)) ? numOf(v) : undefined);
+// "0" and "false" are no, not yes.
+const bool = (v) => ([true, 1, '1', 'true'].includes(v) ? true : [false, 0, '0', 'false'].includes(v) ? false : undefined);
+
+// Keys an admin can override per user. null/undefined/'' = use the site default. Each check
+// returns undefined for a value it does not accept.
 export const LIMIT_KEYS = {
-  upload_mb: (v) => Math.max(1, Math.min(100000, Math.floor(Number(v)))),
-  quota_mb: (v) => Math.max(0, Math.min(10000000, Math.floor(Number(v)))),
-  can_call: (v) => !!v,
-  can_stream: (v) => !!v,
-  stream_quality: (v) => (STREAM_QUALITIES.includes(Number(v)) ? Number(v) : 720),
-  stream_fps: (v) => (STREAM_FPS.includes(Number(v)) ? Number(v) : 30),
+  upload_mb: wholeIn(1, 100000),
+  quota_mb: wholeIn(0, 10000000),
+  can_call: bool,
+  can_stream: bool,
+  stream_quality: oneOf(STREAM_QUALITIES),
+  stream_fps: oneOf(STREAM_FPS),
 };
 
+/** The overrides to store; a value that is not valid is a 400 (nothing is guessed or clamped). */
 export function cleanLimits(input) {
   const out = {};
   for (const [k, fix] of Object.entries(LIMIT_KEYS)) {
-    if (input?.[k] !== undefined && input[k] !== null && input[k] !== '') out[k] = fix(input[k]);
+    if (input?.[k] === undefined || input[k] === null || input[k] === '') continue;
+    const v = fix(input[k]);
+    if (v === undefined) fail(400, `مقدار نامعتبر برای ${k}`);
+    out[k] = v;
   }
   return out;
 }

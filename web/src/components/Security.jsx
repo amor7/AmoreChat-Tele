@@ -30,9 +30,13 @@ function Devices() {
   }
   async function revokeOthers() {
     if (!(await confirmDialog({ title: 'از همه‌ی دستگاه‌های دیگر خارج شوید؟', message: 'روی آن دستگاه‌ها باید دوباره وارد شوید.', confirmLabel: 'خروج', danger: true }))) return;
-    const { loggedOut } = await api('POST', '/me/sessions/revoke-others');
-    showToast(`${toFa(loggedOut)} دستگاه خارج شد`);
-    load();
+    try {
+      const { loggedOut } = await api('POST', '/me/sessions/revoke-others');
+      showToast(`${toFa(loggedOut)} دستگاه خارج شد`);
+      load();
+    } catch (e) {
+      showToast(e.message);
+    }
   }
 
   if (!list) return null;
@@ -215,7 +219,8 @@ function TwoFactor() {
   );
 }
 
-export default function Security() {
+// devicesVersion: bumped by the parent when something else signed devices out (a password change).
+export default function Security({ devicesVersion = 0 }) {
   // Enabling two-step login signs out the other devices: reload the list when it changes.
   const twoFactor = useStore((s) => s.me.twoFactor);
   return (
@@ -224,7 +229,7 @@ export default function Security() {
       <TwoFactor />
       <TelePasscodeSettings />
       <h5>دستگاه‌های وارد شده</h5>
-      <Devices key={String(twoFactor)} />
+      <Devices key={`${twoFactor}:${devicesVersion}`} />
     </>
   );
 }

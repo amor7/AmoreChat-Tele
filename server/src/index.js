@@ -11,8 +11,8 @@ import { pruneOrphanSessions, sessionsRoot } from './tele/session-dirs.js';
 import { startSweeper } from './sweeper.js';
 import { mediaReady, onMediaUpdate, resumePendingMedia, killAllFfmpeg } from './media.js';
 import { setTimerLogger } from './timers.js';
-import { toChat, disconnectIp } from './realtime.js';
-import { loadMessage } from './chats.js';
+import { disconnectIp } from './realtime.js';
+import { loadMessage, toChatMessage } from './chats.js';
 import { hasAnyUser } from './settings.js';
 import { userFromToken, SESSION_COOKIE, randomCode } from './auth.js';
 import { ensureEmergencyChannel } from './chats.js';
@@ -295,7 +295,7 @@ startCertCheck(app.log);
 // When a video finishes processing, refresh every message that shows it.
 onMediaUpdate((fileId) => {
   for (const m of all('SELECT id, chat_id FROM messages WHERE file_id = ? AND deleted = 0', fileId)) {
-    toChat(m.chat_id, 'message:edit', loadMessage(m.id));
+    toChatMessage(m.chat_id, 'message:edit', loadMessage(m.id));
   }
 });
 resumePendingMedia();

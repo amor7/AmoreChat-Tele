@@ -7,16 +7,19 @@ const MAX_PINNED = 10;
 const MAX_FOLDERS = 20;
 const FILTERS = ['dms', 'groups', 'channels', 'voice', 'unread'];
 
+// A chat that was deleted, or that the user left, is no longer in their folders.
 const folderOut = (f) => ({
   id: f.id,
   name: f.name,
   emoji: f.emoji,
   position: f.position,
-  chatIds: parseJSON(f.chat_ids, []),
+  chatIds: parseJSON(f.chat_ids, []).filter((id) => getMember(id, f.user_id)),
   filters: parseJSON(f.filters, []),
 });
 
-function clean(b, userId) {
+// `requireOne`: only when the request itself picks the contents. Renaming a folder whose chats
+// are all gone is still allowed (it shows nothing until something is added).
+function clean(b, userId, { requireOne = true } = {}) {
   const name = String(b.name || '').trim().slice(0, 30);
   if (!name) fail(400, 'نام پوشه را بنویسید');
   const emoji = String(b.emoji || '').slice(0, 8);
@@ -24,7 +27,9 @@ function clean(b, userId) {
   // Only chats the user is actually in.
   const ids = Array.isArray(b.chatIds) ? [...new Set(b.chatIds.map(Number))].slice(0, 500) : [];
   const chatIds = ids.filter((id) => getMember(id, userId));
-  if (!filters.length && !chatIds.length) fail(400, 'حداقل یک نوع گفتگو یا یک گفتگو انتخاب کنید');
+  if (requireOne && !filters.length && !chatIds.length) {
+    fail(400, 'پوشه خالی می‌شود: حداقل یک نوع گفتگو یا یک گفتگو انتخاب کنید، یا پوشه را حذف کنید');
+  }
   return { name, emoji, filters, chatIds };
 }
 
@@ -70,7 +75,8 @@ export default async function folderRoutes(app) {
   app.patch('/api/folders/:id', async (req) => {
     const f0 = get('SELECT * FROM chat_folders WHERE id = ? AND user_id = ?', Number(req.params.id), req.user.id);
     if (!f0) fail(404, 'پوشه پیدا نشد');
-    const f = clean({ ...folderOut(f0), ...(req.body || {}) }, req.user.id);
+    const b = req.body || {};
+    const f = clean({ ...folderOut(f0), ...b }, req.user.id, { requireOne: b.chatIds !== undefined || b.filters !== undefined });
     run('UPDATE chat_folders SET name = ?, emoji = ?, chat_ids = ?, filters = ? WHERE id = ?', f.name, f.emoji, JSON.stringify(f.chatIds), JSON.stringify(f.filters), f0.id);
     changed(req.user.id);
     return { folder: folderOut(get('SELECT * FROM chat_folders WHERE id = ?', f0.id)) };

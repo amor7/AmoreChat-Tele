@@ -7,6 +7,14 @@ import { RtcSettings } from './AdminRtc';
 import { useLoad } from './AdminPanelsA1';
 import { Skeleton, ErrorState, EmptyState } from './States';
 
+const NUMBER_FIELDS = [
+  ['max_upload_mb', 'حداکثر حجم هر فایل'],
+  ['user_quota_mb', 'سهمیه فضای هر کاربر'],
+  ['media_retention_days', 'حذف خودکار فایل‌های قدیمی'],
+  ['deleted_keep_days', 'نگه داشتن پیام‌های حذف‌شده'],
+  ['max_streams_per_room', 'حداکثر استریم همزمان'],
+];
+
 export function Settings() {
   const showToast = useStore((s) => s.showToast);
   const [data, load, error] = useLoad('/admin/settings');
@@ -18,8 +26,13 @@ export function Settings() {
 
   async function save(e) {
     e.preventDefault();
+    // An emptied number field would be refused by the server; say which one instead.
+    const empty = NUMBER_FIELDS.find(([k]) => String(f[k] ?? '').trim() === '');
+    if (empty) return showToast(`«${empty[1]}» خالی است؛ یک عدد بنویسید`);
+    // Set from its own page (Telegram access); the form only shows the rest.
+    const { mirror_files_access: _skip, ...body } = f;
     try {
-      const { settings } = await api('PATCH', '/admin/settings', f);
+      const { settings } = await api('PATCH', '/admin/settings', body);
       setF(settings);
       useStore.setState((s) => ({
         config: { ...s.config, siteName: settings.site_name, registrationMode: settings.registration_mode, allowUserGroups: settings.allow_user_groups === '1' },

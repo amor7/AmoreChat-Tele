@@ -16,6 +16,8 @@ export default function VpnAdmin() {
   const [probing, setProbing] = useState(null); // proxy id, or 'all'
   const [page, setPage] = useState('proxies');
   const [adding, setAdding] = useState(false);
+  // Bumped when a proxy edit is refused, so its fields show the saved value again.
+  const [rev, setRev] = useState(0);
 
   const load = () =>
     adminProxies()
@@ -71,6 +73,7 @@ export default function VpnAdmin() {
       await patchProxyApi(id, patch);
       await load();
     } catch (e) {
+      setRev((n) => n + 1);
       showToast(e.message);
     }
   };
@@ -170,7 +173,7 @@ export default function VpnAdmin() {
                           dir="ltr"
                           className="num-input"
                           defaultValue={p.priority}
-                          key={p.priority}
+                          key={`${p.priority}-${rev}`}
                           onBlur={(e) => Number(e.target.value) !== p.priority && patchProxy(p.id, { priority: Number(e.target.value) })}
                         />
                       </label>
