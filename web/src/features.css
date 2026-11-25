@@ -3191,3 +3191,156 @@ input.music-bar-seek:hover::-moz-range-thumb {
     padding: var(--space-3);
   }
 }
+
+/* ---------- A person's profile (UserProfile.jsx), Telegram-like ---------- */
+.avatar-btn {
+  border: 0;
+  background: none;
+  padding: 0;
+  border-radius: 50%;
+  cursor: pointer;
+  display: inline-flex;
+}
+/* The sender's name in a group bubble is a button now: keep its text look. */
+button.sender {
+  border: 0;
+  padding: 0;
+  font-family: inherit;
+  cursor: pointer;
+  text-align: start;
+  display: block;
+  max-width: 100%;
+}
+button.sender:hover {
+  text-decoration: underline;
+}
+.user-profile-head {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 4px;
+  padding: var(--space-2) 0 var(--space-3);
+}
+.user-profile-head h3 {
+  margin: var(--space-2) 0 0;
+  font-size: 20px;
+}
+.user-profile-head p {
+  margin: 0;
+}
+.user-profile-head .is-online {
+  color: var(--accent);
+}
+.profile-photo-btn {
+  border: 0;
+  background: none;
+  padding: 0;
+  border-radius: 50%;
+  cursor: zoom-in;
+  box-shadow: var(--shadow-sm);
+}
+.profile-actions {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: var(--space-2);
+  margin: var(--space-2) 0 var(--space-3);
+}
+.profile-action {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 64px;
+  padding: var(--space-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--panel-2);
+  color: var(--accent);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background var(--dur-fast);
+}
+.profile-action:hover {
+  background: var(--accent-soft);
+}
+.profile-action.primary {
+  background: var(--grad);
+  border-color: transparent;
+  color: var(--on-accent);
+}
+.profile-action:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.profile-details {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-radius: var(--radius);
+  background: var(--panel-2);
+  overflow: hidden;
+}
+.profile-details:empty {
+  display: none;
+}
+.profile-details .row-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-3);
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  text-align: start;
+}
+.profile-details button.row-item {
+  cursor: pointer;
+}
+.profile-details .row-item .grow {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.profile-details b {
+  color: var(--text);
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.profile-details .profile-bio {
+  white-space: pre-wrap;
+}
+.profile-details small {
+  font-size: 12px;
+}
+.profile-details li + li {
+  border-top: 1px solid var(--border);
+}
+.profile-details .profile-role {
+  padding: var(--space-2) var(--space-3);
+}
+/* Group member list: the row opens the profile; the shield button holds the admin tools. */
+.member-line {
+  display: flex;
+  align-items: center;
+}
+.member-line > .row-item {
+  flex: 1;
+  min-width: 0;
+}
+/* `.user-list button:not(.btn)` makes every button in the list full width and flat: the tools
+   button stays a small round icon button. */
+.user-list .member-line > button.icon-btn {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  justify-content: center;
+  border-radius: 50%;
+}

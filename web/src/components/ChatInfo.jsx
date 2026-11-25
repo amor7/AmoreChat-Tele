@@ -18,7 +18,8 @@ import Avatar from './Avatar';
 import { QrButton } from './QrCode';
 import { confirmDialog, isolate } from '../confirm';
 import { NotifyMute, MediaGallery } from './ChatExtras';
-import { Camera, Settings, Link, UserPlus, VolumeX, MessageCircle, Timer } from 'lucide-react';
+import { Camera, Settings, Link, UserPlus, VolumeX, Timer, ShieldCheck } from 'lucide-react';
+import UserProfile, { ProfileHead, ProfileActions, ProfileDetails, useUserProfile } from './UserProfile';
 
 const MUTE_OPTIONS = [
   ['۱ ساعت', 3600e3],
@@ -393,6 +394,7 @@ function AddMembers({ chatId, members, onDone }) {
 function MemberRow({ m, chat, me, isOwner, run }) {
   const online = useStore((s) => isUserOnline(s, m));
   const [open, setOpen] = useState(false);
+  const [profile, setProfile] = useState(false);
   const [perms, setPerms] = useState(m.chatPerms);
   const can = (p) => hasChatPerm(me, chat, p);
   const self = m.id === me.id;
@@ -406,7 +408,9 @@ function MemberRow({ m, chat, me, isOwner, run }) {
 
   return (
     <li className="member">
-      <button className="row-item" onClick={() => setOpen(!open)}>
+      {/* Like Telegram: a member opens their profile; the admin tools have their own button. */}
+      <div className="member-line">
+      <button className="row-item" onClick={() => setProfile(true)} aria-label={`پروفایل ${m.displayName}`}>
         <Avatar id={m.id} name={m.displayName} file={m.avatar} size={38} online={online} />
         <span className="grow">
           <b>
@@ -417,21 +421,15 @@ function MemberRow({ m, chat, me, isOwner, run }) {
         {muted && <VolumeX size={16} aria-label="بی‌صدا" />}
         {m.chatRole !== 'member' && <span className="role-badge">{ROLE_LABELS[m.chatRole]}</span>}
       </button>
-      {open && (
+      {hasActions && (
+        <button type="button" className="icon-btn" aria-expanded={open} aria-label={`مدیریت ${m.displayName}`} title="مدیریت عضو" onClick={() => setOpen(!open)}>
+          <ShieldCheck size={18} />
+        </button>
+      )}
+      </div>
+      {profile && <UserProfile userId={m.id} user={m} onClose={() => setProfile(false)} />}
+      {open && hasActions && (
         <div className="member-actions">
-          {!self && (
-            <button
-              className="btn sm"
-              onClick={async () => {
-                const { chat: dm } = await api('POST', '/chats/dm', { userId: m.id });
-                useStore.getState().upsertChat(dm);
-                useStore.getState().closeModal();
-                location.hash = `#/chat/${dm.id}`;
-              }}
-            >
-              <MessageCircle size={15} /> پیام خصوصی
-            </button>
-          )}
           {hasActions && isOwner && m.chatRole !== 'owner' && (
             <div className="perm-box">
               <b>{m.chatRole === 'admin' ? 'دسترسی‌های ادمین' : 'ارتقا به ادمین با دسترسی‌های:'}</b>
@@ -516,28 +514,14 @@ function AutoDeleteSelect({ value, onChange }) {
 
 function PeerProfile({ chat, onClose }) {
   const showToast = useStore((s) => s.showToast);
-  const [user, setUser] = useState(null);
   const online = useStore((s) => isUserOnline(s, chat.peer));
-  useEffect(() => {
-    if (chat.peer)
-      api('GET', `/users/${chat.peer.id}`)
-        .then((r) => setUser(r.user))
-        .catch(() => {});
-  }, [chat.peer]);
-  const u = user || chat.peer;
+  const u = useUserProfile(chat.peer?.id, chat.peer);
   if (!u) return null;
   return (
-    <Modal title="اطلاعات کاربر" onClose={onClose}>
-      <div className="center">
-        <Avatar id={u.id} name={u.displayName} file={u.avatar} size={96} />
-        <h3>{u.displayName}</h3>
-        <div className="muted" dir="ltr">
-          @{u.username}
-        </div>
-        <p className="muted">{online ? 'آنلاین' : formatLastSeen(u.lastSeen, u)}</p>
-        {user?.bio && <p>{user.bio}</p>}
-        {user?.role && user.role !== 'user' && <span className="role-badge">{ROLE_LABELS[user.role]} سرور</span>}
-      </div>
+    <Modal title="اطلاعات کاربر" onClose={onClose} size="user-profile">
+      <ProfileHead user={u} online={online} />
+      <ProfileActions user={u} onDone={onClose} />
+      <ProfileDetails user={u} />
       <div className="form">
         <AutoDeleteSelect
           value={chat.autoDelete || 0}

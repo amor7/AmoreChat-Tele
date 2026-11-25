@@ -223,9 +223,23 @@ function Message({ m, chat, mine, grouped, onJump, onMenu }) {
     if (e?.type === 'touchend' && Date.now() - pressedAt.current < 1500) e.preventDefault();
   };
 
+  // Like Telegram: the sender's photo or name opens their profile.
+  const openSender = (e) => {
+    e.stopPropagation();
+    if (m.sender?.id) useStore.getState().openModal('user', { userId: m.sender.id, user: m.sender });
+  };
+
   return (
     <div className={`msg-row ${mine ? 'mine' : ''} ${grouped ? 'grouped' : ''}`} id={`msg-${m.id}`}>
-      {showAvatar && <div className="msg-avatar">{!grouped && <Avatar id={m.sender?.id} name={m.sender?.displayName} file={m.sender?.avatar} size={34} />}</div>}
+      {showAvatar && (
+        <div className="msg-avatar">
+          {!grouped && (
+            <button type="button" className="avatar-btn" onClick={openSender} aria-label={`پروفایل ${m.sender?.displayName || ''}`}>
+              <Avatar id={m.sender?.id} name={m.sender?.displayName} file={m.sender?.avatar} size={34} />
+            </button>
+          )}
+        </div>
+      )}
       <div className="bubble-col">
         <div
           className={`bubble ${m.type === 'deleted' ? 'deleted' : ''} ${visual ? 'has-media' : ''} ${bigEmoji ? 'big-emoji' : ''} ${!mine && m.mentions?.includes(meId) ? 'mentions-me' : ''}`}
@@ -235,7 +249,11 @@ function Message({ m, chat, mine, grouped, onJump, onMenu }) {
           onTouchMove={touchEnd}
           onDoubleClick={() => m.type !== 'deleted' && useStore.setState({ replyTo: m, editing: null })}
         >
-          {showSender && <div className="sender">{m.sender?.displayName}</div>}
+          {showSender && (
+            <button type="button" className="sender" onClick={openSender}>
+              {m.sender?.displayName}
+            </button>
+          )}
           {m.forwardedFrom && (
             <div className="forwarded">
               <Forward size={13} /> فوروارد از {m.forwardedFrom}
