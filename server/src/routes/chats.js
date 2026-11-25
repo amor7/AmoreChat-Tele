@@ -1,5 +1,5 @@
 import { checkHandle, setChatHandle, dropPrivateHandle } from '../handles.js';
-import { get, all, run, now, parseJSON } from '../db.js';
+import { get, all, run, now, parseJSON, tx } from '../db.js';
 import { getSetting } from '../settings.js';
 import { hasSitePerm, hasChatPerm, cleanPerms, CHAT_PERMS } from '../perms.js';
 import { randomCode, publicUser } from '../auth.js';
@@ -206,35 +206,44 @@ export default async function chatRoutes(app) {
       if (!isRoom(chat)) fail(400, 'این گفتگو قابل ویرایش نیست');
       if (!hasChatPerm(req.user, member, 'edit_info')) fail(403, 'دسترسی ویرایش ندارید');
     }
-    if (b.autoDelete !== undefined) {
-      const secs = Math.max(0, Math.min(30 * 86400, Number(b.autoDelete) || 0));
-      run('UPDATE chats SET auto_delete = ? WHERE id = ?', secs, chat.id);
-      const label = secs ? `پیام‌های جدید پس از ${formatDuration(secs)} خودکار حذف می‌شوند` : 'حذف خودکار پیام‌ها خاموش شد';
-      if (chat.type !== 'saved') systemMessage(chat.id, `${req.user.display_name}: ${label}`);
-    }
-    if (b.title !== undefined) {
-      const t = String(b.title).trim().slice(0, 100);
-      if (!t) fail(400, 'عنوان خالی است');
-      run('UPDATE chats SET title = ? WHERE id = ?', t, chat.id);
-    }
-    if (b.description !== undefined) run('UPDATE chats SET description = ? WHERE id = ?', String(b.description).slice(0, 500), chat.id);
-    // A private chat is no longer one every new user joins by themselves.
-    if (b.isPublic !== undefined && !chat.is_emergency) run('UPDATE chats SET is_public = ?, auto_join = auto_join * ? WHERE id = ?', b.isPublic ? 1 : 0, b.isPublic ? 1 : 0, chat.id);
-    if (b.isPublic === false && !chat.is_emergency) {
-      dropPrivateHandle(chat.id);
-      ensureInvite(chat.id, req.user.id);
-    }
-    if (b.handle !== undefined && isRoom(chat)) setChatHandle(req.user, chat.id, b.handle);
-    if (b.slowMode !== undefined) run('UPDATE chats SET slow_mode = ? WHERE id = ?', Math.max(0, Math.min(3600, Number(b.slowMode) || 0)), chat.id);
-    if (b.locked !== undefined) run('UPDATE chats SET locked = ? WHERE id = ?', b.locked ? 1 : 0, chat.id);
-    if (b.voiceStage !== undefined && chat.type === 'group') run('UPDATE chats SET voice_stage = ? WHERE id = ?', b.voiceStage ? 1 : 0, chat.id);
-    if (b.hideMembers !== undefined && chat.type === 'group') run('UPDATE chats SET hide_members = ? WHERE id = ?', b.hideMembers ? 1 : 0, chat.id);
-    if (b.avatar !== undefined) {
-      if (b.avatar !== null && !get("SELECT 1 FROM files WHERE id = ? AND owner_id = ? AND kind = 'image'", b.avatar, req.user.id)) {
-        fail(400, 'تصویر نامعتبر است');
+    // All or nothing: a refused field (a taken handle, a bad image) must not leave the others
+    // half saved, with the app still showing the old values.
+    let autoDeleteNotice = null;
+    tx(() => {
+      if (b.autoDelete !== undefined) {
+        const secs = Math.max(0, Math.min(30 * 86400, Number(b.autoDelete) || 0));
+        run('UPDATE chats SET auto_delete = ? WHERE id = ?', secs, chat.id);
+        autoDeleteNotice = secs ? `پیام‌های جدید پس از ${formatDuration(secs)} خودکار حذف می‌شوند` : 'حذف خودکار پیام‌ها خاموش شد';
       }
-      run('UPDATE chats SET avatar_file_id = ? WHERE id = ?', b.avatar, chat.id);
-    }
+      if (b.title !== undefined) {
+        const t = String(b.title).trim().slice(0, 100);
+        if (!t) fail(400, 'عنوان خالی است');
+        run('UPDATE chats SET title = ? WHERE id = ?', t, chat.id);
+      }
+      if (b.description !== undefined) run('UPDATE chats SET description = ? WHERE id = ?', String(b.description).slice(0, 500), chat.id);
+      // A private chat is no longer one every new user joins by themselves.
+      if (b.isPublic !== undefined && !chat.is_emergency) run('UPDATE chats SET is_public = ?, auto_join = auto_join * ? WHERE id = ?', b.isPublic ? 1 : 0, b.isPublic ? 1 : 0, chat.id);
+      const goesPrivate = b.isPublic === false && !chat.is_emergency;
+      if (goesPrivate) {
+        dropPrivateHandle(chat.id);
+        ensureInvite(chat.id, req.user.id);
+      }
+      // Turning a chat private gives its name back: a handle sent along with that (the form still
+      // holds the old one) is not a request to keep it.
+      if (b.handle !== undefined && isRoom(chat) && !goesPrivate) setChatHandle(req.user, chat.id, b.handle);
+      if (b.slowMode !== undefined) run('UPDATE chats SET slow_mode = ? WHERE id = ?', Math.max(0, Math.min(3600, Number(b.slowMode) || 0)), chat.id);
+      if (b.locked !== undefined) run('UPDATE chats SET locked = ? WHERE id = ?', b.locked ? 1 : 0, chat.id);
+      if (b.voiceStage !== undefined && chat.type === 'group') run('UPDATE chats SET voice_stage = ? WHERE id = ?', b.voiceStage ? 1 : 0, chat.id);
+      if (b.hideMembers !== undefined && chat.type === 'group') run('UPDATE chats SET hide_members = ? WHERE id = ?', b.hideMembers ? 1 : 0, chat.id);
+      if (b.avatar !== undefined) {
+        if (b.avatar !== null && !get("SELECT 1 FROM files WHERE id = ? AND owner_id = ? AND kind = 'image'", b.avatar, req.user.id)) {
+          fail(400, 'تصویر نامعتبر است');
+        }
+        run('UPDATE chats SET avatar_file_id = ? WHERE id = ?', b.avatar, chat.id);
+      }
+    });
+    // Posting a message opens its own transaction: after the settings are saved.
+    if (autoDeleteNotice && chat.type !== 'saved') systemMessage(chat.id, `${req.user.display_name}: ${autoDeleteNotice}`);
     audit(req.user.id, 'chat.edit', chat.id, b);
     toChat(chat.id, 'chat:changed', { chatId: chat.id });
     return { chat: chatSummary(chat.id, req.user.id) || { id: chat.id } };

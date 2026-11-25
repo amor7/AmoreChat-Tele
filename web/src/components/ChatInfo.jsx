@@ -209,8 +209,11 @@ function EditChat({ chat }) {
     e.preventDefault();
     try {
       // Only send autoDelete when it changed: the server posts a notice about it.
-      const { autoDelete, ...rest } = f;
-      await api('PATCH', `/chats/${chat.id}`, autoDelete !== (chat.autoDelete || 0) ? f : rest);
+      const { autoDelete, handle, ...rest } = f;
+      const body = autoDelete !== (chat.autoDelete || 0) ? { ...rest, autoDelete } : rest;
+      // The handle field is hidden for a private chat: its old value is not something to save.
+      if (f.isPublic || chat.fromTelegram) body.handle = handle;
+      await api('PATCH', `/chats/${chat.id}`, body);
       showToast('ذخیره شد');
       setOpen(false);
     } catch (err) {

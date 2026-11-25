@@ -440,6 +440,36 @@ assert.ok((await disc('Searchable')).chats.length >= 1, 'still found by id');
 assert.deepEqual((await disc('Club')).chats, [], 'not by name');
 await owner.call('PATCH', '/api/admin/settings', { discover_list: '1' });
 
+// Turning a public group with a handle private: the edit form still sends the old handle.
+// That used to fail («فقط گروه و کانال عمومی شناسه دارد») after half the change was saved.
+{
+  const club = (await chOwner.call('POST', '/api/chats', { type: 'group', title: 'Private Again', isPublic: true, handle: 'private_again' })).chat.id;
+  let r = await chOwner.call('PATCH', `/api/chats/${club}`, { title: 'Private Again', isPublic: false, handle: 'private_again', slowMode: 0 });
+  assert.equal(r.status, 200, `going private with the old handle sent: ${r.error}`);
+  let c = (await chOwner.call('GET', `/api/chats/${club}`)).chat;
+  assert.equal(c.isPublic, false, 'private now');
+  assert.ok(!c.handle, 'its name is given back');
+  assert.ok(!(await disc('private_again')).chats.some((x) => x.id === club), 'no longer in discover');
+  // And back to public, several times in a row.
+  for (let i = 0; i < 3; i++) {
+    r = await chOwner.call('PATCH', `/api/chats/${club}`, { isPublic: true, handle: 'private_again' });
+    assert.equal(r.status, 200, `public again (${i}): ${r.error}`);
+    c = (await chOwner.call('GET', `/api/chats/${club}`)).chat;
+    assert.equal(c.isPublic, true);
+    assert.equal(c.handle, 'private_again');
+    r = await chOwner.call('PATCH', `/api/chats/${club}`, { isPublic: false, handle: 'private_again' });
+    assert.equal(r.status, 200, `private again (${i}): ${r.error}`);
+    c = (await chOwner.call('GET', `/api/chats/${club}`)).chat;
+    assert.equal(c.isPublic, false);
+  }
+  // A refused field saves nothing: a taken handle leaves the title as it was.
+  r = await chOwner.call('PATCH', `/api/chats/${club}`, { title: 'Renamed', isPublic: true, handle: 'searchable_club' });
+  assert.notEqual(r.status, 200, 'a taken handle is refused');
+  c = (await chOwner.call('GET', `/api/chats/${club}`)).chat;
+  assert.equal(c.title, 'Private Again', 'nothing half saved');
+  assert.equal(c.isPublic, false, 'still private');
+}
+
 // ---- Stream frame rate: owner 60, others the site default (30) unless raised ----
 const fpsOf = async (c) => (await c.call('GET', '/api/auth/me')).user?.limits?.streamFps;
 assert.equal(await fpsOf(owner), 60, 'owner: 60 fps');
