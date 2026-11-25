@@ -11,7 +11,7 @@ import { findTelegram, openTelegramChat, joinTelegramChat, leaveTelegramChat } f
 import fs from 'node:fs';
 import path from 'node:path';
 import { pipeline } from 'node:stream/promises';
-import { get, all, run, now, UPLOAD_DIR } from '../db.js';
+import { get, all, run, tx, now, UPLOAD_DIR } from '../db.js';
 import { settingNumber, setSetting } from '../settings.js';
 import { syncDialogMessages, sendTeleMessage, sendTelePhoto, sendTeleVoice, sendTeleFile, telePhotoFile, teleVoiceFile, teleFileFile, ownTeleMessage, newUploadFile, fileMaxBytes, cancelQueued, newUploadPath, mediaMaxBytes, refreshDialogsFromTelegram, listStoredMessages, publicMessages, searchDialogMessages } from '../tele/messages.js';
 import { getAlertSettings, setAlertSettings, teleAlert, ALERT_KINDS } from '../tele/alerts.js';
@@ -25,6 +25,17 @@ import { assertTeleUnlocked, passcodeRow, isUnlocked, hasPasscode, passcodeUserI
 const loginLimit = { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } };
 // Each of these costs the server's VPN traffic (and too many sends get a Telegram account limited).
 const limit = (max) => ({ config: { rateLimit: { max, timeWindow: '1 minute' } } });
+
+// { bodyField: column } → { column: 1 | 0 } for the fields given; a field that is not true / false is a 400.
+const boolFields = (b, map) => {
+  const out = {};
+  for (const [field, col] of Object.entries(map)) {
+    if (b[field] == null) continue;
+    if (typeof b[field] !== 'boolean') fail(400, `${field} باید true یا false باشد`);
+    out[col] = b[field] ? 1 : 0;
+  }
+  return out;
+};
 
 const needTeleAdmin = (req) => {
   if (!hasSitePerm(req.user, 'manage_settings') && req.user.role !== 'owner') fail(403, 'دسترسی ندارید');
@@ -406,17 +417,19 @@ export default async function teleRoutes(app) {
     const id = Number(req.params.id);
     if (!get('SELECT id FROM tele_accounts WHERE id = ?', id)) fail(404, 'حساب پیدا نشد');
     const b = req.body || {};
-    if (b.allowMedia != null) run('UPDATE tele_accounts SET allow_media = ?, updated_at = ? WHERE id = ?', b.allowMedia ? 1 : 0, now(), id);
-    if (b.allowVoice != null) run('UPDATE tele_accounts SET allow_voice = ?, updated_at = ? WHERE id = ?', b.allowVoice ? 1 : 0, now(), id);
-    if (b.allowFiles != null) run('UPDATE tele_accounts SET allow_files = ?, updated_at = ? WHERE id = ?', b.allowFiles ? 1 : 0, now(), id);
-    if (b.allowExplore != null) run('UPDATE tele_accounts SET allow_explore = ?, updated_at = ? WHERE id = ?', b.allowExplore ? 1 : 0, now(), id);
+    // Every field is checked before anything is written: a bad one saves nothing.
+    const flags = boolFields(b, { allowMedia: 'allow_media', allowVoice: 'allow_voice', allowFiles: 'allow_files', allowExplore: 'allow_explore' });
+    let q;
     if (b.quotaMb !== undefined) {
       // null / '' = the default cap; 0 = no cap for this user; otherwise MB per month.
-      const q = b.quotaMb === null || b.quotaMb === '' ? null : Number(b.quotaMb);
+      q = b.quotaMb === null || b.quotaMb === '' ? null : typeof b.quotaMb === 'number' || typeof b.quotaMb === 'string' ? Number(b.quotaMb) : NaN;
       if (q !== null && !(Number.isInteger(q) && q >= 0 && q <= 1000000)) fail(400, 'سقف مصرف باید عدد صحیح مگابایت باشد');
-      // A new cap also allows a new alert this month.
-      run("UPDATE tele_accounts SET quota_mb = ?, quota_alerted = '', updated_at = ? WHERE id = ?", q, now(), id);
     }
+    tx(() => {
+      for (const [col, v] of Object.entries(flags)) run(`UPDATE tele_accounts SET ${col} = ?, updated_at = ? WHERE id = ?`, v, now(), id);
+      // A new cap also allows a new alert this month.
+      if (q !== undefined) run("UPDATE tele_accounts SET quota_mb = ?, quota_alerted = '', updated_at = ? WHERE id = ?", q, now(), id);
+    });
     audit(req.user.id, 'tele.account', id, { allowMedia: b.allowMedia, allowVoice: b.allowVoice, allowFiles: b.allowFiles, allowExplore: b.allowExplore, quotaMb: b.quotaMb });
     return { ok: true };
   });
@@ -510,13 +523,19 @@ export default async function teleRoutes(app) {
     const account = ownerAccount(req.user);
     const m = get('SELECT * FROM tele_mirrors WHERE id = ? AND account_id = ?', Number(req.params.id), account.id);
     if (!m) fail(404, 'پیدا نشد');
-    if (req.body?.enabled != null) run('UPDATE tele_mirrors SET enabled = ? WHERE id = ?', req.body.enabled ? 1 : 0, m.id);
-    if (req.body?.withPhotos != null) run('UPDATE tele_mirrors SET with_photos = ? WHERE id = ?', req.body.withPhotos ? 1 : 0, m.id);
-    if (req.body?.withFiles != null) run('UPDATE tele_mirrors SET with_files = ? WHERE id = ?', req.body.withFiles ? 1 : 0, m.id);
-    if (req.body?.visibility != null) {
-      if (!VISIBILITY.includes(req.body.visibility)) fail(400, 'حالت نمایش نامعتبر است');
-      setVisibility(m.chat_id, req.body.visibility, req.user.id);
-      audit(req.user.id, 'tele.mirror.visibility', m.id, { visibility: req.body.visibility });
+    const b = req.body || {};
+    // Checked first: a bad visibility must not leave the switches before it saved.
+    const flags = boolFields(b, { enabled: 'enabled', withPhotos: 'with_photos', withFiles: 'with_files' });
+    if (b.visibility != null && !VISIBILITY.includes(b.visibility)) fail(400, 'حالت نمایش نامعتبر است');
+    if (Object.keys(flags).length) {
+      tx(() => {
+        for (const [col, v] of Object.entries(flags)) run(`UPDATE tele_mirrors SET ${col} = ? WHERE id = ?`, v, m.id);
+      });
+      audit(req.user.id, 'tele.mirror.update', m.id, { enabled: b.enabled, withPhotos: b.withPhotos, withFiles: b.withFiles });
+    }
+    if (b.visibility != null) {
+      setVisibility(m.chat_id, b.visibility, req.user.id);
+      audit(req.user.id, 'tele.mirror.visibility', m.id, { visibility: b.visibility });
     }
     return { mirrors: listMirrors(account.id) };
   });
@@ -578,17 +597,25 @@ export default async function teleRoutes(app) {
   app.patch('/api/admin/tele/media', async (req) => {
     needTeleAdmin(req);
     const b = req.body || {};
+    // Both checked before either is written.
+    const w = {};
+    const mbOf = (v) => (typeof v === 'number' || (typeof v === 'string' && v.trim() !== '') ? Number(v) : NaN);
     if (b.maxMb != null) {
-      const mb = Number(b.maxMb);
+      const mb = mbOf(b.maxMb);
       if (!(Number.isInteger(mb) && mb >= 1 && mb <= 50)) fail(400, 'سقف حجم باید بین ۱ تا ۵۰ مگابایت باشد');
-      setSetting('tele_media_max_mb', mb);
+      w.tele_media_max_mb = mb;
     }
     if (b.fileMaxMb != null) {
-      const mb = Number(b.fileMaxMb);
+      const mb = mbOf(b.fileMaxMb);
       if (!(Number.isInteger(mb) && mb >= 1 && mb <= 2000)) fail(400, 'سقف حجم فایل باید بین ۱ تا ۲۰۰۰ مگابایت باشد');
-      setSetting('tele_file_max_mb', mb);
+      w.tele_file_max_mb = mb;
     }
-    audit(req.user.id, 'tele.media.max', '', b);
+    if (Object.keys(w).length) {
+      tx(() => {
+        for (const [k, v] of Object.entries(w)) setSetting(k, v);
+      });
+      audit(req.user.id, 'tele.media.max', '', { maxMb: w.tele_media_max_mb, fileMaxMb: w.tele_file_max_mb });
+    }
     return { mediaMaxMb: settingNumber('tele_media_max_mb') || 5, fileMaxMb: settingNumber('tele_file_max_mb') || 20 };
   });
 }

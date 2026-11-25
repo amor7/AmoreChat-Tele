@@ -16,6 +16,12 @@ export default function NewChat({ onClose }) {
   const [members, setMembers] = useState([]);
   const [error, setError] = useState('');
   const [busy, setBusy] = useState(false);
+  // Each type starts with its own default: a voice channel is public, a group or channel is not
+  // (leaving the voice tab must not carry its "public" over).
+  const pickTab = (t) => {
+    setTab(t);
+    setForm((f) => ({ ...f, isPublic: t === 'voice' }));
+  };
 
   async function openDm(u) {
     try {
@@ -52,10 +58,10 @@ export default function NewChat({ onClose }) {
         </button>
         {canCreate && (
           <>
-            <button role="tab" aria-selected={tab === 'group'} className={tab === 'group' ? 'active' : ''} onClick={() => setTab('group')}>
+            <button role="tab" aria-selected={tab === 'group'} className={tab === 'group' ? 'active' : ''} onClick={() => pickTab('group')}>
               گروه
             </button>
-            <button role="tab" aria-selected={tab === 'channel'} className={tab === 'channel' ? 'active' : ''} onClick={() => setTab('channel')}>
+            <button role="tab" aria-selected={tab === 'channel'} className={tab === 'channel' ? 'active' : ''} onClick={() => pickTab('channel')}>
               کانال
             </button>
             {config.rtc && (
@@ -63,10 +69,7 @@ export default function NewChat({ onClose }) {
                 role="tab"
                 aria-selected={tab === 'voice'}
                 className={tab === 'voice' ? 'active' : ''}
-                onClick={() => {
-                  setTab('voice');
-                  setForm((f) => ({ ...f, isPublic: true }));
-                }}
+                onClick={() => pickTab('voice')}
               >
                 کانال صوتی
               </button>

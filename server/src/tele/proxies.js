@@ -3,7 +3,7 @@
  * Stores admin-managed outbound routes used only by Telegram clients.
  * Never falls back to a direct (non-proxied) connection.
  */
-import { get, all, run, now } from '../db.js';
+import { get, all, run, tx, now } from '../db.js';
 import { detectProtocol, outboundFromConfig, nameOfConfig } from './uri.js';
 import { syncOvpn } from './ovpn.js';
 
@@ -59,6 +59,14 @@ export function getProxy(id) {
   return get('SELECT * FROM tele_proxies WHERE id = ?', Number(id));
 }
 
+// 0 is a real priority (the first one), not "left out"; left out = `fallback`, garbage = 400.
+function priorityOf(v, fallback) {
+  if (v == null || v === '') return fallback;
+  const n = typeof v === 'number' || typeof v === 'string' ? Number(v) : NaN;
+  if (!Number.isFinite(n)) throw Object.assign(new Error('اولویت باید عدد باشد'), { statusCode: 400 });
+  return Math.max(0, Math.min(9999, Math.floor(n)));
+}
+
 export function createProxy({ name, config, protocol, priority = 100, groupName = '', enabled = true }) {
   const cfg = String(config || '').trim();
   if (!cfg) throw Object.assign(new Error('کانفیگ پروکسی خالی است'), { statusCode: 400 });
@@ -74,7 +82,7 @@ export function createProxy({ name, config, protocol, priority = 100, groupName 
     proto,
     cfg,
     enabled ? 1 : 0,
-    Math.max(0, Math.min(9999, Number(priority) || 100)),
+    priorityOf(priority, 100),
     String(groupName || '').slice(0, 60),
     t,
     t,
@@ -98,7 +106,7 @@ export function updateProxy(id, patch) {
         : row.protocol;
   const enabled = patch.enabled != null ? (patch.enabled ? 1 : 0) : row.enabled;
   const priority =
-    patch.priority != null ? Math.max(0, Math.min(9999, Number(patch.priority) || 100)) : row.priority;
+    patch.priority != null && patch.priority !== '' ? priorityOf(patch.priority, row.priority) : row.priority;
   const groupName = patch.groupName != null ? String(patch.groupName).slice(0, 60) : row.group_name;
   const t = now();
   run(
@@ -177,26 +185,36 @@ export function getRoutePolicy() {
 }
 
 export function setRoutePolicy(patch) {
-  if (patch.enabled != null) setTeleSetting('tele_enabled', patch.enabled ? '1' : '0');
+  const bad = (m) => Object.assign(new Error(m), { statusCode: 400 });
+  // Every field is checked first, then all are written together: a bad one saves nothing.
+  const w = {};
+  for (const [field, key] of [['enabled', 'tele_enabled'], ['autoHealth', 'tele_health_auto']]) {
+    if (patch[field] == null) continue;
+    if (typeof patch[field] !== 'boolean') throw bad('مقدار باید true یا false باشد');
+    w[key] = patch[field] ? '1' : '0';
+  }
   if (patch.mode != null) {
-    if (!ROUTE_MODES.includes(patch.mode)) throw Object.assign(new Error('حالت مسیریابی نامعتبر'), { statusCode: 400 });
-    setTeleSetting('tele_route_mode', patch.mode);
+    if (!ROUTE_MODES.includes(patch.mode)) throw bad('حالت مسیریابی نامعتبر');
+    w.tele_route_mode = patch.mode;
   }
   if (patch.activeProxyId !== undefined) {
     if (patch.activeProxyId == null || patch.activeProxyId === '') {
-      setTeleSetting('tele_active_proxy_id', '');
+      w.tele_active_proxy_id = '';
     } else {
       const p = getProxy(patch.activeProxyId);
-      if (!p) throw Object.assign(new Error('پروکسی انتخاب‌شده پیدا نشد'), { statusCode: 400 });
-      setTeleSetting('tele_active_proxy_id', String(p.id));
+      if (!p) throw bad('پروکسی انتخاب‌شده پیدا نشد');
+      w.tele_active_proxy_id = String(p.id);
     }
   }
-  if (patch.autoHealth != null) setTeleSetting('tele_health_auto', patch.autoHealth ? '1' : '0');
-  if (patch.dns !== undefined) setTeleSetting('tele_dns', parseDns(patch.dns).join(','));
+  if (patch.dns !== undefined) w.tele_dns = parseDns(patch.dns).join(',');
   if (patch.healthIntervalSec != null) {
-    const sec = Math.max(60, Math.min(86400, Math.floor(Number(patch.healthIntervalSec)) || 600));
-    setTeleSetting('tele_health_interval_sec', String(sec));
+    const n = typeof patch.healthIntervalSec === 'number' || typeof patch.healthIntervalSec === 'string' ? Number(patch.healthIntervalSec) : NaN;
+    if (!Number.isFinite(n) || String(patch.healthIntervalSec).trim() === '') throw bad('فاصله بررسی باید عدد ثانیه باشد');
+    w.tele_health_interval_sec = String(Math.max(60, Math.min(86400, Math.floor(n))));
   }
+  tx(() => {
+    for (const [k, v] of Object.entries(w)) setTeleSetting(k, v);
+  });
   return getRoutePolicy();
 }
 

@@ -125,7 +125,7 @@ export function LimitsEditor({ u, run }) {
         </select>
       </label>
       <div className="actions">
-        <button className="btn sm" onClick={() => save({}, 'به پیش‌فرض برگشت').then(() => setO({}))}>
+        <button className="btn sm" onClick={() => save({}, 'به پیش‌فرض برگشت').then((r) => r && setO({}))}>
           بازگشت به پیش‌فرض
         </button>
         <button className="btn primary sm" onClick={() => save(o, 'ذخیره شد')}>

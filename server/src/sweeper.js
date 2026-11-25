@@ -2,7 +2,7 @@ import { get, all, run, now } from './db.js';
 import { settingNumber } from './settings.js';
 import { purgeFile } from './media.js';
 import { toChat } from './realtime.js';
-import { loadMessage } from './chats.js';
+import { loadMessage, toChatMessage } from './chats.js';
 
 // A file can be shared by several messages (forwards) and used as an avatar;
 // only delete it from disk once nothing visible points at it anymore.
@@ -35,7 +35,7 @@ export function deleteMessage(m, { by = null } = {}) {
 export function purgeAndTell(fileId) {
   if (!purgeFile(fileId)) return false;
   for (const m of all('SELECT id, chat_id FROM messages WHERE file_id = ? AND deleted = 0', fileId)) {
-    toChat(m.chat_id, 'message:edit', loadMessage(m.id));
+    toChatMessage(m.chat_id, 'message:edit', loadMessage(m.id));
   }
   return true;
 }

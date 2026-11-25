@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { get, all, run, now, parseJSON, DATA_DIR } from '../db.js';
+import { get, all, run, tx, now, parseJSON, DATA_DIR } from '../db.js';
 import { DEFAULTS, getAllSettings, setSetting } from '../settings.js';
 import { hasSitePerm, cleanPerms, SITE_PERMS } from '../perms.js';
 import { hashPassword, randomCode, publicUser } from '../auth.js';
@@ -19,6 +19,53 @@ import { mirrorStatus } from '../backup.js';
 const need = (req, perm) => {
   if (!hasSitePerm(req.user, perm)) fail(403, 'دسترسی ندارید');
 };
+
+// A number or a numeric string; anything else (empty, true, [5], {}) is NaN, not 0 or 1.
+const numOf = (v) => (typeof v === 'number' || (typeof v === 'string' && v.trim() !== '') ? Number(v) : NaN);
+
+// [min, max] of the numeric site settings (whole numbers).
+const NUMERIC_SETTINGS = {
+  max_upload_mb: [1, 100000],
+  user_quota_mb: [0, 100000],
+  media_retention_days: [0, 100000],
+  max_streams_per_room: [0, 100000],
+  deleted_keep_days: [0, 36500],
+};
+const BOOL_SETTINGS = ['allow_user_groups', 'discover_list', 'default_can_call', 'default_can_stream'];
+
+// The stored string for one general setting, or a 400. `raw` is a string, number or boolean.
+function settingValue(key, raw) {
+  const v = String(raw);
+  if (key === 'site_name') {
+    if (typeof raw !== 'string') fail(400, 'نام سرور نامعتبر است');
+    return v.trim().slice(0, 50) || DEFAULTS.site_name;
+  }
+  if (key === 'registration_mode') {
+    if (!['open', 'invite', 'closed'].includes(v)) fail(400, 'حالت ثبت‌نام نامعتبر');
+    return v;
+  }
+  if (BOOL_SETTINGS.includes(key)) {
+    if ([true, 1, '1', 'true'].includes(raw)) return '1';
+    if ([false, 0, '0', 'false'].includes(raw)) return '0';
+    fail(400, 'مقدار بله/خیر نامعتبر');
+  }
+  if (key === 'max_stream_quality') {
+    if (typeof raw === 'boolean' || !['480', '720', '1080'].includes(v)) fail(400, 'کیفیت نامعتبر');
+    return v;
+  }
+  if (key === 'max_stream_fps') {
+    if (typeof raw === 'boolean' || !['30', '60'].includes(v)) fail(400, 'نرخ فریم نامعتبر');
+    return v;
+  }
+  if (key in NUMERIC_SETTINGS) {
+    const [min, max] = NUMERIC_SETTINGS[key];
+    const n = numOf(raw);
+    if (!Number.isFinite(n) || n < min || n > max) fail(400, `عدد نامعتبر؛ باید بین ${min} و ${max} باشد`);
+    return String(Math.floor(n));
+  }
+  // mirror_files_access has its own checked route (access list + mode).
+  fail(400, 'این تنظیم از این‌جا تغییر نمی‌کند');
+}
 
 const targetUser = (id) => {
   const u = get('SELECT * FROM users WHERE id = ?', Number(id));
@@ -66,8 +113,15 @@ export default async function adminRoutes(app) {
     if (req.user.role !== 'owner') fail(403, 'فقط مالک می‌تواند نقش‌ها را تغییر دهد');
     const u = targetUser(req.params.id);
     if (u.id === req.user.id) fail(400, 'نقش خودتان را نمی‌توانید تغییر دهید');
-    const role = req.body?.role === 'admin' ? 'admin' : 'user';
-    const perms = role === 'admin' ? cleanPerms(req.body?.adminPerms, SITE_PERMS) : [];
+    const b = req.body || {};
+    // A typo or a missing role must not quietly turn an admin into a regular user. Only the
+    // permissions given: the role stays as it is.
+    if (b.role !== undefined && b.role !== 'admin' && b.role !== 'user') fail(400, 'نقش نامعتبر است');
+    if (b.role === undefined && b.adminPerms === undefined) fail(400, 'نقش یا دسترسی‌ها مشخص نشده است');
+    const role = b.role ?? u.role;
+    if (role !== 'admin' && b.role === undefined) fail(400, 'این کاربر مدیر نیست');
+    if (b.adminPerms !== undefined && !Array.isArray(b.adminPerms)) fail(400, 'دسترسی‌ها نامعتبر است');
+    const perms = role === 'admin' ? cleanPerms(b.adminPerms ?? parseJSON(u.admin_perms, []), SITE_PERMS) : [];
     run('UPDATE users SET role = ?, admin_perms = ? WHERE id = ?', role, JSON.stringify(perms), u.id);
     audit(req.user.id, 'user.role', u.id, { role, perms });
     return { ok: true };
@@ -77,7 +131,9 @@ export default async function adminRoutes(app) {
     need(req, 'manage_users');
     const u = targetUser(req.params.id);
     assertOutranks(req.user, u);
-    const banned = req.body?.banned !== false;
+    // Strictly true / false ("false" or 0 must not ban); left out = ban, as before.
+    const banned = req.body?.banned === undefined ? true : req.body.banned;
+    if (typeof banned !== 'boolean') fail(400, 'مقدار banned باید true یا false باشد');
     run('UPDATE users SET banned = ? WHERE id = ?', banned ? 1 : 0, u.id);
     if (banned) {
       run('DELETE FROM sessions WHERE user_id = ?', u.id);
@@ -144,9 +200,15 @@ export default async function adminRoutes(app) {
     assertOutranks(req.user, u);
     const b = req.body || {};
     const next = parseJSON(u.restrictions, {});
+    // Checked first: a bad value must not lift a restriction (it used to count as 0).
+    const hoursOf = {};
     for (const k of RESTRICT_KINDS) {
       if (b[k] === undefined) continue;
-      const hours = Math.min(8760, Math.max(0, Number(b[k]) || 0));
+      const n = numOf(b[k]);
+      if (!Number.isFinite(n) || n < 0) fail(400, 'مدت محدودیت باید عدد ساعت باشد (۰ = برداشتن)');
+      hoursOf[k] = Math.min(8760, n);
+    }
+    for (const [k, hours] of Object.entries(hoursOf)) {
       if (hours) next[k] = now() + hours * 3600000;
       else delete next[k];
     }
@@ -182,14 +244,21 @@ export default async function adminRoutes(app) {
   app.post('/api/admin/invites', async (req) => {
     need(req, 'manage_invites');
     const { maxUses, expiresInHours, note } = req.body || {};
+    // Left out, empty or 0 = no limit; anything else must be a sensible number.
+    const unset = (v) => v === undefined || v === null || v === '' || Number(v) === 0;
+    const uses = unset(maxUses) ? null : numOf(maxUses);
+    if (uses !== null && !(Number.isInteger(uses) && uses > 0 && uses <= 1000000)) fail(400, 'تعداد استفاده باید عدد صحیح مثبت باشد');
+    const hours = unset(expiresInHours) ? null : numOf(expiresInHours);
+    if (hours !== null && !(Number.isFinite(hours) && hours > 0 && hours <= 87600)) fail(400, 'اعتبار باید بین ۰ و ۸۷۶۰۰ ساعت باشد');
+    if (note != null && typeof note !== 'string') fail(400, 'یادداشت نامعتبر است');
     const code = randomCode(9);
     run(
       'INSERT INTO invites (code, created_by, max_uses, expires_at, note, created_at) VALUES (?, ?, ?, ?, ?, ?)',
       code,
       req.user.id,
-      Number(maxUses) > 0 ? Number(maxUses) : null,
-      Number(expiresInHours) > 0 ? now() + Number(expiresInHours) * 3600 * 1000 : null,
-      String(note || '').slice(0, 200),
+      uses,
+      hours === null ? null : now() + Math.round(hours * 3600 * 1000),
+      (note || '').trim().slice(0, 200),
       now(),
     );
     audit(req.user.id, 'invite.create', code);
@@ -198,7 +267,7 @@ export default async function adminRoutes(app) {
 
   app.delete('/api/admin/invites/:id', async (req) => {
     need(req, 'manage_invites');
-    run('DELETE FROM invites WHERE id = ?', Number(req.params.id));
+    if (!run('DELETE FROM invites WHERE id = ?', Number(req.params.id)).changes) fail(404, 'کد دعوت پیدا نشد');
     audit(req.user.id, 'invite.delete', req.params.id);
     return { ok: true };
   });
@@ -211,26 +280,28 @@ export default async function adminRoutes(app) {
 
   app.patch('/api/admin/settings', async (req) => {
     need(req, 'manage_settings');
-    const b = req.body || {};
+    const b = req.body;
+    if (!b || typeof b !== 'object' || Array.isArray(b)) fail(400, 'تنظیمات نامعتبر است');
+    const current = getAllSettings();
+    // Every key is checked before anything is written: one bad field refuses the whole save
+    // instead of keeping the fields before it.
+    const changes = {};
     for (const key of Object.keys(b)) {
       // Telegram and security settings have their own checked routes (security ones: owner only).
       if (!(key in DEFAULTS) || /^(tele|sec)_/.test(key)) continue;
-      if (b[key] !== null && typeof b[key] === 'object') fail(400, 'مقدار نامعتبر');
-      let v = String(b[key]);
-      if (key === 'registration_mode' && !['open', 'invite', 'closed'].includes(v)) fail(400, 'حالت ثبت‌نام نامعتبر');
-      if (key === 'allow_user_groups' || key === 'discover_list') v = v === '1' || v === 'true' ? '1' : '0';
-      if (['default_can_call', 'default_can_stream'].includes(key)) v = v === '1' || v === 'true' ? '1' : '0';
-      if (key === 'max_stream_quality' && !['480', '720', '1080'].includes(v)) fail(400, 'کیفیت نامعتبر');
-      if (key === 'max_stream_fps' && !['30', '60'].includes(v)) fail(400, 'نرخ فریم نامعتبر');
-      if (['max_upload_mb', 'user_quota_mb', 'media_retention_days', 'max_streams_per_room'].includes(key)) {
-        const n = Number(b[key]);
-        if (typeof b[key] === 'object' || !Number.isFinite(n)) fail(400, 'عدد نامعتبر');
-        v = String(Math.max(key === 'max_upload_mb' ? 1 : 0, Math.min(100000, Math.floor(n))));
-      }
-      if (key === 'site_name') v = v.trim().slice(0, 50) || DEFAULTS.site_name;
-      setSetting(key, v);
+      const raw = b[key];
+      // The whole form comes back on save: a field it did not touch is no change.
+      if (typeof raw === 'string' && raw === current[key]) continue;
+      if (raw === null || typeof raw === 'object') fail(400, 'مقدار نامعتبر');
+      changes[key] = settingValue(key, raw);
     }
-    audit(req.user.id, 'settings.update', '', b);
+    const keys = Object.keys(changes).filter((k) => changes[k] !== current[k]);
+    if (keys.length) {
+      tx(() => {
+        for (const k of keys) setSetting(k, changes[k]);
+      });
+      audit(req.user.id, 'settings.update', '', Object.fromEntries(keys.map((k) => [k, changes[k]])));
+    }
     return { settings: getAllSettings() };
   });
 
@@ -331,7 +402,9 @@ export default async function adminRoutes(app) {
     need(req, 'handle_reports');
     const r = get('SELECT * FROM reports WHERE id = ?', Number(req.params.id));
     if (!r) fail(404, 'گزارش پیدا نشد');
-    const action = req.body?.action === 'delete' ? 'delete' : 'dismiss';
+    const action = req.body?.action;
+    if (action !== 'delete' && action !== 'dismiss') fail(400, 'کار نامعتبر است');
+    if (r.status !== 'open') fail(409, 'این گزارش قبلاً بررسی شده است');
     if (action === 'delete') {
       const m = get('SELECT * FROM messages WHERE id = ?', r.message_id);
       if (m && !m.deleted) deleteMessage(m, { by: req.user.id });

@@ -11,10 +11,34 @@ const DAY = 24 * 3600 * 1000;
 
 // Online snapshot of the database (safe while the server is running).
 // Uploaded files are not copied; they live in DATA_DIR/uploads and never change once written.
+// Names being written right now (two backups can start in the same second).
+const writing = new Set();
+// The sidecar files SQLite may leave next to a database, plus our check result.
+const sidecars = (file) => [`${file}-wal`, `${file}-shm`, `${file}-journal`, `${file}.check.json`];
+
+// amorechat-YYYYMMDDHHMMSS.db; a second one in the same second gets 2 digits more (…SS01), so the
+// name stays digits only (panel-update.sh, the backups list) and still sorts after the first.
+function newBackupFile(dir) {
+  const stamp = new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '');
+  for (let i = 0; i < 100; i++) {
+    const file = path.join(dir, `amorechat-${stamp}${i ? String(i).padStart(2, '0') : ''}.db`);
+    if (!writing.has(file) && !fs.existsSync(file) && !fs.existsSync(`${file}.partial`)) return file;
+  }
+  throw new Error('backup name: too many backups in one second');
+}
+
 export async function backupNow() {
   fs.mkdirSync(BACKUP_DIR, { recursive: true });
-  const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
-  const file = path.join(BACKUP_DIR, `amorechat-${stamp}.db`);
+  const file = newBackupFile(BACKUP_DIR);
+  writing.add(file);
+  try {
+    return await writeBackup(file);
+  } finally {
+    writing.delete(file);
+  }
+}
+
+async function writeBackup(file) {
   // Written and redacted under a name nothing lists (panel, mirror, redactAllBackups), then put in place.
   const part = `${file}.partial`;
   try {
@@ -31,8 +55,7 @@ export async function backupNow() {
     .sort()
     .slice(0, -KEEP);
   for (const f of old) {
-    fs.rmSync(path.join(BACKUP_DIR, f), { force: true });
-    fs.rmSync(path.join(BACKUP_DIR, `${f}.check.json`), { force: true });
+    for (const x of [path.join(BACKUP_DIR, f), ...sidecars(path.join(BACKUP_DIR, f))]) fs.rmSync(x, { force: true });
   }
   return file;
 }
@@ -66,7 +89,7 @@ export function redactOrDrop(file) {
     try {
       return await redactInChild(file);
     } catch (e) {
-      for (const f of [file, `${file}-wal`, `${file}-shm`, `${file}-journal`, `${file}.check.json`]) fs.rmSync(f, { force: true });
+      for (const f of [file, ...sidecars(file)]) fs.rmSync(f, { force: true });
       throw new Error(`پاک‌کردن پیام‌های تلگرام قفل‌شده از بکاپ ناموفق بود؛ بکاپ حذف شد: ${e.message}`, { cause: e });
     }
   });
@@ -178,7 +201,7 @@ export async function mirrorBackup(dbFile) {
   fs.mkdirSync(path.join(MIRROR, 'backups'), { recursive: true });
   await fs.promises.copyFile(dbFile, path.join(MIRROR, 'backups', path.basename(dbFile)));
   const keep = fs.readdirSync(path.join(MIRROR, 'backups')).filter((f) => /^amorechat-\d+\.db$/.test(f)).sort().slice(0, -KEEP);
-  for (const f of keep) fs.rmSync(path.join(MIRROR, 'backups', f), { force: true });
+  for (const f of keep) for (const x of [path.join(MIRROR, 'backups', f), ...sidecars(path.join(MIRROR, 'backups', f))]) fs.rmSync(x, { force: true });
   fs.mkdirSync(path.join(MIRROR, 'uploads'), { recursive: true });
   const files = await copyNew(UPLOAD_DIR, path.join(MIRROR, 'uploads'));
   lastMirror = { at: Date.now(), files };

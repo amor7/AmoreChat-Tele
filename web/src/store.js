@@ -219,8 +219,13 @@ export const useStore = create((set, get) => ({
     }
     set((s) => {
       const chat = s.chats[m.chatId];
+      let list = s.messages[m.chatId] && replaceIn(s.messages[m.chatId], m);
+      // Replies quoting it show the edited text (the server's quote is the original's current text).
+      if (list?.some((x) => x.replyTo?.id === m.id && (x.replyTo.text !== m.text || x.replyTo.type !== m.type))) {
+        list = list.map((x) => (x.replyTo?.id === m.id ? { ...x, replyTo: { ...x.replyTo, text: m.text, type: m.type } } : x));
+      }
       return {
-        messages: s.messages[m.chatId] ? { ...s.messages, [m.chatId]: replaceIn(s.messages[m.chatId], m) } : s.messages,
+        messages: list ? { ...s.messages, [m.chatId]: list } : s.messages,
         chats: chat?.lastMessage?.id === m.id ? { ...s.chats, [m.chatId]: { ...chat, lastMessage: m } } : s.chats,
       };
     });
@@ -229,6 +234,24 @@ export const useStore = create((set, get) => ({
     const list = get().messages[chatId];
     const wasLast = get().chats[chatId]?.lastMessage?.id === id;
     const m = list?.find((x) => x.id === id) || get().chats[chatId]?.lastMessage;
+    // An unread message gone (deleted or expired): it no longer counts as unread.
+    const chat = get().chats[chatId];
+    if (chat && id > (chat.lastRead || 0) && (chat.unread || chat.unreadMentions)) {
+      if (m?.id !== id) get().refreshChat(chatId);
+      else if (m.type !== 'deleted' && m.type !== 'system' && m.sender?.id !== get().me?.id) {
+        const mention = m.mentions?.includes(get().me?.id);
+        set((s) => ({
+          chats: {
+            ...s.chats,
+            [chatId]: {
+              ...s.chats[chatId],
+              unread: Math.max(0, (s.chats[chatId].unread || 0) - 1),
+              unreadMentions: mention ? Math.max(0, (s.chats[chatId].unreadMentions || 0) - 1) : s.chats[chatId].unreadMentions,
+            },
+          },
+        }));
+      }
+    }
     if (m?.id === id) get().updateMessage({ ...m, type: 'deleted', kept: !!kept, text: '', file: null, sender: null, pinned: false });
     // Replies lose their quote, and the chat list shows the message before it.
     if (list?.some((x) => x.replyTo?.id === id)) {

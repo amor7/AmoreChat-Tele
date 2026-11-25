@@ -90,6 +90,45 @@ function inviteRow(code) {
   return inv;
 }
 
+// A yes/no from a client: a real boolean, or its text from a form. Anything else (0, null, "")
+// is refused rather than guessed, so one value can't mean "private" in one place and not another.
+// Adding someone to a group shows the adder their name and status: adding people you share no
+// chat with (found by their exact username) costs from the same per-minute budget as looking
+// them up, so ids can't be poured into a group to harvest the user list. Charged before anything
+// is added, so going over the budget adds nobody.
+function chargeStrangers(user, ids) {
+  for (const id of new Set(ids)) {
+    if (!Number.isSafeInteger(id) || id === user.id || knowsUser(user.id, id)) continue;
+    spendLookup(user, 'add');
+  }
+}
+
+function parseBool(v, what) {
+  if (v === true || v === 'true') return true;
+  if (v === false || v === 'false') return false;
+  fail(400, `مقدار «${what}» نامعتبر است`);
+}
+
+// Text fields: null means empty, a string is used as is, any other type is refused.
+function textField(v, what) {
+  if (v == null) return '';
+  if (typeof v !== 'string') fail(400, `${what} نامعتبر است`);
+  return v;
+}
+
+const FOREVER = 32503680000000;
+
+// Moderation mute: null = unmuted, -1 = forever (as in /notify), or a timestamp.
+function muteUntil(v) {
+  if (v === null) return null;
+  if (v === -1) return FOREVER;
+  if (typeof v !== 'number' || !Number.isFinite(v) || v < 0) fail(400, 'زمان بی‌صدا نامعتبر است');
+  return Math.floor(v);
+}
+
+// There is no ownership transfer: a chat without its owner could not be deleted or managed.
+const OWNER_STAYS = 'سازنده را نمی‌توان حذف یا مسدود کرد؛ ابتدا گفتگو را حذف کنید';
+
 function joinAllowed(chatId, userId) {
   if (get('SELECT 1 FROM chat_bans WHERE chat_id = ? AND user_id = ?', chatId, userId)) {
     fail(403, 'شما از این گفتگو مسدود شده‌اید');
@@ -131,26 +170,29 @@ export default async function chatRoutes(app) {
   app.post('/api/chats', async (req) => {
     const { type, title, description = '', memberIds = [], isPublic = false, handle = '' } = req.body || {};
     if (!TYPE_LABEL[type]) fail(400, 'نوع گفتگو نامعتبر است');
+    const pub = parseBool(isPublic, 'عمومی');
+    const desc = textField(description, 'توضیحات');
     if (getSetting('allow_user_groups') !== '1' && req.user.role === 'user') {
       fail(403, 'ساخت گروه و کانال فقط برای مدیران فعال است');
     }
-    const t = String(title || '').trim().slice(0, 100);
+    const t = textField(title, 'عنوان').trim().slice(0, 100);
     if (!t) fail(400, 'عنوان را وارد کنید');
-    if (handle && !isPublic) fail(400, 'فقط گروه و کانال عمومی شناسه دارد');
+    if (handle && !pub) fail(400, 'فقط گروه و کانال عمومی شناسه دارد');
     const name = handle ? checkHandle(req.user, handle) : null;
 
     const chatId = createChat({
       type,
       title: t,
-      description: String(description).slice(0, 500),
+      description: desc.slice(0, 500),
       createdBy: req.user.id,
-      isPublic: !!isPublic,
+      isPublic: pub,
     });
     if (name) run('UPDATE chats SET handle = ? WHERE id = ?', name, chatId);
-    if (!isPublic) ensureInvite(chatId, req.user.id);
+    if (!pub) ensureInvite(chatId, req.user.id);
     addMember(chatId, req.user.id, 'owner', { silent: true });
     systemMessage(chatId, `${req.user.display_name} ${TYPE_LABEL[type]} «${t}» را ساخت`);
     const ids = Array.isArray(memberIds) ? memberIds.slice(0, 500).map(Number) : [];
+    chargeStrangers(req.user, ids);
     for (const id of ids) {
       if (id !== req.user.id && get('SELECT 1 FROM users WHERE id = ? AND banned = 0', id)) {
         addMember(chatId, id, 'member', { silent: true });
@@ -173,6 +215,9 @@ export default async function chatRoutes(app) {
   app.get('/api/chats/:id', async (req) => {
     const { chat, member } = requireChat(req, req.params.id, { allowModerator: true });
     const canSeeBans = hasChatPerm(req.user, member, 'ban_members');
+    // Whoever may add members is told who can't be added back (adding someone banned is refused
+    // unless the adder may lift bans), so the picker can leave them out.
+    const canAdd = hasChatPerm(req.user, member, 'add_members');
     // A channel's subscriber list is for the channel's own owner/admins only (not site admins
     // who happen to join it); hidden group lists are also open to site moderators.
     const seesAll = chat.type === 'channel' ? member?.role === 'owner' || member?.role === 'admin' : isChatStaff(req.user, member);
@@ -193,6 +238,7 @@ export default async function chatRoutes(app) {
             chat.id,
           )
         : [],
+      bannedIds: canAdd || canSeeBans ? all('SELECT user_id FROM chat_bans WHERE chat_id = ?', chat.id).map((r) => r.user_id) : [],
     };
   });
 
@@ -206,6 +252,15 @@ export default async function chatRoutes(app) {
       if (!isRoom(chat)) fail(400, 'این گفتگو قابل ویرایش نیست');
       if (!hasChatPerm(req.user, member, 'edit_info')) fail(403, 'دسترسی ویرایش ندارید');
     }
+    // Types first: a wrong one is a 400, not a stored "null" or a database error.
+    if (b.title !== undefined && typeof b.title !== 'string') fail(400, 'عنوان خالی است');
+    const description = b.description !== undefined ? textField(b.description, 'توضیحات') : undefined;
+    // One answer for both the flag and what going private implies (handle dropped, invite made).
+    const pub = b.isPublic !== undefined && !chat.is_emergency ? parseBool(b.isPublic, 'عمومی') : undefined;
+    const locked = b.locked === undefined ? undefined : parseBool(b.locked, 'قفل گروه');
+    const voiceStage = b.voiceStage === undefined ? undefined : parseBool(b.voiceStage, 'ویس‌چت مدیریت‌شده');
+    const hideMembers = b.hideMembers === undefined ? undefined : parseBool(b.hideMembers, 'مخفی کردن اعضا');
+    if (b.avatar !== undefined && b.avatar !== null && !(Number.isInteger(b.avatar) && b.avatar > 0)) fail(400, 'تصویر نامعتبر است');
     // All or nothing: a refused field (a taken handle, a bad image) must not leave the others
     // half saved, with the app still showing the old values.
     let autoDeleteNotice = null;
@@ -220,10 +275,10 @@ export default async function chatRoutes(app) {
         if (!t) fail(400, 'عنوان خالی است');
         run('UPDATE chats SET title = ? WHERE id = ?', t, chat.id);
       }
-      if (b.description !== undefined) run('UPDATE chats SET description = ? WHERE id = ?', String(b.description).slice(0, 500), chat.id);
+      if (description !== undefined) run('UPDATE chats SET description = ? WHERE id = ?', description.slice(0, 500), chat.id);
       // A private chat is no longer one every new user joins by themselves.
-      if (b.isPublic !== undefined && !chat.is_emergency) run('UPDATE chats SET is_public = ?, auto_join = auto_join * ? WHERE id = ?', b.isPublic ? 1 : 0, b.isPublic ? 1 : 0, chat.id);
-      const goesPrivate = b.isPublic === false && !chat.is_emergency;
+      if (pub !== undefined) run('UPDATE chats SET is_public = ?, auto_join = auto_join * ? WHERE id = ?', pub ? 1 : 0, pub ? 1 : 0, chat.id);
+      const goesPrivate = pub === false;
       if (goesPrivate) {
         dropPrivateHandle(chat.id);
         ensureInvite(chat.id, req.user.id);
@@ -232,9 +287,9 @@ export default async function chatRoutes(app) {
       // holds the old one) is not a request to keep it.
       if (b.handle !== undefined && isRoom(chat) && !goesPrivate) setChatHandle(req.user, chat.id, b.handle);
       if (b.slowMode !== undefined) run('UPDATE chats SET slow_mode = ? WHERE id = ?', Math.max(0, Math.min(3600, Number(b.slowMode) || 0)), chat.id);
-      if (b.locked !== undefined) run('UPDATE chats SET locked = ? WHERE id = ?', b.locked ? 1 : 0, chat.id);
-      if (b.voiceStage !== undefined && chat.type === 'group') run('UPDATE chats SET voice_stage = ? WHERE id = ?', b.voiceStage ? 1 : 0, chat.id);
-      if (b.hideMembers !== undefined && chat.type === 'group') run('UPDATE chats SET hide_members = ? WHERE id = ?', b.hideMembers ? 1 : 0, chat.id);
+      if (locked !== undefined) run('UPDATE chats SET locked = ? WHERE id = ?', locked ? 1 : 0, chat.id);
+      if (voiceStage !== undefined && chat.type === 'group') run('UPDATE chats SET voice_stage = ? WHERE id = ?', voiceStage ? 1 : 0, chat.id);
+      if (hideMembers !== undefined && chat.type === 'group') run('UPDATE chats SET hide_members = ? WHERE id = ?', hideMembers ? 1 : 0, chat.id);
       if (b.avatar !== undefined) {
         if (b.avatar !== null && !get("SELECT 1 FROM files WHERE id = ? AND owner_id = ? AND kind = 'image'", b.avatar, req.user.id)) {
           fail(400, 'تصویر نامعتبر است');
@@ -242,8 +297,12 @@ export default async function chatRoutes(app) {
         run('UPDATE chats SET avatar_file_id = ? WHERE id = ?', b.avatar, chat.id);
       }
     });
-    // Posting a message opens its own transaction: after the settings are saved.
-    if (autoDeleteNotice && chat.type !== 'saved') systemMessage(chat.id, `${req.user.display_name}: ${autoDeleteNotice}`);
+    // Posting a message opens its own transaction: after the settings are saved. A private chat
+    // nobody has written in yet is not shown to the other person (see listChats): a notice there
+    // would reveal it, so it gets none.
+    const silentDm =
+      chat.type === 'dm' && !get("SELECT 1 AS x FROM messages WHERE chat_id = ? AND type != 'system' AND deleted = 0 LIMIT 1", chat.id);
+    if (autoDeleteNotice && chat.type !== 'saved' && !silentDm) systemMessage(chat.id, `${req.user.display_name}: ${autoDeleteNotice}`);
     audit(req.user.id, 'chat.edit', chat.id, b);
     toChat(chat.id, 'chat:changed', { chatId: chat.id });
     return { chat: chatSummary(chat.id, req.user.id) || { id: chat.id } };
@@ -293,10 +352,16 @@ export default async function chatRoutes(app) {
     if (!isRoom(chat) || chat.is_emergency) fail(400, 'نمی‌توان به این گفتگو عضو اضافه کرد');
     if (!hasChatPerm(req.user, member, 'add_members')) fail(403, 'دسترسی افزودن عضو ندارید');
     const ids = Array.isArray(req.body?.userIds) ? req.body.userIds.slice(0, 500).map(Number) : [];
+    // Adding someone banned lifts the ban, which only those who may ban (and unban) can do.
+    const canUnban = hasChatPerm(req.user, member, 'ban_members');
+    if (!canUnban && ids.some((id) => get('SELECT 1 AS x FROM chat_bans WHERE chat_id = ? AND user_id = ?', chat.id, id))) {
+      fail(403, 'این کاربر از گفتگو مسدود شده است؛ فقط مدیری با دسترسی مسدود کردن می‌تواند او را برگرداند');
+    }
+    chargeStrangers(req.user, ids);
     let added = 0;
     for (const id of ids) {
       if (!get('SELECT 1 FROM users WHERE id = ? AND banned = 0', id)) continue;
-      run('DELETE FROM chat_bans WHERE chat_id = ? AND user_id = ?', chat.id, id);
+      if (canUnban) run('DELETE FROM chat_bans WHERE chat_id = ? AND user_id = ?', chat.id, id);
       if (addMember(chat.id, id)) added++;
     }
     return { added };
@@ -310,10 +375,23 @@ export default async function chatRoutes(app) {
     if (!target) fail(404, 'این کاربر عضو نیست');
     const b = req.body || {};
     const isOwner = member?.role === 'owner' || hasSitePerm(req.user, 'manage_chats');
+    const setsRole = b.role !== undefined || b.perms !== undefined;
+    const setsMute = b.mutedUntil !== undefined;
 
-    if (b.role !== undefined || b.perms !== undefined) {
+    // Every check before any change: a refused mute must not leave a role change saved.
+    if (setsRole) {
       if (!isOwner) fail(403, 'فقط سازنده می‌تواند ادمین تعیین کند');
       if (target.role === 'owner') fail(400, 'نقش سازنده قابل تغییر نیست');
+    }
+    let until;
+    if (setsMute) {
+      if (!hasChatPerm(req.user, member, 'mute_members')) fail(403, 'دسترسی بی‌صدا کردن ندارید');
+      if (!outranks(req.user, member, target)) fail(403, 'نمی‌توانید این کاربر را بی‌صدا کنید');
+      if (target.role === 'owner') fail(400, 'سازنده‌ی گفتگو را نمی‌توان بی‌صدا کرد');
+      until = muteUntil(b.mutedUntil);
+    }
+
+    if (setsRole) {
       const role = b.role === 'admin' ? 'admin' : b.role === 'member' ? 'member' : target.role;
       const perms = role === 'admin' ? cleanPerms(b.perms ?? parseJSON(target.perms, []), CHAT_PERMS) : [];
       run('UPDATE chat_members SET role = ?, perms = ? WHERE chat_id = ? AND user_id = ?', role, JSON.stringify(perms), chat.id, targetId);
@@ -321,10 +399,7 @@ export default async function chatRoutes(app) {
       toUser(targetId, 'chat:changed', { chatId: chat.id });
     }
 
-    if (b.mutedUntil !== undefined) {
-      if (!hasChatPerm(req.user, member, 'mute_members')) fail(403, 'دسترسی بی‌صدا کردن ندارید');
-      if (!outranks(req.user, member, target)) fail(403, 'نمی‌توانید این کاربر را بی‌صدا کنید');
-      const until = b.mutedUntil === null ? null : Number(b.mutedUntil);
+    if (setsMute) {
       run('UPDATE chat_members SET muted_until = ? WHERE chat_id = ? AND user_id = ?', until, chat.id, targetId);
       audit(req.user.id, 'chat.mute', `${chat.id}:${targetId}`, { until });
       const u = get('SELECT display_name FROM users WHERE id = ?', targetId);
@@ -342,8 +417,12 @@ export default async function chatRoutes(app) {
     if (!isRoom(chat) || chat.is_emergency) fail(400, 'نامعتبر');
     if (!hasChatPerm(req.user, member, 'ban_members')) fail(403, 'دسترسی حذف عضو ندارید');
     const targetId = Number(req.params.userId);
+    if (!Number.isInteger(targetId) || targetId <= 0) fail(400, 'شناسه‌ی کاربر نامعتبر است');
+    if (!get('SELECT 1 AS x FROM users WHERE id = ?', targetId)) fail(404, 'کاربر پیدا نشد');
     const target = getMember(chat.id, targetId);
     if (!outranks(req.user, member, target)) fail(403, 'نمی‌توانید این کاربر را حذف کنید');
+    // Not even the site owner, nor the creator themselves: the chat would be left without an owner.
+    if (target?.role === 'owner') fail(400, OWNER_STAYS);
     const ban = req.query.ban === '1';
     if (ban) {
       run('INSERT OR REPLACE INTO chat_bans (chat_id, user_id, by_id, created_at) VALUES (?, ?, ?, ?)', chat.id, targetId, req.user.id, now());

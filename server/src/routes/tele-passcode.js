@@ -90,7 +90,15 @@ export default async function telePasscodeRoutes(app) {
     const bad = passcodeProblem(p);
     if (bad) fail(400, bad);
     const idle = req.body?.idleMin === undefined ? 15 : parseIdle(req.body.idleMin);
-    run('INSERT INTO tele_passcodes (user_id, hash, idle_min, fails, locked_until, updated_at) VALUES (?, ?, ?, 0, NULL, ?)', req.user.id, await hashPassword(p), idle, now());
+    // Checked above, but two requests at once can both get past that while hashing: the second loses here.
+    const r = run(
+      'INSERT INTO tele_passcodes (user_id, hash, idle_min, fails, locked_until, updated_at) VALUES (?, ?, ?, 0, NULL, ?) ON CONFLICT DO NOTHING',
+      req.user.id,
+      await hashPassword(p),
+      idle,
+      now(),
+    );
+    if (!r.changes) fail(400, 'رمز تلگرام از قبل فعال است');
     // This login stays open; every other one is locked from now on (it never unlocked).
     lockUserSessions(req.user.id);
     unlock(req.user.session_id, req.user.id);

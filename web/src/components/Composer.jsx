@@ -14,6 +14,9 @@ import Avatar from './Avatar';
 import { Pencil, Reply, X, Paperclip, SendHorizontal, Mic, FileText, Smile, Bell, BellOff } from 'lucide-react';
 import { postBlockReason, messagePreview, compressImage, imageSize, formatSize, formatClock, toFa, computeWaveform } from '../util';
 
+// Zero-width and direction marks only: nothing to see, so nothing to send (the server agrees).
+const isBlank = (t) => !t.replace(/[\u200b-\u200f\u202a-\u202e\u2066-\u2069\ufeff]/g, '').trim();
+
 const isTouch = typeof matchMedia !== 'undefined' && matchMedia('(pointer: coarse)').matches;
 
 export default function Composer({ chat, droppedFile, onDroppedHandled }) {
@@ -105,9 +108,10 @@ export default function Composer({ chat, droppedFile, onDroppedHandled }) {
   // Like Telegram: the box empties at once (the keyboard stays open) and the chat jumps to the
   // end; sends go out one after another so quick messages keep their order.
   function send() {
-    const t = text.trim();
-    if (!t) return;
     const edit = editing;
+    // A file's caption may be cleared by editing; any other message needs some text.
+    const t = isBlank(text) ? '' : text.trim();
+    if (!t && !edit?.file) return;
     const reply = replyTo;
     if (edit && busy) return;
     if (!edit) {
@@ -251,11 +255,11 @@ export default function Composer({ chat, droppedFile, onDroppedHandled }) {
         </ul>
       )}
       <div className="composer">
-        {text.trim() || editing ? (
+        {!isBlank(text) || editing ? (
           <button
             className="send-btn"
             aria-label="ارسال"
-            disabled={!text.trim()}
+            disabled={isBlank(text) && !editing?.file}
             // Keep the focus (and the phone keyboard) in the text box.
             onMouseDown={(e) => e.preventDefault()}
             onClick={send}

@@ -177,9 +177,14 @@ export function FolderEditor({ folder, chatIds: initialChats = [], onClose }) {
     .filter((c) => !q || c.title.toLowerCase().includes(q.toLowerCase()))
     .sort(sortChats);
 
+  // A folder whose chats were all deleted or left can still be renamed: its contents are only
+  // sent (and must then not be empty) when they were changed here.
+  const picksChanged = !folder || String(filters) !== String(folder.filters) || String(ids) !== String(folder.chatIds);
+  const empty = !filters.length && !ids.length;
+
   async function save() {
     try {
-      const body = { name, emoji, filters, chatIds: ids };
+      const body = picksChanged ? { name, emoji, filters, chatIds: ids } : { name, emoji };
       if (folder) await api('PATCH', `/folders/${folder.id}`, body);
       else await api('POST', '/folders', body);
       await useStore.getState().loadFolders();
@@ -229,6 +234,7 @@ export function FolderEditor({ folder, chatIds: initialChats = [], onClose }) {
             </li>
           ))}
         </ul>
+        {empty && <p className="hint">این پوشه گفتگویی ندارد؛ یک نوع گفتگو یا یک گفتگو انتخاب کنید.</p>}
       </div>
       <div className="actions sticky-actions">
         {folder && (
@@ -236,7 +242,7 @@ export function FolderEditor({ folder, chatIds: initialChats = [], onClose }) {
             <Trash2 size={16} /> حذف پوشه
           </button>
         )}
-        <button className="btn primary" onClick={save} disabled={!name.trim() || (!filters.length && !ids.length)}>
+        <button className="btn primary" onClick={save} disabled={!name.trim() || (empty && picksChanged)}>
           ذخیره
         </button>
       </div>

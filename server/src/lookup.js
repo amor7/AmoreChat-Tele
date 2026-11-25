@@ -32,7 +32,7 @@ export function spendLookup(user, what) {
 
 // Chats in which you can see the other members: groups without a hidden member list, voice
 // channels, and private chats that have at least one message.
-const VISIBLE_SHARED = `
+export const VISIBLE_SHARED = `
   c.type = 'voice'
   OR (c.type = 'group' AND IFNULL(c.hide_members, 0) = 0)
   OR (c.type = 'dm' AND EXISTS (SELECT 1 FROM messages m WHERE m.chat_id = c.id))`;
@@ -53,12 +53,30 @@ export function searchAcquaintances(userId, like) {
   );
 }
 
-/** Do these two people already share a chat (any kind except channels, where members are hidden)? */
+/** Do these two people share a chat where they see each other (VISIBLE_SHARED)? This is "contacts"
+ * for last seen: an empty private chat or a group with a hidden member list doesn't count. */
 export function knowsUser(userId, otherId) {
   return !!get(
     `SELECT 1 FROM chat_members a JOIN chat_members b ON b.chat_id = a.chat_id AND b.user_id = ?
        JOIN chats c ON c.id = a.chat_id
-     WHERE a.user_id = ? AND c.type IN ('group', 'voice', 'dm') LIMIT 1`,
+     WHERE a.user_id = ? AND (${VISIBLE_SHARED}) LIMIT 1`,
+    otherId,
+    userId,
+  );
+}
+
+/** May userId open otherId's profile? Anyone they know (above), plus whoever a group with a hidden
+ * member list shows them anyway: its owner/admins, people who posted in it, and everyone if
+ * they are an owner/admin there themselves. */
+export function canViewProfile(userId, otherId) {
+  if (knowsUser(userId, otherId)) return true;
+  return !!get(
+    `SELECT 1 FROM chat_members a JOIN chat_members b ON b.chat_id = a.chat_id AND b.user_id = ?
+       JOIN chats c ON c.id = a.chat_id
+     WHERE a.user_id = ? AND c.type = 'group'
+       AND (a.role IN ('owner', 'admin') OR b.role IN ('owner', 'admin')
+         OR EXISTS (SELECT 1 FROM messages m WHERE m.chat_id = c.id AND m.sender_id = b.user_id AND m.deleted = 0))
+     LIMIT 1`,
     otherId,
     userId,
   );

@@ -152,7 +152,8 @@ export default async function storageRoutes(app) {
 
   // By ids (the ticked files), or everything a filter shows (asks for the password). A big
   // filter takes several calls: `remaining` says how many are left.
-  app.post('/api/admin/storage/delete', async (req) => {
+  // It checks the admin's password: a stolen session must not get to guess it at full speed.
+  app.post('/api/admin/storage/delete', { config: { rateLimit: { max: 10, timeWindow: '1 minute' } } }, async (req) => {
     need(req);
     const b = req.body || {};
     const ids = Array.isArray(b.ids) ? [...new Set(b.ids.map(Number).filter(Boolean))].slice(0, 100) : [];

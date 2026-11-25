@@ -2,9 +2,10 @@ import { useEffect, useRef, useState } from 'react';
 import { api, upload } from '../api';
 import { useStore } from '../store';
 import { APP_VERSION } from '../update';
-import { Camera, Bell, RefreshCw } from 'lucide-react';
+import { Camera, Bell, RefreshCw, Trash2 } from 'lucide-react';
 import { compressImage, formatSize, ROLE_LABELS, toFa } from '../util';
 import { Modal } from './Modals';
+import { confirmDialog } from '../confirm';
 import Avatar from './Avatar';
 import Security from './Security';
 import { AndroidSettings } from './AndroidApp';
@@ -21,6 +22,8 @@ export default function Profile({ onClose }) {
   const version = useStore((s) => s.config.version);
   const setPrefs = useStore((s) => s.setPrefs);
   const [usage, setUsage] = useState(null);
+  // Bumped after a password change (it signs the other devices out) so the device list reloads.
+  const [devicesVersion, setDevicesVersion] = useState(0);
 
   useEffect(() => {
     api('GET', '/me/usage')
@@ -32,6 +35,10 @@ export default function Profile({ onClose }) {
     try {
       const { user } = await api('PATCH', '/me', body);
       useStore.setState({ me: user });
+      // Show what the server kept (trimmed name, cut bio), only for the fields that were sent.
+      if ('displayName' in body || 'bio' in body) {
+        setForm((f) => ({ displayName: 'displayName' in body ? user.displayName : f.displayName, bio: 'bio' in body ? user.bio || '' : f.bio }));
+      }
       showToast('ذخیره شد');
     } catch (e) {
       showToast(e.message);
@@ -51,11 +58,17 @@ export default function Profile({ onClose }) {
     }
   }
 
+  async function removeAvatar() {
+    if (!(await confirmDialog({ title: 'عکس پروفایل حذف شود؟', message: 'به‌جای عکس، حرف اول نامتان نشان داده می‌شود.', confirmLabel: 'حذف', danger: true }))) return;
+    await save({ avatar: null });
+  }
+
   async function changePassword(e) {
     e.preventDefault();
     try {
       const { loggedOut } = await api('POST', '/auth/password', pw);
       setPw({ current: '', next: '' });
+      setDevicesVersion((n) => n + 1);
       showToast(loggedOut ? `رمز عوض شد و ${toFa(loggedOut)} دستگاه دیگر خارج شد` : 'رمز عبور تغییر کرد');
     } catch (err) {
       showToast(err.message);
@@ -78,6 +91,11 @@ export default function Profile({ onClose }) {
             @{me.username}
           </div>
           <span className="role-badge">{ROLE_LABELS[me.role]}</span>
+          {me.avatar && (
+            <button className="btn sm danger" onClick={removeAvatar}>
+              <Trash2 size={15} /> حذف عکس
+            </button>
+          )}
         </div>
       </div>
 
@@ -142,7 +160,7 @@ export default function Profile({ onClose }) {
 
       <AndroidSettings />
 
-      <Security />
+      <Security devicesVersion={devicesVersion} />
 
       <h5>تغییر رمز عبور</h5>
       <p className="muted tiny">بعد از تغییر رمز، همه‌ی دستگاه‌های دیگر خارج می‌شوند.</p>

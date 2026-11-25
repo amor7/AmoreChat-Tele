@@ -9,7 +9,7 @@
  * from the panel; on the server, `sudo amorechat-unban` (unban-cli.js) works too.
  */
 import net from 'node:net';
-import { get, all, run, now } from './db.js';
+import { get, all, run, tx, now } from './db.js';
 import { getSetting, setSetting } from './settings.js';
 import { ensureSavedChat, systemMessage, onAudit } from './chats.js';
 
@@ -27,16 +27,24 @@ export function secSettings() {
 }
 export function setSecSettings(p = {}) {
   const bad = (m) => Object.assign(new Error(m), { statusCode: 400 });
-  if (p.alerts != null) setSetting('sec_alerts', p.alerts ? '1' : '0');
-  if (p.autoBan != null) setSetting('sec_auto_ban', p.autoBan ? '1' : '0');
+  // Everything is checked before anything is written, so a bad field saves nothing.
+  const w = {};
+  for (const [field, key] of [['alerts', 'sec_alerts'], ['autoBan', 'sec_auto_ban']]) {
+    if (p[field] == null) continue;
+    if (typeof p[field] !== 'boolean') throw bad('مقدار باید true یا false باشد');
+    w[key] = p[field] ? '1' : '0';
+  }
   if (p.threshold != null) {
     if (!Number.isInteger(p.threshold) || p.threshold < 3 || p.threshold > 1000) throw bad('تعداد تلاش باید بین ۳ و ۱۰۰۰ باشد');
-    setSetting('sec_fail_threshold', String(p.threshold));
+    w.sec_fail_threshold = String(p.threshold);
   }
   if (p.autoBanMinutes != null) {
     if (!Number.isInteger(p.autoBanMinutes) || p.autoBanMinutes < 0 || p.autoBanMinutes > 525600) throw bad('مدت بن نامعتبر است');
-    setSetting('sec_auto_ban_minutes', String(p.autoBanMinutes));
+    w.sec_auto_ban_minutes = String(p.autoBanMinutes);
   }
+  tx(() => {
+    for (const [k, v] of Object.entries(w)) setSetting(k, v);
+  });
   return secSettings();
 }
 
@@ -98,8 +106,9 @@ export function banIp(ip, { by = null, reason = '', minutes = 0 } = {}) {
 }
 export function unbanIp(ip) {
   const key = normalizeIp(ip);
-  run('DELETE FROM ip_bans WHERE ip = ?', key);
+  const removed = run('DELETE FROM ip_bans WHERE ip = ?', key).changes > 0;
   banCache = null;
+  return removed;
 }
 export const listBans = () =>
   all('SELECT b.*, u.display_name AS by_name FROM ip_bans b LEFT JOIN users u ON u.id = b.created_by ORDER BY b.created_at DESC')
