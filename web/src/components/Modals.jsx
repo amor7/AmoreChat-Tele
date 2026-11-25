@@ -11,6 +11,7 @@ import { X, Megaphone, Users, Volume2 } from 'lucide-react';
 import NewChat from './NewChat';
 import Profile from './Profile';
 import ChatInfo from './ChatInfo';
+import UserProfile from './UserProfile';
 import Admin from './Admin';
 import { Readers } from './ChatExtras';
 import { ShareTarget, AppUpdateNotes } from './AndroidApp';
@@ -420,6 +421,8 @@ function storeDialog(modal, close) {
       return <JoinInvite code={modal.code} onClose={close} />;
     case 'profile':
       return <Profile onClose={close} />;
+    case 'user':
+      return <UserProfile userId={modal.userId} user={modal.user} onClose={close} />;
     case 'chatInfo':
       return <ChatInfo chatId={modal.chatId} onClose={close} />;
     case 'admin':
